@@ -81,7 +81,6 @@ B<A> test;
 #endif
 
 
-
 #include	"function.h"
 #ifdef WIN32
 #ifdef WINSOCK_IPX
@@ -103,6 +102,7 @@ TcpipManagerClass	Winsock;
 #include	<share.h>
 #include	"ccdde.h"
 #include	"vortex.h"
+#include    "GameModifierManager.h"
 
 #ifdef WOLAPI_INTEGRATION
 //#include "WolDebug.h"
@@ -122,15 +122,15 @@ MPG_RESPONSE far __stdcall MpegCallback(MPG_CMD cmd, LPVOID data, LPVOID user);
 
 #define SHAPE_TRANS		0x40
 
-void * Get_Shape_Header_Data(void * ptr);
+void* Get_Shape_Header_Data(void* ptr);
 extern bool Spawn_WChat(bool can_launch);
 
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 void Enable_Secret_Units(void);
 #endif
 
-extern bool Is_Mission_Aftermath (char *file_name);
-extern bool Is_Mission_Counterstrike (char *file_name);
+extern bool Is_Mission_Aftermath(char* file_name);
+extern bool Is_Mission_Counterstrike(char* file_name);
 
 #ifdef FIXIT_VERSION_3		//	Stalemate games.
 extern void Do_Draw(void);
@@ -140,17 +140,18 @@ extern void Do_Draw(void);
 bool	bNoMovies = false;
 #endif
 
+
 /****************************************
 **	Function prototypes for this module **
 *****************************************/
 bool Main_Loop(void);
-void Keyboard_Process(KeyNumType & input);
-static void Message_Input(KeyNumType &input);
+void Keyboard_Process(KeyNumType& input);
+static void Message_Input(KeyNumType& input);
 void Color_Cycle(void);
 bool Map_Edit_Loop(void);
 
 extern "C" {
-	bool UseOldShapeDraw = false;
+bool UseOldShapeDraw = false;
 }
 
 #ifdef CHEAT_KEYS
@@ -162,20 +163,20 @@ static void Do_Record_Playback(void);
 void Toggle_Formation(void);
 
 extern "C" {
-	extern char * __nheapbeg;
+extern char* __nheapbeg;
 }
 
 //
 // Special module globals for recording and playback
 //
-char TeamEvent = 0;			// 0 = no event, 1,2,3 = team event type
-char TeamNumber = 0;			// which team was selected? (1-9)
-char FormationEvent = 0;	// 0 = no event, 1 = formation was toggled
+char TeamEvent = 0; // 0 = no event, 1,2,3 = team event type
+char TeamNumber = 0; // which team was selected? (1-9)
+char FormationEvent = 0; // 0 = no event, 1 = formation was toggled
 
 
-	/* -----------------10/14/96 7:29PM------------------
+/* -----------------10/14/96 7:29PM------------------
 
-	 --------------------------------------------------*/
+ --------------------------------------------------*/
 
 #if(TEN)
 void TEN_Call_Back(void);
@@ -209,72 +210,84 @@ void MPATH_Call_Back(void);
  * HISTORY:                                                                                    *
  *   10/01/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-void Main_Game(int argc, char * argv[])
+void Main_Game(int argc, char* argv[])
 {
-	static bool fade = true;
+    static bool fade = true;
 
-	/*
-	**	Perform one-time-only initializations
-	*/
-	if (!Init_Game(argc, argv)) {
-		return;
-	}
+    /*
+    **	Perform one-time-only initializations
+    */
+    if (!Init_Game(argc, argv))
+    {
+        return;
+    }
 
-	/*
-	**	Game processing loop:
-	**	1) Select which game to play, or whether to exit (don't fade the palette
-	**		on the first game selection, but fade it in on subsequent calls)
-	**	2) Invoke either the main-loop routine, or the editor-loop routine,
-	**		until they indicate that the user wants to exit the scenario.
-	*/
-	while (Select_Game(fade)) {
+	//  setup modifiers
+	
+//	Modifiers.Setup();
 
-		// ST 5/14/2019
-		if (RunningAsDLL) {
-			return;
-		}
+    /*
+    **	Game processing loop:
+    **	1) Select which game to play, or whether to exit (don't fade the palette
+    **		on the first game selection, but fade it in on subsequent calls)
+    **	2) Invoke either the main-loop routine, or the editor-loop routine,
+    **		until they indicate that the user wants to exit the scenario.
+    */
+    while (Select_Game(fade))
+    {
+        // ST 5/14/2019
+        if (RunningAsDLL)
+        {
+            return;
+        }
 
-		fade = false;
-		ScenarioInit = 0;		// Kludge.
+        fade = false;
+        ScenarioInit = 0; // Kludge.
 
-		fade = true;
+        fade = true;
 
-		/*
-		** Initialise the color lookup tables for the chronal vortex
-		*/
-		ChronalVortex.Stop();
-		ChronalVortex.Setup_Remap_Tables(Scen.Theater);
+        /*
+        ** Initialise the color lookup tables for the chronal vortex
+        */
+        ChronalVortex.Stop();
+        ChronalVortex.Setup_Remap_Tables(Scen.Theater);
 
-		/*
-		**	Make the game screen visible, clear the keyboard buffer of spurious
-		**	values, and then show the mouse.  This PRESUMES that Select_Game() has
-		**	told the map to draw itself.
-		*/
-		GamePalette.Set(FADE_PALETTE_MEDIUM);
-		Keyboard->Clear();
-		/*
-		** Only show the mouse if we're not playing back a recording.
-		*/
-		if (Session.Play) {
-			Hide_Mouse();
-			TeamEvent = 0;
-			TeamNumber = 0;
-			FormationEvent = 0;
-		} else {
-			Show_Mouse();
-		}
+        /*
+        **	Make the game screen visible, clear the keyboard buffer of spurious
+        **	values, and then show the mouse.  This PRESUMES that Select_Game() has
+        **	told the map to draw itself.
+        */
+        GamePalette.Set(FADE_PALETTE_MEDIUM);
+        Keyboard->Clear();
+        /*
+        ** Only show the mouse if we're not playing back a recording.
+        */
+        if (Session.Play)
+        {
+            Hide_Mouse();
+            TeamEvent = 0;
+            TeamNumber = 0;
+            FormationEvent = 0;
+        }
+        else
+        {
+            Show_Mouse();
+        }
 
 #ifdef WIN32
-		if (Session.Type == GAME_INTERNET) {
-			Register_Game_Start_Time();
-			GameStatisticsPacketSent = false;
-			PacketLater = NULL;
-			ConnectionLost = false;
-		} else {
+        if (Session.Type == GAME_INTERNET)
+        {
+            Register_Game_Start_Time();
+            GameStatisticsPacketSent = false;
+            PacketLater = NULL;
+            ConnectionLost = false;
+        }
+        else
+        {
 #ifndef WOLAPI_INTEGRATION
-			DDEServer.Disable();
+            DDEServer.Disable();
 #endif	//	!WOLAPI_INTEGRATION
-		}
+        }
 #endif	//WIN32
 
 #ifdef SCENARIO_EDITOR
@@ -339,126 +352,139 @@ void Main_Game(int argc, char * argv[])
 			}
 		}
 #else
-		/*
-		**	Non-editor version of main-loop processing
-		*/
-		for (;;) {
+        /*
+        **	Non-editor version of main-loop processing
+        */
+        for (;;)
+        {
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
-			TimeQuake = PendingTimeQuake;
-			PendingTimeQuake = false;
+            TimeQuake = PendingTimeQuake;
+            PendingTimeQuake = false;
 #else
 			TimeQuake = false;
 #endif
-			/*
-			**	Call the game's main loop
-			*/
-			if (Main_Loop()) {
-				break;
-			}
+            /*
+            **	Call the game's main loop
+            */
+            if (Main_Loop())
+            {
+                break;
+            }
 
-			/*
-			**	If the SpecialDialog flag is set, invoke the given special dialog.
-			**	This must be done outside the main loop, since the dialog will call
-			**	Main_Loop(), allowing the game to run in the background.
-			*/
-			if (SpecialDialog != SDLG_NONE) {
-				switch (SpecialDialog) {
-					case SDLG_SPECIAL:
-						Map.Help_Text(TXT_NONE);
-						Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
-						Special_Dialog();
-						Map.Revert_Mouse_Shape();
-						SpecialDialog = SDLG_NONE;
-						break;
+            /*
+            **	If the SpecialDialog flag is set, invoke the given special dialog.
+            **	This must be done outside the main loop, since the dialog will call
+            **	Main_Loop(), allowing the game to run in the background.
+            */
+            if (SpecialDialog != SDLG_NONE)
+            {
+                switch (SpecialDialog)
+                {
+                case SDLG_SPECIAL:
+                    Map.Help_Text(TXT_NONE);
+                    Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
+                    Special_Dialog();
+                    Map.Revert_Mouse_Shape();
+                    SpecialDialog = SDLG_NONE;
+                    break;
 
-					case SDLG_OPTIONS:
-						Map.Help_Text(TXT_NONE);
-						Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
-						Options.Process();
-						Map.Revert_Mouse_Shape();
-						SpecialDialog = SDLG_NONE;
-						break;
+                case SDLG_OPTIONS:
+                    Map.Help_Text(TXT_NONE);
+                    Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
+                    Options.Process();
+                    Map.Revert_Mouse_Shape();
+                    SpecialDialog = SDLG_NONE;
+                    break;
 
-					case SDLG_SURRENDER:
-						Map.Help_Text(TXT_NONE);
-						Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
-						if (Surrender_Dialog(TXT_SURRENDER)) {
-							OutList.Add(EventClass(EventClass::DESTRUCT));
-						}
-						SpecialDialog = SDLG_NONE;
-						Map.Revert_Mouse_Shape();
-						break;
+                case SDLG_SURRENDER:
+                    Map.Help_Text(TXT_NONE);
+                    Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
+                    if (Surrender_Dialog(TXT_SURRENDER))
+                    {
+                        OutList.Add(EventClass(EventClass::DESTRUCT));
+                    }
+                    SpecialDialog = SDLG_NONE;
+                    Map.Revert_Mouse_Shape();
+                    break;
 
-/*ifdef FIXIT_VERSION_3		//	Stalemate games.
-					case SDLG_PROPOSE_DRAW:
-						Map.Help_Text(TXT_NONE);
-						Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
-						if (Surrender_Dialog(TXT_WOL_PROPOSE_DRAW)) {
-							OutList.Add(EventClass(EventClass::PROPOSE_DRAW));
-						}
-						SpecialDialog = SDLG_NONE;
-						Map.Revert_Mouse_Shape();
-						break;
-
-					case SDLG_ACCEPT_DRAW:
-						Map.Help_Text(TXT_NONE);
-						Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
-						if (Surrender_Dialog(TXT_WOL_ACCEPT_DRAW)) {
-							OutList.Add(EventClass(EventClass::ACCEPT_DRAW));
-						}
-						SpecialDialog = SDLG_NONE;
-						Map.Revert_Mouse_Shape();
-						break;
-#endif
-*/
-					default:
-						break;
-				}
-			}
-		}
+                /*ifdef FIXIT_VERSION_3		//	Stalemate games.
+                                    case SDLG_PROPOSE_DRAW:
+                                        Map.Help_Text(TXT_NONE);
+                                        Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
+                                        if (Surrender_Dialog(TXT_WOL_PROPOSE_DRAW)) {
+                                            OutList.Add(EventClass(EventClass::PROPOSE_DRAW));
+                                        }
+                                        SpecialDialog = SDLG_NONE;
+                                        Map.Revert_Mouse_Shape();
+                                        break;
+                
+                                    case SDLG_ACCEPT_DRAW:
+                                        Map.Help_Text(TXT_NONE);
+                                        Map.Override_Mouse_Shape(MOUSE_NORMAL, false);
+                                        if (Surrender_Dialog(TXT_WOL_ACCEPT_DRAW)) {
+                                            OutList.Add(EventClass(EventClass::ACCEPT_DRAW));
+                                        }
+                                        SpecialDialog = SDLG_NONE;
+                                        Map.Revert_Mouse_Shape();
+                                        break;
+                #endif
+                */
+                default:
+                    break;
+                }
+            }
+        }
 #endif
 
 
 #ifdef WIN32
-		/*
-		** Send the game stats to WChat if we haven't already done so
-		*/
-		if (!GameStatisticsPacketSent && PacketLater) {
-			Send_Statistics_Packet();		//	After game sending if PacketLater set.
-		}
+        /*
+        ** Send the game stats to WChat if we haven't already done so
+        */
+        if (!GameStatisticsPacketSent && PacketLater)
+        {
+            Send_Statistics_Packet(); //	After game sending if PacketLater set.
+        }
 #endif	//WIN32
 
-		/*
-		**	Scenario is done; fade palette to black
-		*/
-		BlackPalette.Set(FADE_PALETTE_SLOW);
-		VisiblePage.Clear();
+        /*
+        **	Scenario is done; fade palette to black
+        */
+        BlackPalette.Set(FADE_PALETTE_SLOW);
+        VisiblePage.Clear();
 
-		/*
-		**	Un-initialize whatever needs it, for each game played.
-		**
-		**	Shut down either the modem or network; they'll get re-initialized if
-		**	the user selections those options again in Select_Game().  This
-		**	"re-boots" the modem & network code, which I currently feel is safer
-		**	than just letting it hang around.
-		** (Skip this step if we're in playback mode; the modem or net won't have
-		** been initialized in that case.)
-		*/
-		if (Session.Record || Session.Play) {
-			Session.RecordFile.Close();
-		}
+        /*
+        **	Un-initialize whatever needs it, for each game played.
+        **
+        **	Shut down either the modem or network; they'll get re-initialized if
+        **	the user selections those options again in Select_Game().  This
+        **	"re-boots" the modem & network code, which I currently feel is safer
+        **	than just letting it hang around.
+        ** (Skip this step if we're in playback mode; the modem or net won't have
+        ** been initialized in that case.)
+        */
+        if (Session.Record || Session.Play)
+        {
+            Session.RecordFile.Close();
+        }
 
-		if (Session.Type == GAME_NULL_MODEM || Session.Type == GAME_MODEM) {
-			if (!Session.Play) {
-				//PG Modem_Signoff();
-			}
-		} else {
-			if (Session.Type == GAME_IPX) {
-				if (!Session.Play) {
-					//PG Shutdown_Network();
-				}
-			}
-		}
+        if (Session.Type == GAME_NULL_MODEM || Session.Type == GAME_MODEM)
+        {
+            if (!Session.Play)
+            {
+                //PG Modem_Signoff();
+            }
+        }
+        else
+        {
+            if (Session.Type == GAME_IPX)
+            {
+                if (!Session.Play)
+                {
+                    //PG Shutdown_Network();
+                }
+            }
+        }
 
 #if(TEN)
 
@@ -477,36 +503,38 @@ void Main_Game(int argc, char * argv[])
 		}
 #endif	// MPATH
 
-		/*
-		**	If we're playing back, the mouse will be hidden; show it.
-		** Also, set all variables back to normal, to return to the main menu.
-		*/
-		if (Session.Play) {
-			Show_Mouse();
-			Session.Type = GAME_NORMAL;
-			Session.Play = 0;
-		}
+        /*
+        **	If we're playing back, the mouse will be hidden; show it.
+        ** Also, set all variables back to normal, to return to the main menu.
+        */
+        if (Session.Play)
+        {
+            Show_Mouse();
+            Session.Type = GAME_NORMAL;
+            Session.Play = 0;
+        }
 #ifndef WOLAPI_INTEGRATION
 #ifdef WIN32
-		if (Special.IsFromWChat) {
-			//PG Shutdown_Network();		      // Clear up the pseudo IPX stuff
+        if (Special.IsFromWChat)
+        {
+            //PG Shutdown_Network();		      // Clear up the pseudo IPX stuff
 #ifndef WINSOCK_IPX
-			Winsock.Close();
+            Winsock.Close();
 #endif	//WINSOCK_IPX
-			Special.IsFromWChat = false;
-			SpawnedFromWChat = false;
-			DDEServer.Delete_MPlayer_Game_Info();	//Make sure we dont use the same start packet twice
-			Session.Type = GAME_NORMAL;			//Have to do this or we will got straight to the multiplayer menu
-			Spawn_WChat(false);		//Will switch back to Wchat. It must be there because its been poking us
-		}
+            Special.IsFromWChat = false;
+            SpawnedFromWChat = false;
+            DDEServer.Delete_MPlayer_Game_Info(); //Make sure we dont use the same start packet twice
+            Session.Type = GAME_NORMAL; //Have to do this or we will got straight to the multiplayer menu
+            Spawn_WChat(false); //Will switch back to Wchat. It must be there because its been poking us
+        }
 #endif	//WIN32
 #endif	//	!WOLAPI_INTEGRATION
-	}
+    }
 
-	/*
-	**	Free the scenario description buffers
-	*/
-	Session.Free_Scenario_Descriptions();
+    /*
+    **	Free the scenario description buffers
+    */
+    Session.Free_Scenario_Descriptions();
 }
 
 
@@ -527,30 +555,31 @@ void Main_Game(int argc, char * argv[])
  *   01/21/1992 JLB : Created.                                                                 *
  *   07/04/1995 JLB : Handles team and map control hotkeys.                                    *
  *=============================================================================================*/
-void Keyboard_Process(KeyNumType & input)
+void Keyboard_Process(KeyNumType& input)
 {
-	ObjectClass * obj;
-	int index;
+    ObjectClass* obj;
+    int index;
 
-	/*
-	**	Don't do anything if there is not keyboard event.
-	*/
-	if (input == KN_NONE) {
-		return;
-	}
-	/*
-	**	For network & modem, process user input for inter-player messages.
-	*/
-	Message_Input(input);
+    /*
+    **	Don't do anything if there is not keyboard event.
+    */
+    if (input == KN_NONE)
+    {
+        return;
+    }
+    /*
+    **	For network & modem, process user input for inter-player messages.
+    */
+    Message_Input(input);
 
 #ifdef WIN32
-	/*
-	**	The VK_BIT must be stripped from the "plain" value of the key so that a comparison to
-	**	KN_1, for example, will yield TRUE if in fact the "1" key was pressed.
-	*/
+    /*
+    **	The VK_BIT must be stripped from the "plain" value of the key so that a comparison to
+    **	KN_1, for example, will yield TRUE if in fact the "1" key was pressed.
+    */
 
-	KeyNumType plain = KeyNumType(input & ~(WWKEY_SHIFT_BIT|WWKEY_ALT_BIT|WWKEY_CTRL_BIT|WWKEY_VK_BIT));
-	KeyNumType key = KeyNumType(input & ~WWKEY_VK_BIT);
+    KeyNumType plain = KeyNumType(input & ~(WWKEY_SHIFT_BIT | WWKEY_ALT_BIT | WWKEY_CTRL_BIT | WWKEY_VK_BIT));
+    KeyNumType key = KeyNumType(input & ~WWKEY_VK_BIT);
 
 
 #else
@@ -612,165 +641,205 @@ void Keyboard_Process(KeyNumType & input)
 	}
 #endif
 
-	/*
-	**	Process prerecorded team selection. This will be an additive select
-	**	if the SHIFT key is held down. It will create the team if the
-	**	CTRL or ALT key is held down.
-	*/
-	int action = 0;
+    /*
+    **	Process prerecorded team selection. This will be an additive select
+    **	if the SHIFT key is held down. It will create the team if the
+    **	CTRL or ALT key is held down.
+    */
+    int action = 0;
 #ifdef WIN32
-	if (input & WWKEY_SHIFT_BIT) action = 1;
-	if (input & WWKEY_ALT_BIT) action = 3;
-	if (input & WWKEY_CTRL_BIT) action = 2;
+    if (input & WWKEY_SHIFT_BIT) action = 1;
+    if (input & WWKEY_ALT_BIT) action = 3;
+    if (input & WWKEY_CTRL_BIT) action = 2;
 #else
 	if (input & KN_SHIFT_BIT) action = 1;
 	if (input & KN_ALT_BIT) action = 3;
 	if (input & KN_CTRL_BIT) action = 2;
 #endif
 
-	/*
-	**	If the "N" key is pressed, then select the next object.
-	*/
-	if (key != 0 && key == Options.KeyNext) {
-		if (action) {
-			obj = Map.Prev_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
-		} else {
-			obj = Map.Next_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
-		}
-		if (obj != NULL) {
-			Unselect_All();
-		 	obj->Select();
-			Map.Center_Map();
-			Map.Flag_To_Redraw(true);
-		}
-		input = KN_NONE;
-	}
-	if (key != 0 && key == Options.KeyPrevious) {
-		if (action) {
-			obj = Map.Next_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
-		} else {
-			obj = Map.Prev_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
-		}
-		if (obj != NULL) {
-			Unselect_All();
-		 	obj->Select();
-			Map.Center_Map();
-			Map.Flag_To_Redraw(true);
-		}
-		input = KN_NONE;
-	}
+    /*
+    **	If the "N" key is pressed, then select the next object.
+    */
+    if (key != 0 && key == Options.KeyNext)
+    {
+        if (action)
+        {
+            obj = Map.Prev_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
+        }
+        else
+        {
+            obj = Map.Next_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
+        }
+        if (obj != NULL)
+        {
+            Unselect_All();
+            obj->Select();
+            Map.Center_Map();
+            Map.Flag_To_Redraw(true);
+        }
+        input = KN_NONE;
+    }
+    if (key != 0 && key == Options.KeyPrevious)
+    {
+        if (action)
+        {
+            obj = Map.Next_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
+        }
+        else
+        {
+            obj = Map.Prev_Object(CurrentObject.Count() ? CurrentObject[0] : NULL);
+        }
+        if (obj != NULL)
+        {
+            Unselect_All();
+            obj->Select();
+            Map.Center_Map();
+            Map.Flag_To_Redraw(true);
+        }
+        input = KN_NONE;
+    }
 
 
-	/*
-	**	All selected units will go into idle mode.
-	*/
-	if (key != 0 && key == Options.KeyStop) {
-		if (CurrentObject.Count()) {
-			for (index = 0; index < CurrentObject.Count(); index++) {
-				ObjectClass const * tech = CurrentObject[index];
+    /*
+    **	All selected units will go into idle mode.
+    */
+    if (key != 0 && key == Options.KeyStop)
+    {
+        if (CurrentObject.Count())
+        {
+            for (index = 0; index < CurrentObject.Count(); index++)
+            {
+                ObjectClass const* tech = CurrentObject[index];
 
-				if (tech != NULL && (tech->Can_Player_Move() || (tech->Can_Player_Fire() && tech->What_Am_I() != RTTI_BUILDING))) {
-					OutList.Add(EventClass(EventClass::IDLE, TargetClass(tech)));
-				}
-			}
-		}
-		input = KN_NONE;
-	}
+                if (tech != NULL && (tech->Can_Player_Move() || (tech->Can_Player_Fire() && tech->What_Am_I() !=
+                    RTTI_BUILDING)))
+                {
+                    OutList.Add(EventClass(EventClass::IDLE, TargetClass(tech)));
+                }
+            }
+        }
+        input = KN_NONE;
+    }
 
-	/*
-	**	All selected units will attempt to go into guard area mode.
-	*/
-	if (key != 0 && key == Options.KeyGuard) {
-		if (CurrentObject.Count()) {
-			for (index = 0; index < CurrentObject.Count(); index++) {
-				ObjectClass const * tech = CurrentObject[index];
+    /*
+    **	All selected units will attempt to go into guard area mode.
+    */
+    if (key != 0 && key == Options.KeyGuard)
+    {
+        if (CurrentObject.Count())
+        {
+            for (index = 0; index < CurrentObject.Count(); index++)
+            {
+                ObjectClass const* tech = CurrentObject[index];
 
-				if (tech != NULL && tech->Can_Player_Move() && tech->Can_Player_Fire()) {
-					OutList.Add(EventClass(TargetClass(tech), MISSION_GUARD_AREA));
-				}
-			}
-		}
-		input = KN_NONE;
-	}
+                if (tech != NULL && tech->Can_Player_Move() && tech->Can_Player_Fire())
+                {
+                    OutList.Add(EventClass(TargetClass(tech), MISSION_GUARD_AREA));
+                }
+            }
+        }
+        input = KN_NONE;
+    }
 
-	/*
-	**	All selected units will attempt to scatter.
-	*/
-	if (key != 0 && key == Options.KeyScatter) {
-		if (CurrentObject.Count()) {
-			for (index = 0; index < CurrentObject.Count(); index++) {
-				ObjectClass const * tech = CurrentObject[index];
+    /*
+    **	All selected units will attempt to scatter.
+    */
+    if (key != 0 && key == Options.KeyScatter)
+    {
+        if (CurrentObject.Count())
+        {
+            for (index = 0; index < CurrentObject.Count(); index++)
+            {
+                ObjectClass const* tech = CurrentObject[index];
 
-				if (tech != NULL && tech->Can_Player_Move()) {
-					OutList.Add(EventClass(EventClass::SCATTER, TargetClass(tech)));
-				}
-			}
-		}
-		input = KN_NONE;
-	}
+                if (tech != NULL && tech->Can_Player_Move())
+                {
+                    OutList.Add(EventClass(EventClass::SCATTER, TargetClass(tech)));
+                }
+            }
+        }
+        input = KN_NONE;
+    }
 
-	/*
-	**	Center the map around the currently selected objects. If no
-	**	objects are selected, then fall into the home case.
-	*/
-	if (key != 0 && (key == Options.KeyHome1 || key == Options.KeyHome2)) {
-		if (CurrentObject.Count()) {
-			Map.Center_Map();
+    /*
+    **	Center the map around the currently selected objects. If no
+    **	objects are selected, then fall into the home case.
+    */
+    if (key != 0 && (key == Options.KeyHome1 || key == Options.KeyHome2))
+    {
+        if (CurrentObject.Count())
+        {
+            Map.Center_Map();
 #ifdef WIN32
-			Map.Flag_To_Redraw(true);
+            Map.Flag_To_Redraw(true);
 #endif
-			input = KN_NONE;
-		} else {
-			input = Options.KeyBase;
-		}
-	}
+            input = KN_NONE;
+        }
+        else
+        {
+            input = Options.KeyBase;
+        }
+    }
 
-	/*
-	**	Center the map about the construction yard or construction vehicle
-	**	if one is present.
-	*/
-	if (key != 0 && key == Options.KeyBase) {
-		Unselect_All();
-		if (PlayerPtr->CurBuildings) {
-			for (index = 0; index < Buildings.Count(); index++) {
-				BuildingClass * building = Buildings.Ptr(index);
+    /*
+    **	Center the map about the construction yard or construction vehicle
+    **	if one is present.
+    */
+    if (key != 0 && key == Options.KeyBase)
+    {
+        Unselect_All();
+        if (PlayerPtr->CurBuildings)
+        {
+            for (index = 0; index < Buildings.Count(); index++)
+            {
+                BuildingClass* building = Buildings.Ptr(index);
 
-				if (building != NULL && !building->IsInLimbo && building->House == PlayerPtr && *building == STRUCT_CONST) {
-					Unselect_All();
-					building->Select();
-					if (building->IsLeader) break;
-				}
-			}
-		}
-		if (CurrentObject.Count() == 0 && PlayerPtr->CurUnits) {
-			for (index = 0; index < Units.Count(); index++) {
-				UnitClass * unit = Units.Ptr(index);
+                if (building != NULL && !building->IsInLimbo && building->House == PlayerPtr && *building ==
+                    STRUCT_CONST)
+                {
+                    Unselect_All();
+                    building->Select();
+                    if (building->IsLeader) break;
+                }
+            }
+        }
+        if (CurrentObject.Count() == 0 && PlayerPtr->CurUnits)
+        {
+            for (index = 0; index < Units.Count(); index++)
+            {
+                UnitClass* unit = Units.Ptr(index);
 
-				if (unit != NULL && !unit->IsInLimbo && unit->House == PlayerPtr && *unit == UNIT_MCV) {
-					Unselect_All();
-					unit->Select();
-					break;
-				}
-			}
-		}
-		if (CurrentObject.Count()) {
-			Map.Center_Map();
-		} else {
-			if (PlayerPtr->Center != 0) {
-				Map.Center_Map(PlayerPtr->Center);
-			}
-		}
-		Map.Flag_To_Redraw(true);
-		input = KN_NONE;
-	}
+                if (unit != NULL && !unit->IsInLimbo && unit->House == PlayerPtr && *unit == UNIT_MCV)
+                {
+                    Unselect_All();
+                    unit->Select();
+                    break;
+                }
+            }
+        }
+        if (CurrentObject.Count())
+        {
+            Map.Center_Map();
+        }
+        else
+        {
+            if (PlayerPtr->Center != 0)
+            {
+                Map.Center_Map(PlayerPtr->Center);
+            }
+        }
+        Map.Flag_To_Redraw(true);
+        input = KN_NONE;
+    }
 
-	/*
-	** Toggle the status of formation for the current team
-	*/
-	if (key != 0 && key == Options.KeyFormation) {
-		Toggle_Formation();
-		input = KN_NONE;
-	}
+    /*
+    ** Toggle the status of formation for the current team
+    */
+    if (key != 0 && key == Options.KeyFormation)
+    {
+        Toggle_Formation();
+        input = KN_NONE;
+    }
 
 #ifdef TOFIX
 	/*
@@ -785,165 +854,194 @@ void Keyboard_Process(KeyNumType & input)
 	}
 #endif
 
-	/*
-	**	Handle making and breaking alliances.
-	*/
-	if (key != 0 && key == Options.KeyAlliance) {
-		if (Session.Type != GAME_NORMAL || Debug_Flag) {
-			if (CurrentObject.Count() && !PlayerPtr->IsDefeated) {
-				if (CurrentObject[0]->Owner() != PlayerPtr->Class->House) {
-					OutList.Add(EventClass(EventClass::ALLY, CurrentObject[0]->Owner()));
-				}
-			}
-		}
-		input = KN_NONE;
-	}
+    /*
+    **	Handle making and breaking alliances.
+    */
+    if (key != 0 && key == Options.KeyAlliance)
+    {
+        if (Session.Type != GAME_NORMAL || Debug_Flag)
+        {
+            if (CurrentObject.Count() && !PlayerPtr->IsDefeated)
+            {
+                if (CurrentObject[0]->Owner() != PlayerPtr->Class->House)
+                {
+                    OutList.Add(EventClass(EventClass::ALLY, CurrentObject[0]->Owner()));
+                }
+            }
+        }
+        input = KN_NONE;
+    }
 
-	/*
-	**	Select all the units on the current display. This is equivalent to
-	**	drag selecting the whole view.
-	*/
-	if (key != 0 && key == Options.KeySelectView) {
-		Map.Select_These(0x00000000, XY_Coord(Map.TacLeptonWidth, Map.TacLeptonHeight));
-		input = KN_NONE;
-	}
+    /*
+    **	Select all the units on the current display. This is equivalent to
+    **	drag selecting the whole view.
+    */
+    if (key != 0 && key == Options.KeySelectView)
+    {
+        Map.Select_These(0x00000000, XY_Coord(Map.TacLeptonWidth, Map.TacLeptonHeight));
+        input = KN_NONE;
+    }
 
-	/*
-	**	Toggles the repair state similarly to pressing the repair button.
-	*/
-	if (key != 0 && key == Options.KeyRepair) {
-		Map.Repair_Mode_Control(-1);
-		input = KN_NONE;
-	}
+    /*
+    **	Toggles the repair state similarly to pressing the repair button.
+    */
+    if (key != 0 && key == Options.KeyRepair)
+    {
+        Map.Repair_Mode_Control(-1);
+        input = KN_NONE;
+    }
 
-	/*
-	**	Toggles the sell state similarly to pressing the sell button.
-	*/
-	if (key != 0 && key == Options.KeySell) {
-		Map.Sell_Mode_Control(-1);
-		input = KN_NONE;
-	}
+    /*
+    **	Toggles the sell state similarly to pressing the sell button.
+    */
+    if (key != 0 && key == Options.KeySell)
+    {
+        Map.Sell_Mode_Control(-1);
+        input = KN_NONE;
+    }
 
-	/*
-	**	Toggles the map zoom mode similarly to pressing the map button.
-	*/
-	if (key != 0 && key == Options.KeyMap) {
-		Map.Zoom_Mode_Control();
-		input = KN_NONE;
-	}
+    /*
+    **	Toggles the map zoom mode similarly to pressing the map button.
+    */
+    if (key != 0 && key == Options.KeyMap)
+    {
+        Map.Zoom_Mode_Control();
+        input = KN_NONE;
+    }
 
-	/*
-	**	Scrolls the sidebar up one slot.
-	*/
-	if (key != 0 && key == Options.KeySidebarUp) {
-		Map.SidebarClass::Scroll(true, -1);
-		input = KN_NONE;
-	}
+    /*
+    **	Scrolls the sidebar up one slot.
+    */
+    if (key != 0 && key == Options.KeySidebarUp)
+    {
+        Map.SidebarClass::Scroll(true, -1);
+        input = KN_NONE;
+    }
 
-	/*
-	**	Scrolls the sidebar down one slot.
-	*/
-	if (key != 0 && key == Options.KeySidebarDown) {
-		Map.SidebarClass::Scroll(false, -1);
-		input = KN_NONE;
-	}
+    /*
+    **	Scrolls the sidebar down one slot.
+    */
+    if (key != 0 && key == Options.KeySidebarDown)
+    {
+        Map.SidebarClass::Scroll(false, -1);
+        input = KN_NONE;
+    }
 
-	/*
-	**	Brings up the options dialog box.
-	*/
-	if (key != 0 && (key == Options.KeyOption1 || key == Options.KeyOption2)) {
-		Map.Help_Text(TXT_NONE);			// Turns off help text.
-		Queue_Options();
-		input = KN_NONE;
-	}
+    /*
+    **	Brings up the options dialog box.
+    */
+    if (key != 0 && (key == Options.KeyOption1 || key == Options.KeyOption2))
+    {
+        Map.Help_Text(TXT_NONE); // Turns off help text.
+        Queue_Options();
+        input = KN_NONE;
+    }
 
-	/*
-	**	Scrolls the tactical map in the direction specified.
-	*/
-	int distance = CELL_LEPTON_W;
-	if (key != 0 && key == Options.KeyScrollLeft) {
-		Map.Scroll_Map(DIR_W, distance, true);
-		input = KN_NONE;
-	}
-	if (key != 0 && key == Options.KeyScrollRight) {
-		Map.Scroll_Map(DIR_E, distance, true);
-		input = KN_NONE;
-	}
-	if (key != 0 && key == Options.KeyScrollUp) {
-		Map.Scroll_Map(DIR_N, distance, true);
-		input = KN_NONE;
-	}
-	if (key != 0 && key == Options.KeyScrollDown) {
-		Map.Scroll_Map(DIR_S, distance, true);
-		input = KN_NONE;
-	}
+    /*
+    **	Scrolls the tactical map in the direction specified.
+    */
+    int distance = CELL_LEPTON_W;
+    if (key != 0 && key == Options.KeyScrollLeft)
+    {
+        Map.Scroll_Map(DIR_W, distance, true);
+        input = KN_NONE;
+    }
+    if (key != 0 && key == Options.KeyScrollRight)
+    {
+        Map.Scroll_Map(DIR_E, distance, true);
+        input = KN_NONE;
+    }
+    if (key != 0 && key == Options.KeyScrollUp)
+    {
+        Map.Scroll_Map(DIR_N, distance, true);
+        input = KN_NONE;
+    }
+    if (key != 0 && key == Options.KeyScrollDown)
+    {
+        Map.Scroll_Map(DIR_S, distance, true);
+        input = KN_NONE;
+    }
 
-	/*
-	**	Teams are handled by the 10 special team keys. The manual comparison
-	**	to the KN numbers is because the Windows keyboard driver can vary
-	**	the base code number for the key depending on the shift or alt key
-	**	state!
-	*/
-	if (input != 0 && (plain == Options.KeyTeam1 || plain == KN_1)) {
-		Handle_Team(0, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam2 || plain == KN_2)) {
-		Handle_Team(1, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam3 || plain == KN_3)) {
-		Handle_Team(2, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam4 || plain == KN_4)) {
-		Handle_Team(3, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam5 || plain == KN_5)) {
-		Handle_Team(4, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam6 || plain == KN_6)) {
-		Handle_Team(5, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam7 || plain == KN_7)) {
-		Handle_Team(6, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam8 || plain == KN_8)) {
-		Handle_Team(7, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam9 || plain == KN_9)) {
-		Handle_Team(8, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && (plain == Options.KeyTeam10 || plain == KN_0)) {
-		Handle_Team(9, action);
-		input = KN_NONE;
-	}
+    /*
+    **	Teams are handled by the 10 special team keys. The manual comparison
+    **	to the KN numbers is because the Windows keyboard driver can vary
+    **	the base code number for the key depending on the shift or alt key
+    **	state!
+    */
+    if (input != 0 && (plain == Options.KeyTeam1 || plain == KN_1))
+    {
+        Handle_Team(0, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam2 || plain == KN_2))
+    {
+        Handle_Team(1, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam3 || plain == KN_3))
+    {
+        Handle_Team(2, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam4 || plain == KN_4))
+    {
+        Handle_Team(3, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam5 || plain == KN_5))
+    {
+        Handle_Team(4, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam6 || plain == KN_6))
+    {
+        Handle_Team(5, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam7 || plain == KN_7))
+    {
+        Handle_Team(6, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam8 || plain == KN_8))
+    {
+        Handle_Team(7, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam9 || plain == KN_9))
+    {
+        Handle_Team(8, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && (plain == Options.KeyTeam10 || plain == KN_0))
+    {
+        Handle_Team(9, action);
+        input = KN_NONE;
+    }
 
-	/*
-	**	Handle the bookmark hotkeys.
-	*/
-	if (input != 0 && plain == Options.KeyBookmark1 && !Debug_Map) {
-		Handle_View(0, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && plain == Options.KeyBookmark2 && !Debug_Map) {
-		Handle_View(1, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && plain == Options.KeyBookmark3 && !Debug_Map) {
-		Handle_View(2, action);
-		input = KN_NONE;
-	}
-	if (input != 0 && plain == Options.KeyBookmark4 && !Debug_Map) {
-		Handle_View(3, action);
-		input = KN_NONE;
-	}
+    /*
+    **	Handle the bookmark hotkeys.
+    */
+    if (input != 0 && plain == Options.KeyBookmark1 && !Debug_Map)
+    {
+        Handle_View(0, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && plain == Options.KeyBookmark2 && !Debug_Map)
+    {
+        Handle_View(1, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && plain == Options.KeyBookmark3 && !Debug_Map)
+    {
+        Handle_View(2, action);
+        input = KN_NONE;
+    }
+    if (input != 0 && plain == Options.KeyBookmark4 && !Debug_Map)
+    {
+        Handle_View(3, action);
+        input = KN_NONE;
+    }
 
 #ifdef CHEAT_KEYS
 	if (input != 0 && Debug_Flag && input && (input & KN_RLSE_BIT) == 0) {
@@ -953,9 +1051,9 @@ void Keyboard_Process(KeyNumType & input)
 }
 
 
-void Toggle_Formation(void) {
-
-// MBL 03.23.2020: this has been copied to DLLExportClass::Team_Units_Formation_Toggle_On(), and modified as needed
+void Toggle_Formation(void)
+{
+    // MBL 03.23.2020: this has been copied to DLLExportClass::Team_Units_Formation_Toggle_On(), and modified as needed
 #if 0
 	int team = -1;
 	long minx = 0x7FFFFFFFL, miny = 0x7FFFFFFFL;
@@ -1146,77 +1244,84 @@ void Toggle_Formation(void) {
  *   05/22/1995 BRR : Created.                                                                 *
  *=============================================================================================*/
 //#pragma off (unreferenced)
-static void Message_Input(KeyNumType &input)
+static void Message_Input(KeyNumType& input)
 {
-	int rc;
-	char txt[MAX_MESSAGE_LENGTH+32];
-	int id;
-//	SerialPacketType * serial_packet;
-	//int i;
-	KeyNumType copy_input;
-	//char *msg;
+    int rc;
+    char txt[MAX_MESSAGE_LENGTH + 32];
+    int id;
+    //	SerialPacketType * serial_packet;
+    //int i;
+    KeyNumType copy_input;
+    //char *msg;
 
-	/*
-	**	Check keyboard input for a request to send a message.
-	**	The 'to' argument for Add_Edit is prefixed to the message buffer; the
-	**	message buffer is big enough for the 'to' field plus MAX_MESSAGE_LENGTH.
-	**	To send the message, calling Get_Edit_Buf retrieves the buffer minus the
-	**	'to' portion.  At the other end, the buffer allocated to display the
-	**	message must be MAX_MESSAGE_LENGTH plus the size of "From: xxx (house)".
-	*/
+    /*
+    **	Check keyboard input for a request to send a message.
+    **	The 'to' argument for Add_Edit is prefixed to the message buffer; the
+    **	message buffer is big enough for the 'to' field plus MAX_MESSAGE_LENGTH.
+    **	To send the message, calling Get_Edit_Buf retrieves the buffer minus the
+    **	'to' portion.  At the other end, the buffer allocated to display the
+    **	message must be MAX_MESSAGE_LENGTH plus the size of "From: xxx (house)".
+    */
 #ifdef WOLAPI_INTEGRATION
 	if (Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH && 
 		( ( input >= KN_F1 && input < (KN_F1 + Session.MaxPlayers) ) || input == PAGE_RESPOND_KEY ) && 
 		!Session.Messages.Is_Edit()) {
 #else
-	if (Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH && input >= KN_F1 && input < (KN_F1 + Session.MaxPlayers) && !Session.Messages.Is_Edit()) {
+    if (Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH && input >= KN_F1 && input < (KN_F1 + Session.
+        MaxPlayers) && !Session.Messages.Is_Edit())
+    {
 #endif
-		memset (txt, 0, 40);
+        memset(txt, 0, 40);
 
-		/*
-		**	For a serial game, send a message on F1 or F4; set 'txt' to the
-		**	"Message:" string & add an editable message to the list.
-		*/
-		if (Session.Type==GAME_NULL_MODEM || Session.Type==GAME_MODEM) {
-			if (input==KN_F1 || input==(KN_F1 + Session.MaxPlayers - 1)) {
+        /*
+        **	For a serial game, send a message on F1 or F4; set 'txt' to the
+        **	"Message:" string & add an editable message to the list.
+        */
+        if (Session.Type == GAME_NULL_MODEM || Session.Type == GAME_MODEM)
+        {
+            if (input == KN_F1 || input == (KN_F1 + Session.MaxPlayers - 1))
+            {
+                strcpy(txt, Text_String(TXT_MESSAGE)); // "Message:"
 
-				strcpy(txt, Text_String(TXT_MESSAGE));	// "Message:"
+                Session.Messages.Add_Edit(Session.ColorIdx,
+                                          TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW, txt, 0, 232 * RESFACTOR);
 
-				Session.Messages.Add_Edit (Session.ColorIdx,
-					TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW, txt, 0, 232 * RESFACTOR);
+                Map.Flag_To_Redraw(false);
+            }
+        }
+        else if ((Session.Type == GAME_IPX || Session.Type == GAME_INTERNET) && !Session.Messages.Is_Edit())
+        {
+            /*
+            **	For a network game:
+            **	F1-F7 = "To <name> (house):" (only allowed if we're not in ObiWan mode)
+            **	F8 = "To All:"
+            */
+            if (input == (KN_F1 + Session.MaxPlayers - 1))
+            {
+                Session.MessageAddress = IPXAddressClass(); // set to broadcast
+                strcpy(txt, Text_String(TXT_TO_ALL)); // "To All:"
 
-				Map.Flag_To_Redraw(false);
-			}
-		} else if ((Session.Type == GAME_IPX || Session.Type == GAME_INTERNET) && !Session.Messages.Is_Edit()) {
-		/*
-		**	For a network game:
-		**	F1-F7 = "To <name> (house):" (only allowed if we're not in ObiWan mode)
-		**	F8 = "To All:"
-		*/
-			if (input==(KN_F1 + Session.MaxPlayers - 1)) {
+                Session.Messages.Add_Edit(Session.ColorIdx,
+                                          TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW, txt, 0, 232 * RESFACTOR);
 
-				Session.MessageAddress = IPXAddressClass();		// set to broadcast
-				strcpy(txt, Text_String(TXT_TO_ALL));	// "To All:"
-
-				Session.Messages.Add_Edit(Session.ColorIdx,
-					TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW, txt, 0, 232 * RESFACTOR);
-
-				Map.Flag_To_Redraw(false);
+                Map.Flag_To_Redraw(false);
 
 #ifdef WOLAPI_INTEGRATION
 			} else if ((input - KN_F1) < Ipx.Num_Connections() && !Session.ObiWan && input != PAGE_RESPOND_KEY ) {
 #else
-			} else if ((input - KN_F1) < Ipx.Num_Connections() && !Session.ObiWan) {
+            }
+            else if ((input - KN_F1) < Ipx.Num_Connections() && !Session.ObiWan)
+            {
 #endif
-				id = Ipx.Connection_ID(input - KN_F1);
-				Session.MessageAddress = (*(Ipx.Connection_Address (id)));
-				sprintf(txt, Text_String(TXT_TO), Ipx.Connection_Name(id));
+                id = Ipx.Connection_ID(input - KN_F1);
+                Session.MessageAddress = (*(Ipx.Connection_Address(id)));
+                sprintf(txt, Text_String(TXT_TO), Ipx.Connection_Name(id));
 
-				Session.Messages.Add_Edit(Session.ColorIdx,
-					TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW, txt, 0, 232 * RESFACTOR);
+                Session.Messages.Add_Edit(Session.ColorIdx,
+                                          TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW, txt, 0, 232 * RESFACTOR);
 
-				Map.Flag_To_Redraw(false);
-			}
+                Map.Flag_To_Redraw(false);
+            }
 #ifdef WOLAPI_INTEGRATION
 			else if( Session.Type == GAME_INTERNET && pWolapi && !pWolapi->bConnectionDown && input == PAGE_RESPOND_KEY )
 			{
@@ -1249,7 +1354,7 @@ static void Message_Input(KeyNumType &input)
 				}
 			}
 #endif
-		}
+        }
 #if(TEN)
 		/*
 		**	For a TEN game:
@@ -1310,45 +1415,51 @@ static void Message_Input(KeyNumType &input)
 			}
 		}
 #endif	// MPATH
-	}
+    }
 
-	/*
-	**	Process message-system input; send the message out if RETURN is hit.
-	*/
-	copy_input = input;
-	rc = Session.Messages.Input(input);
+    /*
+    **	Process message-system input; send the message out if RETURN is hit.
+    */
+    copy_input = input;
+    rc = Session.Messages.Input(input);
 
-	/*
-	**	If a single character has been added to an edit buffer, update the display.
-	*/
-	if (rc == 1 && Session.Type != GAME_NORMAL) {
-		Map.Flag_To_Redraw(false);
-	}
+    /*
+    **	If a single character has been added to an edit buffer, update the display.
+    */
+    if (rc == 1 && Session.Type != GAME_NORMAL)
+    {
+        Map.Flag_To_Redraw(false);
+    }
 
-	/*
-	**	If backspace was hit, redraw the map.  If the edit message was removed,
-	** the map must be force-drawn, since it won't be able to compute the
-	** cells to redraw; otherwise, let the map compute the cells to redraw,
-	** by not force-drawing it, but just setting the IsToRedraw bit.
-	*/
-	if (rc==2 && Session.Type != GAME_NORMAL) {
-		if (copy_input==KN_ESC) {
-			Map.Flag_To_Redraw(true);
+    /*
+    **	If backspace was hit, redraw the map.  If the edit message was removed,
+    ** the map must be force-drawn, since it won't be able to compute the
+    ** cells to redraw; otherwise, let the map compute the cells to redraw,
+    ** by not force-drawing it, but just setting the IsToRedraw bit.
+    */
+    if (rc == 2 && Session.Type != GAME_NORMAL)
+    {
+        if (copy_input == KN_ESC)
+        {
+            Map.Flag_To_Redraw(true);
 #ifdef WOLAPI_INTEGRATION
 			if( pWolapi )
 				//	Just in case user was responding to a page from outside the game, and we had frozen the "szExternalPager".
 				pWolapi->bFreezeExternalPager = false;
 #endif
-		} else {
-			Map.Flag_To_Redraw(false);
-		}
-		Map.DisplayClass::IsToRedraw = true;
-	}
+        }
+        else
+        {
+            Map.Flag_To_Redraw(false);
+        }
+        Map.DisplayClass::IsToRedraw = true;
+    }
 
-	/*
-	**	Send a message
-	*/
-	if ((rc==3 || rc==4) && Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH) {
+    /*
+    **	Send a message
+    */
+    if ((rc == 3 || rc == 4) && Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH)
+    {
 #if (0)
 		/*
 		**	Serial game: fill in a SerialPacketType & send it.
@@ -1422,13 +1533,13 @@ static void Message_Input(KeyNumType &input)
 				**	the message to every player we have a connection with.
 				*/
 				if (Session.MessageAddress.Is_Broadcast()) {
-	#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
+#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 		char *ptr = &Session.GPacket.Message.Buf[0];
 		if (!strncmp(ptr,"SECRET UNITS ON ",15) && NewUnitsEnabled) {
 			*ptr = 'X';		// force it to an odd hack so we know it was broadcast.
 			Enable_Secret_Units();
 		}
-	#endif
+#endif
 					for (i = 0; i < Ipx.Num_Connections(); i++) {
 						Ipx.Send_Global_Message(&Session.GPacket,
 							sizeof(GlobalPacketType), 1,
@@ -1507,8 +1618,9 @@ static void Message_Input(KeyNumType &input)
 		*/
 		Map.Flag_To_Redraw(true);
 #endif
-	}
+    }
 }
+
 //#pragma on (unreferenced)
 
 
@@ -1532,78 +1644,90 @@ static void Message_Input(KeyNumType &input)
  *=============================================================================================*/
 void Color_Cycle(void)
 {
-	static CDTimerClass<SystemTimerClass> _timer;
-	static CDTimerClass<SystemTimerClass> _ftimer;
-	static bool _up = false;
-	static int val = 255;
-	bool changed = false;
+    static CDTimerClass<SystemTimerClass> _timer;
+    static CDTimerClass<SystemTimerClass> _ftimer;
+    static bool _up = false;
+    static int val = 255;
+    bool changed = false;
 
-	if (Options.IsPaletteScroll) {
-		/*
-		**	Process the fading white color. It is used for the radar box and other glowing
-		**	game interface elements.
-		*/
-		if (!_ftimer) {
-			_ftimer = TIMER_SECOND/6;
+    if (Options.IsPaletteScroll)
+    {
+        /*
+        **	Process the fading white color. It is used for the radar box and other glowing
+        **	game interface elements.
+        */
+        if (!_ftimer)
+        {
+            _ftimer = TIMER_SECOND / 6;
 
-			#define	STEP_RATE	20
-			if (_up) {
-				val += STEP_RATE;
-				if (val > 150) {
-					val = 150;
-					_up = false;
-				}
-			} else {
-				val -= STEP_RATE;
-				if (val < 0x20) {
-					val = 0x20;
-					_up = true;
-				}
-			}
+#define	STEP_RATE	20
+            if (_up)
+            {
+                val += STEP_RATE;
+                if (val > 150)
+                {
+                    val = 150;
+                    _up = false;
+                }
+            }
+            else
+            {
+                val -= STEP_RATE;
+                if (val < 0x20)
+                {
+                    val = 0x20;
+                    _up = true;
+                }
+            }
 
-			/*
-			**	Set the pulse color as the proportional value between white and the
-			**	minimum value for pulsing.
-			*/
-			InGamePalette[CC_PULSE_COLOR] = GamePalette[WHITE];
-			InGamePalette[CC_PULSE_COLOR].Adjust(val, BlackColor);
+            /*
+            **	Set the pulse color as the proportional value between white and the
+            **	minimum value for pulsing.
+            */
+            InGamePalette[CC_PULSE_COLOR] = GamePalette[WHITE];
+            InGamePalette[CC_PULSE_COLOR].Adjust(val, BlackColor);
 
-			/*
-			**	Pulse the glowing embers between medium and dark red.
-			*/
-			InGamePalette[CC_EMBER_COLOR] = RGBClass(255, 80, 80);
-			InGamePalette[CC_EMBER_COLOR].Adjust(val, BlackColor);
+            /*
+            **	Pulse the glowing embers between medium and dark red.
+            */
+            InGamePalette[CC_EMBER_COLOR] = RGBClass(255, 80, 80);
+            InGamePalette[CC_EMBER_COLOR].Adjust(val, BlackColor);
 
-			changed = true;
-		}
+            changed = true;
+        }
 
-		/*
-		**	Process the color cycling effects -- water.
-		*/
-		if (!_timer) {
-			_timer = TIMER_SECOND/4;
+        /*
+        **	Process the color cycling effects -- water.
+        */
+        if (!_timer)
+        {
+            _timer = TIMER_SECOND / 4;
 
-			RGBClass first = InGamePalette[CYCLE_COLOR_START+CYCLE_COLOR_COUNT-1];
-			for (int index = CYCLE_COLOR_START+CYCLE_COLOR_COUNT-1; index >= CYCLE_COLOR_START; index--) {
-				InGamePalette[index] = InGamePalette[index-1];
-			}
-			InGamePalette[CYCLE_COLOR_START] = first;
+            RGBClass first = InGamePalette[CYCLE_COLOR_START + CYCLE_COLOR_COUNT - 1];
+            for (int index = CYCLE_COLOR_START + CYCLE_COLOR_COUNT - 1; index >= CYCLE_COLOR_START; index--)
+            {
+                InGamePalette[index] = InGamePalette[index - 1];
+            }
+            InGamePalette[CYCLE_COLOR_START] = first;
 
-			changed = true;
-		}
+            changed = true;
+        }
 
-		/*
-		**	If any of the processing functions changed the palette, then this palette must be
-		**	passed to the system.
-		*/
-		if (changed) {
-			BStart(BENCH_PALETTE);
-			InGamePalette.Set();
-//			Set_Palette(InGamePalette);
-			BEnd(BENCH_PALETTE);
-		}
-	}
+        /*
+        **	If any of the processing functions changed the palette, then this palette must be
+        **	passed to the system.
+        */
+        if (changed)
+        {
+            BStart(BENCH_PALETTE);
+            InGamePalette.Set();
+            //			Set_Palette(InGamePalette);
+            BEnd(BENCH_PALETTE);
+        }
+    }
 }
+
+
 
 
 /***********************************************************************************************
@@ -1624,28 +1748,31 @@ void Color_Cycle(void)
  *=============================================================================================*/
 void Call_Back(void)
 {
-	/*
-	**	Music and speech maintenance
-	*/
-	if (SampleType) {
-		Sound_Callback();
-		Theme.AI();
-		Speak_AI();
-	}
+    /*
+    **  Music and speech maintenance
+    */
+    if (SampleType)
+    {
+        Sound_Callback();
+        Theme.AI();
+        Speak_AI();
+    }
 
-	/*
-	**	Network maintenance.
-	*/
-	if (Session.Type == GAME_IPX || Session.Type == GAME_INTERNET) {
-		IPX_Call_Back();
-	}
+    /*
+    **	Network maintenance.
+    */
+    if (Session.Type == GAME_IPX || Session.Type == GAME_INTERNET)
+    {
+        IPX_Call_Back();
+    }
 
-	/*
-	**	Serial game maintenance.
-	*/
-	if (Session.Type == GAME_NULL_MODEM || ((Session.Type == GAME_MODEM) && Session.ModemService)) {
-		//NullModem.Service();		ST - 5/7/2019
-	}
+    /*
+    **	Serial game maintenance.
+    */
+    if (Session.Type == GAME_NULL_MODEM || ((Session.Type == GAME_MODEM) && Session.ModemService))
+    {
+        //NullModem.Service();		ST - 5/7/2019
+    }
 
 #ifdef WOLAPI_INTEGRATION
 	//	Wolapi maintenance.
@@ -1930,14 +2057,14 @@ void MPATH_Call_Back(void)
  * HISTORY:                                                                                    *
  *   10/07/1992 JLB : Created.                                                                 *
  *=============================================================================================*/
-char const * Language_Name(char const * basename)
+char const* Language_Name(char const* basename)
 {
-	static char _fullname[_MAX_FNAME+_MAX_EXT];
+    static char _fullname[_MAX_FNAME + _MAX_EXT];
 
-	if (!basename) return(NULL);
+    if (!basename) return (NULL);
 
-	sprintf(_fullname, "%s.ENG", basename);
-	return(_fullname);
+    sprintf(_fullname, "%s.ENG", basename);
+    return (_fullname);
 }
 
 
@@ -1958,16 +2085,19 @@ char const * Language_Name(char const * basename)
  * HISTORY:                                                                                    *
  *   04/17/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-SourceType Source_From_Name(char const * name)
+SourceType Source_From_Name(char const* name)
 {
-	if (name) {
-		for (SourceType source = SOURCE_FIRST; source < SOURCE_COUNT; source++) {
-			if (stricmp(SourceName[source], name) == 0) {
-				return(source);
-			}
-		}
-	}
-	return(SOURCE_NONE);
+    if (name)
+    {
+        for (SourceType source = SOURCE_FIRST; source < SOURCE_COUNT; source++)
+        {
+            if (stricmp(SourceName[source], name) == 0)
+            {
+                return (source);
+            }
+        }
+    }
+    return (SOURCE_NONE);
 }
 
 
@@ -1986,12 +2116,13 @@ SourceType Source_From_Name(char const * name)
  * HISTORY:                                                                						  *
  *   11/15/1994 BR : Created.                                              						  *
  *=============================================================================================*/
-char const * Name_From_Source(SourceType source)
+char const* Name_From_Source(SourceType source)
 {
-	if ((unsigned)source < SOURCE_COUNT) {
-		return(SourceName[source]);
-	}
-	return("None");
+    if ((unsigned)source < SOURCE_COUNT)
+    {
+        return (SourceName[source]);
+    }
+    return ("None");
 }
 
 
@@ -2010,18 +2141,21 @@ char const * Name_From_Source(SourceType source)
  * HISTORY:                                                                                    *
  *   10/01/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-TheaterType Theater_From_Name(char const * name)
+TheaterType Theater_From_Name(char const* name)
 {
-	TheaterType	index;
+    TheaterType index;
 
-	if (name) {
-		for (index = THEATER_FIRST; index < THEATER_COUNT; index++) {
-			if (stricmp(name, Theaters[index].Name) == 0) {
-				return(index);
-			}
-		}
-	}
-	return(THEATER_NONE);
+    if (name)
+    {
+        for (index = THEATER_FIRST; index < THEATER_COUNT; index++)
+        {
+            if (stricmp(name, Theaters[index].Name) == 0)
+            {
+                return (index);
+            }
+        }
+    }
+    return (THEATER_NONE);
 }
 
 
@@ -2044,36 +2178,37 @@ TheaterType Theater_From_Name(char const * name)
  *=============================================================================================*/
 FacingType KN_To_Facing(int input)
 {
-	input &= ~(KN_ALT_BIT|KN_SHIFT_BIT|KN_CTRL_BIT);
-	switch (input) {
-		case KN_LEFT:
-			return(FACING_W);
+    input &= ~(KN_ALT_BIT | KN_SHIFT_BIT | KN_CTRL_BIT);
+    switch (input)
+    {
+    case KN_LEFT:
+        return (FACING_W);
 
-		case KN_RIGHT:
-			return(FACING_E);
+    case KN_RIGHT:
+        return (FACING_E);
 
-		case KN_UP:
-			return(FACING_N);
+    case KN_UP:
+        return (FACING_N);
 
-		case KN_DOWN:
-			return(FACING_S);
+    case KN_DOWN:
+        return (FACING_S);
 
-		case KN_UPLEFT:
-			return(FACING_NW);
+    case KN_UPLEFT:
+        return (FACING_NW);
 
-		case KN_UPRIGHT:
-			return(FACING_NE);
+    case KN_UPRIGHT:
+        return (FACING_NE);
 
-		case KN_DOWNLEFT:
-			return(FACING_SW);
+    case KN_DOWNLEFT:
+        return (FACING_SW);
 
-		case KN_DOWNRIGHT:
-			return(FACING_SE);
+    case KN_DOWNRIGHT:
+        return (FACING_SE);
 
-		default:
-			break;
-	}
-	return(FACING_NONE);
+    default:
+        break;
+    }
+    return (FACING_NONE);
 }
 
 
@@ -2096,34 +2231,37 @@ FacingType KN_To_Facing(int input)
  *=============================================================================================*/
 static void Sync_Delay(void)
 {
-	/*
-	**	Accumulate the number of 'spare' ticks that are frittered away here.
-	*/
-	SpareTicks += FrameTimer;
+    /*
+    **	Accumulate the number of 'spare' ticks that are frittered away here.
+    */
+    SpareTicks += FrameTimer;
 
-	/*
-	**	Delay until the frame timer expires. This forces the game loop to be regulated to a
-	**	speed controlled by the game options slider.
-	*/
-	while (FrameTimer) {
-		Color_Cycle();
-		Call_Back();
+    /*
+    **	Delay until the frame timer expires. This forces the game loop to be regulated to a
+    **	speed controlled by the game options slider.
+    */
+    while (FrameTimer)
+    {
+        Color_Cycle();
+        Call_Back();
 
-		if (SpecialDialog == SDLG_NONE) {
+        if (SpecialDialog == SDLG_NONE)
+        {
 #ifdef WIN32
-			WWMouse->Erase_Mouse(&HidPage, TRUE);
+            WWMouse->Erase_Mouse(&HidPage, TRUE);
 #endif	//WIN32
-			KeyNumType input = KN_NONE;
-			int x, y;
-			Map.Input(input, x, y);
-			if (input) {
-				Keyboard_Process(input);
-			}
-			Map.Render();
-		}
-	}
-	Color_Cycle();
-	Call_Back();
+            KeyNumType input = KN_NONE;
+            int x, y;
+            Map.Input(input, x, y);
+            if (input)
+            {
+                Keyboard_Process(input);
+            }
+            Map.Render();
+        }
+    }
+    Color_Cycle();
+    Call_Back();
 }
 
 
@@ -2149,43 +2287,45 @@ void Reallocate_Big_Shape_Buffer(void);
 
 bool Main_Loop()
 {
-	KeyNumType	input;					// Player input.
-	int x;
-	int y;
-	int framedelay;
+    KeyNumType input; // Player input.
+    int x;
+    int y;
+    int framedelay;
 
-Mono_Set_Cursor(0,0);
+    Mono_Set_Cursor(0, 0);
 
-	if (!GameActive) return(!GameActive);
+    if (!GameActive) return (!GameActive);
 
 #ifdef WIN32
-	/*
-	** Call the focus loss handler
-	*/
-	Check_For_Focus_Loss();
+    /*
+    ** Call the focus loss handler
+    */
+    Check_For_Focus_Loss();
 
-	/*
-	** Allocate extra memory for uncompressed shapes as needed
-	*/
-	Reallocate_Big_Shape_Buffer();
+    /*
+    ** Allocate extra memory for uncompressed shapes as needed
+    */
+    Reallocate_Big_Shape_Buffer();
 #endif
 
-	/*
-	** Sync-bug trapping code
-	*/
-	if (Frame >= Session.TrapFrame) {
-		Session.Trap_Object();
-	}
+    /*
+    ** Sync-bug trapping code
+    */
+    if (Frame >= Session.TrapFrame)
+    {
+        Session.Trap_Object();
+    }
 
-	//
-	// Initialize our AI processing timer
-	//
-	Session.ProcessTimer = TickCount;
+    //
+    // Initialize our AI processing timer
+    //
+    Session.ProcessTimer = TickCount;
 
 #if 1
-	if (Session.TrapCheckHeap) {
-		Debug_Trap_Check_Heap = true;
-	}
+    if (Session.TrapCheckHeap)
+    {
+        Debug_Trap_Check_Heap = true;
+    }
 #endif
 
 #ifdef CHEAT_KEYS
@@ -2196,69 +2336,82 @@ Mono_Set_Cursor(0,0);
 	Self_Regulate();
 #endif
 
-	BStart(BENCH_GAME_FRAME);
+    BStart(BENCH_GAME_FRAME);
 
-	/*
-	**	If there is no theme playing, but it looks like one is required, then start one
-	**	playing. This is usually the symptom of there being no transition score.
-	*/
-	if (SampleType && Theme.What_Is_Playing() == THEME_NONE) {
-		Theme.Queue_Song(THEME_PICK_ANOTHER);
-	}
+    /*
+    **	If there is no theme playing, but it looks like one is required, then start one
+    **	playing. This is usually the symptom of there being no transition score.
+    */
+    if (SampleType && Theme.What_Is_Playing() == THEME_NONE)
+    {
+        Theme.Queue_Song(THEME_PICK_ANOTHER);
+    }
 
-	/*
-	**	Setup the timer so that the Main_Loop function processes at the correct rate.
-	*/
-	if (Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH &&
-		Session.CommProtocol == COMM_PROTOCOL_MULTI_E_COMP) {
-
-		//
-		// In playback mode, run as fast as possible.
-		//
-		if (Session.Play) {
-			FrameTimer = 0;
-		} else {
+    /*
+    **	Setup the timer so that the Main_Loop function processes at the correct rate.
+    */
+    if (Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH &&
+        Session.CommProtocol == COMM_PROTOCOL_MULTI_E_COMP)
+    {
+        //
+        // In playback mode, run as fast as possible.
+        //
+        if (Session.Play)
+        {
+            FrameTimer = 0;
+        }
+        else
+        {
 #ifdef FIXIT_VERSION_3
-			if( !Session.DesiredFrameRate )
-				Session.DesiredFrameRate = 60;		//	A division by zero was happening (very rare).
+            if (!Session.DesiredFrameRate)
+                Session.DesiredFrameRate = 60; //	A division by zero was happening (very rare).
 #endif
-			framedelay = TIMER_SECOND / Session.DesiredFrameRate;
-			FrameTimer = framedelay;
-		}
-	} else {
-		if (Options.GameSpeed != 0) {
-			FrameTimer = Options.GameSpeed +
-				(PlayerPtr->Difficulty == DIFF_EASY ? 1 : 0) -
-				(PlayerPtr->Difficulty == DIFF_HARD ? 1 : 0);
-		} else {
-			FrameTimer = Options.GameSpeed + (PlayerPtr->Difficulty == DIFF_EASY ? 1 : 0);
-		}
-	}
+            framedelay = TIMER_SECOND / Session.DesiredFrameRate;
+            FrameTimer = framedelay;
+        }
+    }
+    else
+    {
+        if (Options.GameSpeed != 0)
+        {
+            FrameTimer = Options.GameSpeed +
+                (PlayerPtr->Difficulty == DIFF_EASY ? 1 : 0) -
+                (PlayerPtr->Difficulty == DIFF_HARD ? 1 : 0);
+        }
+        else
+        {
+            FrameTimer = Options.GameSpeed + (PlayerPtr->Difficulty == DIFF_EASY ? 1 : 0);
+        }
+    }
 
-	/*
-	**	Update the display, unless we're inside a dialog.
-	*/
-	if (!Session.Play) {
+    /*
+    **	Update the display, unless we're inside a dialog.
+    */
+    if (!Session.Play)
+    {
 #ifdef WIN32
-		if (SpecialDialog == SDLG_NONE && GameInFocus) {
-			WWMouse->Erase_Mouse(&HidPage, TRUE);
+        if (SpecialDialog == SDLG_NONE && GameInFocus)
+        {
+            WWMouse->Erase_Mouse(&HidPage, TRUE);
 #else
 		if (SpecialDialog == SDLG_NONE) {
 #endif
-			Map.Input(input, x, y);
-			if (input) {
-				Keyboard_Process(input);
-			}
-			Map.Render();
-		}
-	}
+            Map.Input(input, x, y);
+            if (input)
+            {
+                Keyboard_Process(input);
+            }
+            Map.Render();
+        }
+    }
 
-	/*
-	** Save map's position & selected objects, if we're recording the game.
-	*/
-	if (Session.Record || Session.Play) {
-		Do_Record_Playback();
-	}
+    /*
+    ** Save map's position & selected objects, if we're recording the game.
+    */
+    if (Session.Record || Session.Play)
+    {
+        Do_Record_Playback();
+    }
 
 #ifndef SORTDRAW
 	/*
@@ -2271,136 +2424,144 @@ Mono_Set_Cursor(0,0);
 	DisplayClass::Layer[LAYER_GROUND].Sort();
 #endif
 
-	/*
-	**	AI logic operations are performed here.
-	*/
-	Logic.AI();
-	TimeQuake = false;
+    /*
+    **	AI logic operations are performed here.
+    */
+    Logic.AI();
+    TimeQuake = false;
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
-	if (!PendingTimeQuake) {
-		TimeQuakeCenter = 0;
-	}
+    if (!PendingTimeQuake)
+    {
+        TimeQuakeCenter = 0;
+    }
 #endif
 
-	/*
-	**	Manage the inter-player message list.  If Manage() returns true, it means
-	**	a message has expired & been removed, and the entire map must be updated.
-	*/
-	if (Session.Messages.Manage()) {
+    /*
+    **	Manage the inter-player message list.  If Manage() returns true, it means
+    **	a message has expired & been removed, and the entire map must be updated.
+    */
+    if (Session.Messages.Manage())
+    {
 #ifdef WIN32
-		HiddenPage.Clear();
+        HiddenPage.Clear();
 #else	//WIN32
 		HidPage.Clear();
 #endif	//WIN32
-		Map.Flag_To_Redraw(true);
-	}
+        Map.Flag_To_Redraw(true);
+    }
 
-	//
-	// Measure how long it took to process the AI
-	//
-	Session.ProcessTicks += (TickCount - Session.ProcessTimer);
-	Session.ProcessFrames++;
+    //
+    // Measure how long it took to process the AI
+    //
+    Session.ProcessTicks += (TickCount - Session.ProcessTimer);
+    Session.ProcessFrames++;
 
-	/*
-	**	Process all commands that are ready to be processed.
-	*/
-	Queue_AI();
+    /*
+    **	Process all commands that are ready to be processed.
+    */
+    Queue_AI();
 
-	/*
-	**	Keep track of elapsed time in the game.
-	*/
-	Score.ElapsedTime += TIMER_SECOND / TICKS_PER_SECOND;
-
-	Call_Back();
-
-	/*
-	**	Check for player wins or loses according to global event flag.
-	*/
-	if (PlayerWins) {
-
+    /*
+    **	Keep track of elapsed time in the game.
+    */
+    Score.ElapsedTime += TIMER_SECOND / TICKS_PER_SECOND;
+    Call_Back();
+    /*
+    **	Check for player wins or loses according to global event flag.
+    */
+    if (PlayerWins)
+    {
 #ifdef WIN32
 
-		/*
-		** Send the game statistics to WChat.
-		*/
-		if (Session.Type == GAME_INTERNET && !GameStatisticsPacketSent) {
-			Register_Game_End_Time();
-			Send_Statistics_Packet();		//	Player just won.
-		}
+        /*
+        ** Send the game statistics to WChat.
+        */
+        if (Session.Type == GAME_INTERNET && !GameStatisticsPacketSent)
+        {
+            Register_Game_End_Time();
+            Send_Statistics_Packet(); //	Player just won.
+        }
 
-		WWMouse->Erase_Mouse(&HidPage, TRUE);
+        WWMouse->Erase_Mouse(&HidPage, TRUE);
 #endif	//WIN32
-		PlayerLoses = false;
-		PlayerWins = false;
-		PlayerRestarts = false;
-		Map.Help_Text(TXT_NONE);
-		Do_Win();
-		return(!GameActive);
-	}
-	if (PlayerLoses) {
+        PlayerLoses = false;
+        PlayerWins = false;
+        PlayerRestarts = false;
+        Map.Help_Text(TXT_NONE);
+        Do_Win();
+        return (!GameActive);
+    }
+    if (PlayerLoses)
+    {
 #ifdef WIN32
-		/*
-		** Send the game statistics to WChat.
-		*/
-		if (Session.Type == GAME_INTERNET && !GameStatisticsPacketSent) {
-			Register_Game_End_Time();
-			Send_Statistics_Packet();		//	Player just lost.
-		}
+        /*
+        ** Send the game statistics to WChat.
+        */
+        if (Session.Type == GAME_INTERNET && !GameStatisticsPacketSent)
+        {
+            Register_Game_End_Time();
+            Send_Statistics_Packet(); //	Player just lost.
+        }
 
-		WWMouse->Erase_Mouse(&HidPage, TRUE);
+        WWMouse->Erase_Mouse(&HidPage, TRUE);
 #endif	//WIN32
-		PlayerWins = false;
-		PlayerLoses = false;
-		PlayerRestarts = false;
-		Map.Help_Text(TXT_NONE);
-		Do_Lose();
-		return(!GameActive);
-	}
-	if (PlayerRestarts) {
+        PlayerWins = false;
+        PlayerLoses = false;
+        PlayerRestarts = false;
+        Map.Help_Text(TXT_NONE);
+        Do_Lose();
+        return (!GameActive);
+    }
+    if (PlayerRestarts)
+    {
 #ifdef WIN32
-		WWMouse->Erase_Mouse(&HidPage, TRUE);
+        WWMouse->Erase_Mouse(&HidPage, TRUE);
 #endif	//WIN32
-		PlayerWins = false;
-		PlayerLoses = false;
-		PlayerRestarts = false;
-		Map.Help_Text(TXT_NONE);
-		Do_Restart();
-		return(!GameActive);
-	}
+        PlayerWins = false;
+        PlayerLoses = false;
+        PlayerRestarts = false;
+        Map.Help_Text(TXT_NONE);
+        Do_Restart();
+        return (!GameActive);
+    }
 
 #ifdef FIXIT_VERSION_3		//	Stalemate games.
-	if( Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH && Session.Players.Count() == 2 &&
-		Scen.bLocalProposesDraw && Scen.bOtherProposesDraw )
-	{
-		//	End game in a draw.
-		if (Session.Type == GAME_INTERNET && !GameStatisticsPacketSent) {
-			Register_Game_End_Time();
-			Send_Statistics_Packet();
-		}
-		WWMouse->Erase_Mouse(&HidPage, TRUE);
-		Map.Help_Text(TXT_NONE);
-		Do_Draw();
-		return(!GameActive);
-	}
+    if (Session.Type != GAME_NORMAL && Session.Type != GAME_SKIRMISH && Session.Players.Count() == 2 &&
+        Scen.bLocalProposesDraw && Scen.bOtherProposesDraw)
+    {
+        //	End game in a draw.
+        if (Session.Type == GAME_INTERNET && !GameStatisticsPacketSent)
+        {
+            Register_Game_End_Time();
+            Send_Statistics_Packet();
+        }
+        WWMouse->Erase_Mouse(&HidPage, TRUE);
+        Map.Help_Text(TXT_NONE);
+        Do_Draw();
+        return (!GameActive);
+    }
 #endif
 
-	/*
-	**	The frame logic has been completed. Increment the frame
-	**	counter.
-	*/
-	Frame++;
+    /*
+    **	The frame logic has been completed. Increment the frame
+    **	counter.
+    */
+    Frame++;
 
-	/*
-	** Is there a memory trasher altering the map??
-	*/
-	if (Debug_Check_Map) {
-		if (!Map.Validate()) {
-			if (WWMessageBox().Process (TEXT_MAP_ERROR, TEXT_STOP, TEXT_CONTINUE)==0) {
-				GameActive = 0;
-			}
-			Map.Validate();		// give debugger a chance to catch it
-		}
-	}
+    /*
+    ** Is there a memory trasher altering the map??
+    */
+    if (Debug_Check_Map)
+    {
+        if (!Map.Validate())
+        {
+            if (WWMessageBox().Process(TEXT_MAP_ERROR, TEXT_STOP, TEXT_CONTINUE) == 0)
+            {
+                GameActive = 0;
+            }
+            Map.Validate(); // give debugger a chance to catch it
+        }
+    }
 
 
 #if (0)	//ST - 5/8/2019
@@ -2457,10 +2618,10 @@ Mono_Set_Cursor(0,0);
 	}
 #endif
 #endif
-	BEnd(BENCH_GAME_FRAME);
+    BEnd(BENCH_GAME_FRAME);
 
-	Sync_Delay();
-	return(!GameActive);
+    Sync_Delay();
+    return (!GameActive);
 }
 
 
@@ -2714,19 +2875,21 @@ long MixFileHandler(VQAHandle * vqa, long action, void * buffer, long nbytes)
 }
 #endif
 
-void Rebuild_Interpolated_Palette(unsigned char * interpal)
+void Rebuild_Interpolated_Palette(unsigned char* interpal)
 {
-	for (int y=0; y<255; y++) {
-		for (int x=y+1; x<256; x++) {
-			*(interpal + (y*256+x)) = *(interpal + (x*256+y));
-		}
-	}
+    for (int y = 0; y < 255; y++)
+    {
+        for (int x = y + 1; x < 256; x++)
+        {
+            *(interpal + (y * 256 + x)) = *(interpal + (x * 256 + y));
+        }
+    }
 }
 
 
-unsigned char 	* InterpolatedPalettes[100];
-BOOL				PalettesRead;
-unsigned			PaletteCounter;
+unsigned char* InterpolatedPalettes[100];
+BOOL PalettesRead;
+unsigned PaletteCounter;
 
 
 /***********************************************************************************************
@@ -2743,65 +2906,75 @@ unsigned			PaletteCounter;
  * HISTORY:                                                                                    *
  *    5/7/96 9:49AM ST : Created                                                               *
  *=============================================================================================*/
-int Load_Interpolated_Palettes(char const * filename, BOOL add)
+int Load_Interpolated_Palettes(char const* filename, BOOL add)
 {
-	int	num_palettes=0;
-	int	i;
-	int 	start_palette;
+    int num_palettes = 0;
+    int i;
+    int start_palette;
 
-	PalettesRead = FALSE;
-	CCFileClass	file(filename);
+    PalettesRead = FALSE;
+    CCFileClass file(filename);
 
-	if (!add) {
-		for (i=0; i < ARRAY_SIZE(InterpolatedPalettes); i++) {
-			InterpolatedPalettes[i]=NULL;
-		}
-		start_palette=0;
-	} else {
-		for (start_palette = 0; start_palette < ARRAY_SIZE(InterpolatedPalettes); start_palette++) {
-			if (!InterpolatedPalettes[start_palette]) break;
-		}
-	}
+    if (!add)
+    {
+        for (i = 0; i < ARRAY_SIZE(InterpolatedPalettes); i++)
+        {
+            InterpolatedPalettes[i] = NULL;
+        }
+        start_palette = 0;
+    }
+    else
+    {
+        for (start_palette = 0; start_palette < ARRAY_SIZE(InterpolatedPalettes); start_palette++)
+        {
+            if (!InterpolatedPalettes[start_palette]) break;
+        }
+    }
 
-	/*
-	**	Hack another interpolated palette if the requested one is
-	**	not present.
-	*/
-	if (!file.Is_Available()) {
-		file.Set_Name("AAGUN.VQP");
-	}
+    /*
+    **	Hack another interpolated palette if the requested one is
+    **	not present.
+    */
+    if (!file.Is_Available())
+    {
+        file.Set_Name("AAGUN.VQP");
+    }
 
-	if (file.Is_Available()) {
+    if (file.Is_Available())
+    {
+        file.Open(READ);
+        file.Read(&num_palettes, 4);
 
-		file.Open(READ);
-		file.Read(&num_palettes , 4);
+        for (i = 0; i < num_palettes; i++)
+        {
+            InterpolatedPalettes[i + start_palette] = (unsigned char*)malloc(65536);
+            memset(InterpolatedPalettes[i + start_palette], 0, 65536);
+            for (int y = 0; y < 256; y++)
+            {
+                file.Read(InterpolatedPalettes[i + start_palette] + y * 256, y + 1);
+            }
 
-		for (i=0; i < num_palettes; i++) {
-			InterpolatedPalettes[i+start_palette] = (unsigned char *)malloc (65536);
-			memset (InterpolatedPalettes[i+start_palette], 0, 65536);
-			for (int y = 0; y < 256; y++) {
-				file.Read (InterpolatedPalettes[i+start_palette] + y*256 , y+1);
-			}
+            Rebuild_Interpolated_Palette(InterpolatedPalettes[i + start_palette]);
+        }
 
-			Rebuild_Interpolated_Palette(InterpolatedPalettes[i+start_palette]);
-		}
-
-		PalettesRead = TRUE;
-		file.Close();
-	}
-	PaletteCounter = 0;
-	return (num_palettes);
+        PalettesRead = TRUE;
+        file.Close();
+    }
+    PaletteCounter = 0;
+    return (num_palettes);
 }
 
 
 void Free_Interpolated_Palettes(void)
 {
-	for (int i = 0; i < ARRAY_SIZE(InterpolatedPalettes) ;i++) {
-		if (InterpolatedPalettes[i]) {
-			free(InterpolatedPalettes[i]);
-			InterpolatedPalettes[i]=NULL;
-		}
-	}
+    for (int i = 0; i < ARRAY_SIZE(InterpolatedPalettes); i++)
+    {
+        if (InterpolatedPalettes[i])
+        {
+            free(InterpolatedPalettes[i]);
+            InterpolatedPalettes[i] = NULL;
+        }
+    }
 }
 
 
@@ -2834,19 +3007,20 @@ extern GraphicBufferClass VQ640;
 #endif
 #endif
 
-extern void Play_Movie_GlyphX(const char * movie_name, ThemeType theme, bool immediate);
+extern void Play_Movie_GlyphX(const char* movie_name, ThemeType theme, bool immediate);
 
-void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate)
-	{
+void Play_Movie(char const* name, ThemeType theme, bool clrscrn, bool immediate)
+{
 #if (1)
-	if (strcmp(name, "x") == 0 || strcmp(name, "X") == 0) {
-		return;
-	}
+    if (strcmp(name, "x") == 0 || strcmp(name, "X") == 0)
+    {
+        return;
+    }
 
-	Play_Movie_GlyphX(name, theme, immediate);
-	return;
+    Play_Movie_GlyphX(name, theme, immediate);
+    return;
 #else
-	#ifdef MPEGMOVIE
+#ifdef MPEGMOVIE
 	//theme = theme;
 	//clrscrn = clrscrn;
 	if( Using_DVD() )
@@ -2854,45 +3028,45 @@ void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate
 		if (PlayMpegMovie(name))
 			return;
 	}
-	#endif
+#endif
 
-	#ifdef CHEAT_KEYS
-	//	Mono_Printf("Movie: %s\n", name);
-	#endif	//CHEAT_KEYS
+#ifdef CHEAT_KEYS
+    //	Mono_Printf("Movie: %s\n", name);
+#endif	//CHEAT_KEYS
 	/*
 	** Don't play movies in editor mode
 	*/
 	if (Debug_Map) {
 		return;
 	}
-	#ifdef CHEAT_KEYS
-	//	Mono_Printf("A\n");
-	#endif	//CHEAT_KEYS
+#ifdef CHEAT_KEYS
+    //	Mono_Printf("A\n");
+#endif	//CHEAT_KEYS
 	/*
 	** Don't play movies in multiplayer mode
 	*/
 	if (Session.Type != GAME_NORMAL) {
 		return;
 	}
-	#ifdef CHEAT_KEYS
-	//Mono_Printf("b\n");
-	#endif	//CHEAT_KEYS
+#ifdef CHEAT_KEYS
+    //Mono_Printf("b\n");
+#endif	//CHEAT_KEYS
 
 	if (name) {
 		char fullname[_MAX_FNAME+_MAX_EXT];
 		_makepath(fullname, NULL, NULL, name, ".VQA");
-		#ifdef WIN32
+#ifdef WIN32
 		char palname [_MAX_FNAME+_MAX_EXT];
 		_makepath(palname , NULL, NULL, name, ".VQP");
-		#endif	//WIN32
-		#ifdef CHEAT_KEYS
-		//			Mono_Set_Cursor(0, 0);Mono_Printf("[%s]", fullname);
-		#endif
+#endif	//WIN32
+#ifdef CHEAT_KEYS
+    //			Mono_Set_Cursor(0, 0);Mono_Printf("[%s]", fullname);
+#endif
 
 		if (!CCFileClass(fullname).Is_Available()){
-			#ifdef CHEAT_KEYS
-			//		 Mono_Printf("fullname: %s\n", fullname);
-			#endif	//CHEAT_KEYS
+#ifdef CHEAT_KEYS
+    //		 Mono_Printf("fullname: %s\n", fullname);
+#endif	//CHEAT_KEYS
 		 return;
 		}
 		/*
@@ -2922,8 +3096,8 @@ void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate
 		VQAHandle * vqa = NULL;
 
 
-		#ifdef WIN32
-		#ifdef MOVIE640
+#ifdef WIN32
+#ifdef MOVIE640
 		if(IsVQ640) {
 			AnimControl.ImageWidth = 640;
 			AnimControl.ImageHeight = 400;
@@ -2933,8 +3107,8 @@ void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate
 			AnimControl.ImageHeight = 200;
 			AnimControl.ImageBuf = (unsigned char *)SysMemPage.Get_Offset();
 		}
-		#endif
-		#endif
+#endif
+#endif
 
 		if (!Debug_Quiet && Get_Digi_Handle() != -1) {
 			AnimControl.OptionFlags |= VQAOPTF_AUDIO;
@@ -2947,34 +3121,34 @@ void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate
 
 			if (VQA_Open(vqa, fullname, &AnimControl) == 0) {
 				Brokeout = false;
-				#ifdef WIN32
-				//Suspend_Audio_Thread();
-				#ifdef MOVIE640
+#ifdef WIN32
+    //Suspend_Audio_Thread();
+#ifdef MOVIE640
 				if(!IsVQ640) {
 					Load_Interpolated_Palettes(palname);
 				}
-				#else
+#else
 				Load_Interpolated_Palettes(palname);
-				#endif
+#endif
 				//Set_Palette(BlackPalette);
 				SysMemPage.Clear();
 				InMovie = true;
-				#endif	//WIN32
+#endif	//WIN32
 				VQA_Play(vqa, VQAMODE_RUN);
 				VQA_Close(vqa);
-				#ifdef WIN32
+#ifdef WIN32
 				//Resume_Audio_Thread();
 				InMovie = FALSE;
-				#ifdef MOVIE640
+#ifdef MOVIE640
 				if(!IsVQ640) {
 					Free_Interpolated_Palettes();
 				}
-				#else
+#else
 				Free_Interpolated_Palettes();
-				#endif
+#endif
 				IsVQ640 = false;
 				Set_Primary_Buffer_Format();
-				#endif	//WIN32
+#endif	//WIN32
 
 				/*
 				**	Any movie that ends prematurely must have the screen
@@ -2986,19 +3160,19 @@ void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate
 					Brokeout = false;
 				}
 			} else {
-				#ifndef NDEBUG
+#ifndef NDEBUG
 				bool error = true;
 				assert(error);
-				#endif
+#endif
 			}
 
 			VQA_Free(vqa);
 		} else {
 			assert(vqa != NULL);
 		}
-		#ifdef CHEAT_KEYS
-		//Mono_Printf("d");
-		#endif	//CHEAT_KEYS
+#ifdef CHEAT_KEYS
+    //Mono_Printf("d");
+#endif	//CHEAT_KEYS
 		/*
 		**	Presume that the screen is left in a garbage state as well as the palette
 		**	being in an unknown condition. Recover from this by clearing the screen and
@@ -3019,13 +3193,15 @@ void Play_Movie(char const * name, ThemeType theme, bool clrscrn, bool immediate
 
 void Play_Movie(VQType name, ThemeType theme, bool clrscrn, bool immediate)
 {
-	if (name != VQ_NONE) {
-		if (name == VQ_REDINTRO) {
-			IsVQ640 = true;
-		}
-		Play_Movie(VQName[name], theme, clrscrn, immediate);
-		IsVQ640 = false;
-	}
+    if (name != VQ_NONE)
+    {
+        if (name == VQ_REDINTRO)
+        {
+            IsVQ640 = true;
+        }
+        Play_Movie(VQName[name], theme, clrscrn, immediate);
+        IsVQ640 = false;
+    }
 }
 
 
@@ -3049,13 +3225,13 @@ bool PlayMpegMovie(const char* name)
 	
 	if (!file.Is_Available())
 		{
-		#if(1)
+#if(1)
 		VisiblePage.Clear();
 		GamePalette.Set();
 		Show_Mouse();
 		sprintf(path, "Couldn't find %s\n", filename);
 		WWMessageBox().Process(path);
-		#endif
+#endif
 		return false;
 		}
 
@@ -3066,7 +3242,7 @@ bool PlayMpegMovie(const char* name)
 	// Release primary surface
 	VisiblePage.Un_Init();
 
-	#ifdef MCIMPEG
+#ifdef MCIMPEG
 	if (MciMovie && MpgSettings && (MpgSettings->GetDeviceName() != NULL))
 		{
 		DirectDrawObject->SetCooperativeLevel(MainWindow, DDSCL_NORMAL);
@@ -3083,7 +3259,7 @@ bool PlayMpegMovie(const char* name)
 		DirectDrawObject->SetCooperativeLevel(MainWindow, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
 		}
 	else
-	#endif
+#endif
 		{
 		DDSURFACEDESC ddsd;
 		IDirectDrawSurface* primary = NULL;
@@ -3224,44 +3400,46 @@ MPG_RESPONSE far __stdcall MpegCallback(MPG_CMD cmd, LPVOID data, LPVOID user)
  *=============================================================================================*/
 void Unselect_All(void)
 {
-	//while (CurrentObject.Count()) {
-	//	CurrentObject[0]->Unselect();
-	//}
+    //while (CurrentObject.Count()) {
+    //	CurrentObject[0]->Unselect();
+    //}
 
-	//Added some error handling incase there was an issue removing the object - JAS 6/28/2019
-	while (CurrentObject.Count()) {
+    //Added some error handling incase there was an issue removing the object - JAS 6/28/2019
+    while (CurrentObject.Count())
+    {
+        int count_before = CurrentObject.Count();
+        CurrentObject[0]->Unselect();
 
-		int count_before = CurrentObject.Count();
-		CurrentObject[0]->Unselect();
-
-		if (count_before <= CurrentObject.Count()) {
-			GlyphX_Debug_Print("Unselect_All failed to remove an object");
-			CurrentObject.Delete(CurrentObject[0]);
-		}
-	}
-	//End of change - JAS 6/28/2019
-
+        if (count_before <= CurrentObject.Count())
+        {
+            GlyphX_Debug_Print("Unselect_All failed to remove an object");
+            CurrentObject.Delete(CurrentObject[0]);
+        }
+    }
+    //End of change - JAS 6/28/2019
 }
 
 
 void Unselect_All_Except(ObjectClass* object)
 {
-	int index = 0;
-	while (index < CurrentObject.Count()) {
+    int index = 0;
+    while (index < CurrentObject.Count())
+    {
+        if (CurrentObject[index] == object)
+        {
+            index++;
+            continue;
+        }
 
-		if (CurrentObject[index] == object) {
-			index++;
-			continue;
-		}
+        int count_before = CurrentObject.Count();
+        CurrentObject[index]->Unselect();
 
-		int count_before = CurrentObject.Count();
-		CurrentObject[index]->Unselect();
-
-		if (count_before <= CurrentObject.Count()) {
-			GlyphX_Debug_Print("Unselect_All failed to remove an object");
-			CurrentObject.Delete(CurrentObject[index]);
-		}
-	}
+        if (count_before <= CurrentObject.Count())
+        {
+            GlyphX_Debug_Print("Unselect_All failed to remove an object");
+            CurrentObject.Delete(CurrentObject[index]);
+        }
+    }
 }
 
 
@@ -3284,14 +3462,14 @@ void Unselect_All_Except(ObjectClass* object)
  * HISTORY:                                                                                    *
  *   01/19/1995 JLB : Created.                                                                 *
  *=============================================================================================*/
-char const * Fading_Table_Name(char const * base, TheaterType theater)
+char const* Fading_Table_Name(char const* base, TheaterType theater)
 {
-	static char _buffer[_MAX_FNAME+_MAX_EXT];
-	char root[_MAX_FNAME];
+    static char _buffer[_MAX_FNAME + _MAX_EXT];
+    char root[_MAX_FNAME];
 
-	sprintf(root, "%1.1s%s", Theaters[theater].Root, base);
-	_makepath(_buffer, NULL, NULL, root, ".MRF");
-	return(_buffer);
+    sprintf(root, "%1.1s%s", Theaters[theater].Root, base);
+    _makepath(_buffer, NULL, NULL, root, ".MRF");
+    return (_buffer);
 }
 
 
@@ -3307,20 +3485,20 @@ char const * Fading_Table_Name(char const * base, TheaterType theater)
  *   04/12/1995 PWG : Created.                                                                 *
  *   05/10/1995 JLB : Handles a null shapefile pointer.                                        *
  *=============================================================================================*/
-void const * Get_Radar_Icon(void const * shapefile, int shapenum, int frames, int zoomfactor)
+void const* Get_Radar_Icon(void const* shapefile, int shapenum, int frames, int zoomfactor)
 {
-	static int _offx[]={	0, 0,  -1,  1, 0, -1, 1, -1, 1};
-	static int _offy[]={	0, 0,  -1,  1, 0, -1, 1, -1, 1};
-	int lp,framelp;
-	char pixel;
+    static int _offx[] = {0, 0, -1, 1, 0, -1, 1, -1, 1};
+    static int _offy[] = {0, 0, -1, 1, 0, -1, 1, -1, 1};
+    int lp, framelp;
+    char pixel;
 
-	char * retval = NULL;
-	char * buffer = NULL;
+    char* retval = NULL;
+    char* buffer = NULL;
 
-	/*
-	**	If there is no shape file, then there can be no radar icon imagery.
-	*/
-	if (!shapefile) return(NULL);
+    /*
+    **	If there is no shape file, then there can be no radar icon imagery.
+    */
+    if (!shapefile) return (NULL);
 
 #if (0)
 	CCPalette.Set();
@@ -3328,73 +3506,82 @@ void const * Get_Radar_Icon(void const * shapefile, int shapenum, int frames, in
 	CC_Draw_Shape(shapefile, shapenum, 64, 64, WINDOW_MAIN, SHAPE_WIN_REL);
 #endif
 
-	/*
-	** Get the pixel width and height of the frame we built.  This will
-	** be used to extract icons and build pixels.
-	*/
-	int pixel_width  = Get_Build_Frame_Width( shapefile );
-	int pixel_height = Get_Build_Frame_Height( shapefile );
+    /*
+    ** Get the pixel width and height of the frame we built.  This will
+    ** be used to extract icons and build pixels.
+    */
+    int pixel_width = Get_Build_Frame_Width(shapefile);
+    int pixel_height = Get_Build_Frame_Height(shapefile);
 
-	/*
-	** Find the width and height in icons, adjust these by half an
-	** icon because the artists may be sloppy and miss the edge of an
-	** icon one way or the other.
-	*/
-	int icon_width	 = (pixel_width + 12) / 24;
-	int icon_height = (pixel_height + 12) / 24;
+    /*
+    ** Find the width and height in icons, adjust these by half an
+    ** icon because the artists may be sloppy and miss the edge of an
+    ** icon one way or the other.
+    */
+    int icon_width = (pixel_width + 12) / 24;
+    int icon_height = (pixel_height + 12) / 24;
 
-	/*
-	** If we have been told to build as many frames as possible, then
-	** find out how many frames there are to build.
-	*/
-	if (frames == -1) frames = Get_Build_Frame_Count( shapefile );
+    /*
+    ** If we have been told to build as many frames as possible, then
+    ** find out how many frames there are to build.
+    */
+    if (frames == -1) frames = Get_Build_Frame_Count(shapefile);
 
-	/*
-	** Allocate a position to store our icons.  If the alloc fails then
-	** we don't add these icons to the set.
-	**/
-	buffer = new char[(icon_width * icon_height * 9 * frames)+2];
-	if (!buffer) return(NULL);
+    /*
+    ** Allocate a position to store our icons.  If the alloc fails then
+    ** we don't add these icons to the set.
+    **/
+    buffer = new char[(icon_width * icon_height * 9 * frames) + 2];
+    if (!buffer) return (NULL);
 
-	/*
-	** Save off the return value so that we can return it to the calling
-	** function.
-	*/
-	retval	 = (char *)buffer;
-	*buffer++ = (char)icon_width;
-	*buffer++ = (char)icon_height;
-	int val = 24/zoomfactor;
+    /*
+    ** Save off the return value so that we can return it to the calling
+    ** function.
+    */
+    retval = (char*)buffer;
+    *buffer++ = (char)icon_width;
+    *buffer++ = (char)icon_height;
+    int val = 24 / zoomfactor;
 
-	for (framelp = 0; framelp < frames; framelp ++) {
-		/*
-		** Build the current frame.  If the frame can not be built then we
-		** just need to skip past this set of icons and try to build the
-		** next frame.
-		*/
+    for (framelp = 0; framelp < frames; framelp++)
+    {
+        /*
+        ** Build the current frame.  If the frame can not be built then we
+        ** just need to skip past this set of icons and try to build the
+        ** next frame.
+        */
 #ifdef WIN32
-		void * ptr;
-		if ((ptr = (void *)(Build_Frame(shapefile, shapenum + framelp, SysMemPage.Get_Buffer()))) != NULL) {
-			ptr = Get_Shape_Header_Data(ptr);
+        void* ptr;
+        if ((ptr = (void*)(Build_Frame(shapefile, shapenum + framelp, SysMemPage.Get_Buffer()))) != NULL)
+        {
+            ptr = Get_Shape_Header_Data(ptr);
 #else	//WIN#@
 		if (Build_Frame(shapefile, shapenum + framelp, HidPage.Get_Buffer()) <= (unsigned long)HidPage.Get_Size() ) {
 #endif	//WIN32
 
-			/*
-			** Loop through the icon width and the icon height building icons
-			** into the buffer pointer.  When the getx or gety falls outside of
-			** the width and height of the shape, just insert transparent pixels.
-			*/
-			for (int icony = 0; icony < icon_height; icony ++) {
-				for (int iconx = 0; iconx < icon_width; iconx ++) {
+            /*
+            ** Loop through the icon width and the icon height building icons
+            ** into the buffer pointer.  When the getx or gety falls outside of
+            ** the width and height of the shape, just insert transparent pixels.
+            */
+            for (int icony = 0; icony < icon_height; icony++)
+            {
+                for (int iconx = 0; iconx < icon_width; iconx++)
+                {
 #ifdef WIN32
 
-					for (int y = 0; y < zoomfactor; y++) {
-						for (int x = 0; x < zoomfactor; x++) {
-							int getx = (iconx * 24) + (x * val) + (zoomfactor / 2);
-							int gety = (icony * 24) + (y * val) + (zoomfactor / 2);
-							if ((getx < pixel_width) && (gety < pixel_height)) {
-								for (lp = 0; lp < 9; lp ++) {
-									pixel	= *(char *)((char *)ptr + ((gety - _offy[lp]) * pixel_width) + getx-_offx[lp]);
+                    for (int y = 0; y < zoomfactor; y++)
+                    {
+                        for (int x = 0; x < zoomfactor; x++)
+                        {
+                            int getx = (iconx * 24) + (x * val) + (zoomfactor / 2);
+                            int gety = (icony * 24) + (y * val) + (zoomfactor / 2);
+                            if ((getx < pixel_width) && (gety < pixel_height))
+                            {
+                                for (lp = 0; lp < 9; lp++)
+                                {
+                                    pixel = *(char*)((char*)ptr + ((gety - _offy[lp]) * pixel_width) + getx - _offx[
+                                        lp]);
 
 #else	//WIN32
 					for (int y = 0; y < 3; y++) {
@@ -3405,64 +3592,81 @@ void const * Get_Radar_Icon(void const * shapefile, int shapenum, int frames, in
 								for (lp = 0; lp < 9; lp ++) {
 									pixel	= *(char *)((char *)HidPage.Get_Buffer(), ((gety - _offy[lp]) * pixel_width) + getx-_offx[lp]);
 #endif	//WIN32
-									if (pixel == LTGREEN) pixel = 0;
-									if (pixel) {
-										break;
-									}
-								}
-								*buffer++ = pixel;
-							} else {
-								*buffer++ = 0;
-							}
-						}
-					}
-				}
-			}
-		} else {
-			buffer += icon_width * icon_height * 9;
-		}
-	}
-	return(retval);
+                                    if (pixel == LTGREEN) pixel = 0;
+                                    if (pixel)
+                                    {
+                                        break;
+                                    }
+                                }
+                                *buffer++ = pixel;
+                            }
+                            else
+                            {
+                                *buffer++ = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            buffer += icon_width * icon_height * 9;
+        }
+    }
+    return (retval);
 }
 
 
-extern void DLL_Draw_Intercept(int shape_number, int x, int y, int width, int height, int flags, const ObjectClass *object, DirType rotation, long scale, const char *shape_file_name, char override_owner);
+extern void DLL_Draw_Intercept(int shape_number, int x, int y, int width, int height, int flags,
+                               const ObjectClass* object, DirType rotation, long scale, const char* shape_file_name,
+                               char override_owner);
 extern void DLL_Draw_Pip_Intercept(const ObjectClass* object, int pip);
-void CC_Draw_Shape(void const * shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags, void const * fadingdata, void const * ghostdata, DirType rotation);
+void CC_Draw_Shape(void const* shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags,
+                   void const* fadingdata, void const* ghostdata, DirType rotation);
 
-void CC_Draw_Shape(const ObjectClass *object, void const * shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags, void const * fadingdata, void const * ghostdata, DirType rotation, long virtualscale, int width, int height)
+void CC_Draw_Shape(const ObjectClass* object, void const* shapefile, int shapenum, int x, int y,
+                   WindowNumberType window, ShapeFlags_Type flags, void const* fadingdata, void const* ghostdata,
+                   DirType rotation, long virtualscale, int width, int height)
 {
-	if (window == WINDOW_VIRTUAL) {
-		if (width == 0) width = Get_Build_Frame_Width(shapefile);
-		if (height == 0) height = Get_Build_Frame_Height(shapefile);
-		DLL_Draw_Intercept(shapenum, x, y, width, height, (int)flags, object, rotation, virtualscale, NULL, HOUSE_NONE);
-		return;
-	}
+    if (window == WINDOW_VIRTUAL)
+    {
+        if (width == 0) width = Get_Build_Frame_Width(shapefile);
+        if (height == 0) height = Get_Build_Frame_Height(shapefile);
+        DLL_Draw_Intercept(shapenum, x, y, width, height, (int)flags, object, rotation, virtualscale, NULL, HOUSE_NONE);
+        return;
+    }
 
-	CC_Draw_Shape(shapefile, shapenum, x, y, window, flags, fadingdata, ghostdata, rotation);
+    CC_Draw_Shape(shapefile, shapenum, x, y, window, flags, fadingdata, ghostdata, rotation);
 }
 
-void CC_Draw_Shape(const ObjectClass *object, const char *shape_file_name, void const * shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags, void const * fadingdata, void const * ghostdata, DirType rotation, long virtualscale, char override_owner)
+void CC_Draw_Shape(const ObjectClass* object, const char* shape_file_name, void const* shapefile, int shapenum, int x,
+                   int y, WindowNumberType window, ShapeFlags_Type flags, void const* fadingdata, void const* ghostdata,
+                   DirType rotation, long virtualscale, char override_owner)
 {
-	if (window == WINDOW_VIRTUAL) {
-		int width = Get_Build_Frame_Width(shapefile);
-		int height = Get_Build_Frame_Height(shapefile);
-		DLL_Draw_Intercept(shapenum, x, y, width, height, (int)flags, object, rotation, virtualscale, shape_file_name, override_owner);
-		return;
-	}
+    if (window == WINDOW_VIRTUAL)
+    {
+        int width = Get_Build_Frame_Width(shapefile);
+        int height = Get_Build_Frame_Height(shapefile);
+        DLL_Draw_Intercept(shapenum, x, y, width, height, (int)flags, object, rotation, virtualscale, shape_file_name,
+                           override_owner);
+        return;
+    }
 
-	CC_Draw_Shape(shapefile, shapenum, x, y, window, flags, fadingdata, ghostdata, rotation);
+    CC_Draw_Shape(shapefile, shapenum, x, y, window, flags, fadingdata, ghostdata, rotation);
 }
 
 
-void CC_Draw_Pip(const ObjectClass *object, void const * shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags, void const * fadingdata, void const * ghostdata, DirType rotation)
+void CC_Draw_Pip(const ObjectClass* object, void const* shapefile, int shapenum, int x, int y, WindowNumberType window,
+                 ShapeFlags_Type flags, void const* fadingdata, void const* ghostdata, DirType rotation)
 {
-	if (window == WINDOW_VIRTUAL) {
-		DLL_Draw_Pip_Intercept(object, shapenum);
-		return;
-	}
+    if (window == WINDOW_VIRTUAL)
+    {
+        DLL_Draw_Pip_Intercept(object, shapenum);
+        return;
+    }
 
-	CC_Draw_Shape(shapefile, shapenum, x, y, window, flags, fadingdata, ghostdata, rotation);
+    CC_Draw_Shape(shapefile, shapenum, x, y, window, flags, fadingdata, ghostdata, rotation);
 }
 
 
@@ -3502,34 +3706,38 @@ void CC_Draw_Pip(const ObjectClass *object, void const * shapefile, int shapenum
  * HISTORY:                                                                                    *
  *   02/21/1995 JLB : Created.                                                                 *
  *=============================================================================================*/
-void CC_Draw_Shape(void const * shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags, void const * fadingdata, void const * ghostdata, DirType rotation)
+void CC_Draw_Shape(void const* shapefile, int shapenum, int x, int y, WindowNumberType window, ShapeFlags_Type flags,
+                   void const* fadingdata, void const* ghostdata, DirType rotation)
 {
-	int predoffset;
+    int predoffset;
 #ifdef WIN32
-	unsigned	long	shape_pointer;
+    unsigned long shape_pointer;
 #endif	//WIN32
 
 
-	/*
-	** Special kludge for E3 to prevent crashes
-	*/
-	if ((flags & SHAPE_GHOST) && (!ghostdata)) {
-		ghostdata = DisplayClass::SpecialGhost;
-	}
-	if ((flags & SHAPE_FADING) && (!fadingdata)) {
-		fadingdata = DisplayClass::FadingShade;
-	}
+    /*
+    ** Special kludge for E3 to prevent crashes
+    */
+    if ((flags & SHAPE_GHOST) && (!ghostdata))
+    {
+        ghostdata = DisplayClass::SpecialGhost;
+    }
+    if ((flags & SHAPE_FADING) && (!fadingdata))
+    {
+        fadingdata = DisplayClass::FadingShade;
+    }
 
-	static unsigned char * _xbuffer = 0;
+    static unsigned char* _xbuffer = 0;
 
-	if (!_xbuffer) {
-		_xbuffer = new unsigned char[SHAPE_BUFFER_SIZE];
-	}
+    if (!_xbuffer)
+    {
+        _xbuffer = new unsigned char[SHAPE_BUFFER_SIZE];
+    }
 
-	if (shapefile != NULL && shapenum != -1) {
-
-		int width = Get_Build_Frame_Width(shapefile);
-		int height = Get_Build_Frame_Height(shapefile);
+    if (shapefile != NULL && shapenum != -1)
+    {
+        int width = Get_Build_Frame_Width(shapefile);
+        int height = Get_Build_Frame_Height(shapefile);
 
 #ifdef NEVER
 		/*
@@ -3551,17 +3759,18 @@ void CC_Draw_Shape(void const * shapefile, int shapenum, int x, int y, WindowNum
 
 
 #ifdef WIN32
-		/*
-		** In WIn95, build shape returns a pointer to the shape not its size
-		*/
-		shape_pointer = Build_Frame(shapefile, shapenum, _ShapeBuffer);
-		if (shape_pointer) {
-			GraphicViewPortClass draw_window(LogicPage->Get_Graphic_Buffer(),
-														WindowList[window][WINDOWX] + LogicPage->Get_XPos(),
-														WindowList[window][WINDOWY] + LogicPage->Get_YPos(),
-														WindowList[window][WINDOWWIDTH],
-														WindowList[window][WINDOWHEIGHT]);
-			unsigned char * buffer = (unsigned char *) shape_pointer;	//Get_Shape_Header_Data((void*)shape_pointer);
+        /*
+        ** In WIn95, build shape returns a pointer to the shape not its size
+        */
+        shape_pointer = Build_Frame(shapefile, shapenum, _ShapeBuffer);
+        if (shape_pointer)
+        {
+            GraphicViewPortClass draw_window(LogicPage->Get_Graphic_Buffer(),
+                                             WindowList[window][WINDOWX] + LogicPage->Get_XPos(),
+                                             WindowList[window][WINDOWY] + LogicPage->Get_YPos(),
+                                             WindowList[window][WINDOWWIDTH],
+                                             WindowList[window][WINDOWHEIGHT]);
+            unsigned char* buffer = (unsigned char*)shape_pointer; //Get_Shape_Header_Data((void*)shape_pointer);
 
 #else	//WIN32
 		if ( Build_Frame(shapefile, shapenum, _ShapeBuffer ) <= (unsigned long)_ShapeBufferSize) {
@@ -3573,21 +3782,22 @@ void CC_Draw_Shape(void const * shapefile, int shapenum, int x, int y, WindowNum
 			unsigned char * buffer = (unsigned char *)_ShapeBuffer;
 #endif	//WIN32
 
-			UseOldShapeDraw = false;
-			/*
-			**	Rotation handler.
-			*/
-			if (rotation != DIR_N) {
-
-				/*
-				** Get the raw shape data without the new header and flag to use the old shape drawing
-				*/
-				UseOldShapeDraw = true;
+            UseOldShapeDraw = false;
+            /*
+            **	Rotation handler.
+            */
+            if (rotation != DIR_N)
+            {
+                /*
+                ** Get the raw shape data without the new header and flag to use the old shape drawing
+                */
+                UseOldShapeDraw = true;
 #ifdef WIN32
-				buffer = (unsigned char *) Get_Shape_Header_Data((void*)shape_pointer);
+                buffer = (unsigned char*)Get_Shape_Header_Data((void*)shape_pointer);
 #endif
 
-				if (Debug_Rotate) {
+                if (Debug_Rotate)
+                {
 #if (0)//PG
 					GraphicBufferClass src(width, height, buffer);
 					width *= 2;
@@ -3597,53 +3807,70 @@ void CC_Draw_Shape(void const * shapefile, int shapenum, int x, int y, WindowNum
 					Rotate_Bitmap(&src, &dst, rotation);
 					buffer = _xbuffer;
 #endif
-				} else {
+                }
+                else
+                {
+                    BitmapClass bm(width, height, buffer);
+                    width *= 2;
+                    height *= 2;
+                    memset(_xbuffer, '\0', SHAPE_BUFFER_SIZE);
+                    GraphicBufferClass gb(width, height, _xbuffer);
+                    TPoint2D pt(width / 2, height / 2);
 
-					BitmapClass bm(width, height, buffer);
-					width *= 2;
-					height *= 2;
-					memset(_xbuffer, '\0', SHAPE_BUFFER_SIZE);
-					GraphicBufferClass gb(width, height, _xbuffer);
-					TPoint2D pt(width/2, height/2);
+                    gb.Scale_Rotate(bm, pt, 0x0100, (256 - (rotation - 64)));
+                    buffer = _xbuffer;
+                }
+            }
 
-					gb.Scale_Rotate(bm, pt, 0x0100, (256-(rotation-64)));
-					buffer = _xbuffer;
-				}
-			}
+            /*
+            **	Special shadow drawing code (used for aircraft and bullets).
+            */
+            if ((flags & (SHAPE_FADING | SHAPE_PREDATOR)) == (SHAPE_FADING | SHAPE_PREDATOR))
+            {
+                flags = flags & ~(SHAPE_FADING | SHAPE_PREDATOR);
+                flags = flags | SHAPE_GHOST;
+                ghostdata = DisplayClass::SpecialGhost;
+            }
 
-			/*
-			**	Special shadow drawing code (used for aircraft and bullets).
-			*/
-			if ((flags & (SHAPE_FADING|SHAPE_PREDATOR)) == (SHAPE_FADING|SHAPE_PREDATOR)) {
-				flags = flags & ~(SHAPE_FADING|SHAPE_PREDATOR);
-				flags = flags | SHAPE_GHOST;
-				ghostdata = DisplayClass::SpecialGhost;
-			}
+            predoffset = Frame;
 
-			predoffset = Frame;
+            if (x > (WindowList[window][WINDOWWIDTH] << 2))
+            {
+                predoffset = -predoffset;
+            }
 
-			if (x > ( WindowList[window][WINDOWWIDTH] << 2)) {
-				predoffset = -predoffset;
-			}
-
-			if (draw_window.Lock()) {
-				if ((flags & (SHAPE_GHOST|SHAPE_FADING)) == (SHAPE_GHOST|SHAPE_FADING)) {
-					Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS, ghostdata, fadingdata, 1, predoffset);
-				} else {
-					if (flags & SHAPE_FADING) {
-						Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS, fadingdata, 1, predoffset);
-					} else {
-						if (flags & SHAPE_PREDATOR) {
-							Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS, predoffset);
-						} else {
-							Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS, ghostdata, predoffset);
-						}
-					}
-				}
-				draw_window.Unlock();
-			}
-		}
-	}
+            if (draw_window.Lock())
+            {
+                if ((flags & (SHAPE_GHOST | SHAPE_FADING)) == (SHAPE_GHOST | SHAPE_FADING))
+                {
+                    Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS, ghostdata,
+                                         fadingdata, 1, predoffset);
+                }
+                else
+                {
+                    if (flags & SHAPE_FADING)
+                    {
+                        Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS, fadingdata,
+                                             1, predoffset);
+                    }
+                    else
+                    {
+                        if (flags & SHAPE_PREDATOR)
+                        {
+                            Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS,
+                                                 predoffset);
+                        }
+                        else
+                        {
+                            Buffer_Frame_To_Page(x, y, width, height, buffer, draw_window, flags | SHAPE_TRANS,
+                                                 ghostdata, predoffset);
+                        }
+                    }
+                }
+                draw_window.Unlock();
+            }
+        }
+    }
 }
 
 
@@ -3668,97 +3895,110 @@ void CC_Draw_Shape(void const * shapefile, int shapenum, int x, int y, WindowNum
  * HISTORY:                                                                                    *
  *   07/22/1996 JLB : Created.                                                                 *
  *=============================================================================================*/
-Rect const Shape_Dimensions(void const * shapedata, int shapenum)
+Rect const Shape_Dimensions(void const* shapedata, int shapenum)
 {
-	Rect rect;
+    Rect rect;
 
-	if (shapedata == NULL || shapenum < 0 || shapenum > Get_Build_Frame_Count(shapedata)) {
-		return(rect);
-	}
+    if (shapedata == NULL || shapenum < 0 || shapenum > Get_Build_Frame_Count(shapedata))
+    {
+        return (rect);
+    }
 
-	char * shape;
+    char* shape;
 #ifdef WIN32
-	void * sh = (void *)Build_Frame(shapedata, shapenum, _ShapeBuffer);
-	if (sh == NULL) return(rect);
-//	shape = (char *)sh;
-	shape = (char *)Get_Shape_Header_Data(sh);
+    void* sh = (void*)Build_Frame(shapedata, shapenum, _ShapeBuffer);
+    if (sh == NULL) return (rect);
+    //	shape = (char *)sh;
+    shape = (char*)Get_Shape_Header_Data(sh);
 #else
 	Build_Frame(shapedata, shapenum, _ShapeBuffer);
 	shape = (char *)_ShapeBuffer;
 #endif
 
-	int width = Get_Build_Frame_Width(shapedata);
-	int height = Get_Build_Frame_Height(shapedata);
+    int width = Get_Build_Frame_Width(shapedata);
+    int height = Get_Build_Frame_Height(shapedata);
 
-	rect.X = 0;
-	rect.Y = 0;
-	int xlimit = width-1;
-	int ylimit = height-1;
+    rect.X = 0;
+    rect.Y = 0;
+    int xlimit = width - 1;
+    int ylimit = height - 1;
 
-	/*
-	**	Find top edge of the shape.
-	*/
-	for (int y = 0; y <= ylimit; y++) {
-		for (int x = 0; x <= xlimit; x++) {
-			if (shape[y*width + x] != 0) {
-				rect.Y = y;
-				rect.X = x;
-				y = ylimit+1;
-				break;
-			}
-		}
-	}
+    /*
+    **	Find top edge of the shape.
+    */
+    for (int y = 0; y <= ylimit; y++)
+    {
+        for (int x = 0; x <= xlimit; x++)
+        {
+            if (shape[y * width + x] != 0)
+            {
+                rect.Y = y;
+                rect.X = x;
+                y = ylimit + 1;
+                break;
+            }
+        }
+    }
 
-	/*
-	**	Find bottom edge of the shape.
-	*/
-	for (int y = ylimit; y >= rect.Y; y--) {
-		for (int x = xlimit; x >= 0; x--) {
-			if (shape[y*width + x] != 0) {
-				rect.Height = (y-rect.Y)+1;
-				xlimit = x;
-				y = rect.Y-1;
-				break;
-			}
-		}
-	}
+    /*
+    **	Find bottom edge of the shape.
+    */
+    for (int y = ylimit; y >= rect.Y; y--)
+    {
+        for (int x = xlimit; x >= 0; x--)
+        {
+            if (shape[y * width + x] != 0)
+            {
+                rect.Height = (y - rect.Y) + 1;
+                xlimit = x;
+                y = rect.Y - 1;
+                break;
+            }
+        }
+    }
 
-	/*
-	**	Find left edge of the shape.
-	*/
-	for (int x = 0; x < rect.X; x++) {
-		for (int y = rect.Y; y < rect.Y+rect.Height; y++) {
-			if (shape[y*width + x] != 0) {
-				rect.X = x;
-				x = rect.X;
-				break;
-			}
-		}
-	}
+    /*
+    **	Find left edge of the shape.
+    */
+    for (int x = 0; x < rect.X; x++)
+    {
+        for (int y = rect.Y; y < rect.Y + rect.Height; y++)
+        {
+            if (shape[y * width + x] != 0)
+            {
+                rect.X = x;
+                x = rect.X;
+                break;
+            }
+        }
+    }
 
-	/*
-	**	Find the right edge of the shape.
-	*/
-	for (int x = width-1; x >= xlimit; x--) {
-		for (int y = rect.Y; y < rect.Y+rect.Height; y++) {
-			if (shape[y*width + x] != 0) {
-				rect.Width = (x-rect.X)+1;
-				x = xlimit-1;
-				break;
-			}
-		}
-	}
+    /*
+    **	Find the right edge of the shape.
+    */
+    for (int x = width - 1; x >= xlimit; x--)
+    {
+        for (int y = rect.Y; y < rect.Y + rect.Height; y++)
+        {
+            if (shape[y * width + x] != 0)
+            {
+                rect.Width = (x - rect.X) + 1;
+                x = xlimit - 1;
+                break;
+            }
+        }
+    }
 
-	/*
-	**	Normalize the rectangle around the center of the shape.
-	*/
-	rect.X -= width / 2;
-	rect.Y -= height / 2;
+    /*
+    **	Normalize the rectangle around the center of the shape.
+    */
+    rect.X -= width / 2;
+    rect.Y -= height / 2;
 
-	/*
-	**	Return with the minimum rectangle that encloses the shape.
-	*/
-	return(rect);
+    /*
+    **	Return with the minimum rectangle that encloses the shape.
+    */
+    return (rect);
 }
 
 
@@ -3780,33 +4020,34 @@ Rect const Shape_Dimensions(void const * shapedata, int shapenum)
  * HISTORY:                                                                                    *
  *   05/08/1995 JLB : Created.                                                                 *
  *=============================================================================================*/
-TechnoTypeClass const * Fetch_Techno_Type(RTTIType type, int id)
+TechnoTypeClass const* Fetch_Techno_Type(RTTIType type, int id)
 {
-	switch (type) {
-		case RTTI_UNITTYPE:
-		case RTTI_UNIT:
-			return(&UnitTypeClass::As_Reference(UnitType(id)));
+    switch (type)
+    {
+    case RTTI_UNITTYPE:
+    case RTTI_UNIT:
+        return (&UnitTypeClass::As_Reference(UnitType(id)));
 
-		case RTTI_VESSELTYPE:
-		case RTTI_VESSEL:
-			return(&VesselTypeClass::As_Reference(VesselType(id)));
+    case RTTI_VESSELTYPE:
+    case RTTI_VESSEL:
+        return (&VesselTypeClass::As_Reference(VesselType(id)));
 
-		case RTTI_BUILDINGTYPE:
-		case RTTI_BUILDING:
-			return(&BuildingTypeClass::As_Reference(StructType(id)));
+    case RTTI_BUILDINGTYPE:
+    case RTTI_BUILDING:
+        return (&BuildingTypeClass::As_Reference(StructType(id)));
 
-		case RTTI_INFANTRYTYPE:
-		case RTTI_INFANTRY:
-			return(&InfantryTypeClass::As_Reference(InfantryType(id)));
+    case RTTI_INFANTRYTYPE:
+    case RTTI_INFANTRY:
+        return (&InfantryTypeClass::As_Reference(InfantryType(id)));
 
-		case RTTI_AIRCRAFTTYPE:
-		case RTTI_AIRCRAFT:
-			return(&AircraftTypeClass::As_Reference(AircraftType(id)));
+    case RTTI_AIRCRAFTTYPE:
+    case RTTI_AIRCRAFT:
+        return (&AircraftTypeClass::As_Reference(AircraftType(id)));
 
-		default:
-			break;
-	}
-	return(NULL);
+    default:
+        break;
+    }
+    return (NULL);
 }
 
 
@@ -3828,14 +4069,17 @@ TechnoTypeClass const * Fetch_Techno_Type(RTTIType type, int id)
  *   06/24/1995 JLB : Created.                                                                 *
  *=============================================================================================*/
 #ifdef WIN32
-void VQA_PauseAudio(void) {};
+void VQA_PauseAudio(void)
+{
+};
 void Check_VQ_Palette_Set(void);
 
 extern GraphicBufferClass VQ640;
 extern bool IsVQ640;
-long VQ_Call_Back(unsigned char *, long )
+
+long VQ_Call_Back(unsigned char*, long)
 {
-	return 0;
+    return 0;
 #if (0)//PG
 	int key = 0;
 	if (Keyboard->Check()) {
@@ -3911,223 +4155,268 @@ long VQ_Call_Back(unsigned char *, long )
  *=============================================================================================*/
 void Handle_Team(int team, int action)
 {
-	int index;
+    int index;
 
-	//
-	// Recording support
-	//
-	if (Session.Record) {
-		TeamNumber = (char)team;
-		TeamEvent = (char)action + 1;
-	}
+    //
+    // Recording support
+    //
+    if (Session.Record)
+    {
+        TeamNumber = (char)team;
+        TeamEvent = (char)action + 1;
+    }
 
-	TeamFormDataStruct& team_form_data = TeamFormData[PlayerPtr->Class->House];
+    TeamFormDataStruct& team_form_data = TeamFormData[PlayerPtr->Class->House];
 
-	AllowVoice = true;
-	switch (action) {
+    AllowVoice = true;
+    switch (action)
+    {
+    /*
+    **	Toggle the team selection. If the team is selected, then merely unselect it. If the
+    **	team is not selected, then unselect all others before selecting this team.
+    */
+    case 3:
+    case 0:
 
-		/*
-		**	Toggle the team selection. If the team is selected, then merely unselect it. If the
-		**	team is not selected, then unselect all others before selecting this team.
-		*/
-		case 3:
-		case 0:
+        /*
+        **	If a non team member is currently selected, then deselect all objects
+        **	before selecting this team.
+        */
+        for (index = 0; index < CurrentObject.Count(); index++)
+        {
+            ObjectClass* obj = CurrentObject[index];
+            if (obj->Is_Foot() && ((FootClass*)obj)->Group != team)
+            {
+                Unselect_All();
+                break;
+            }
+        }
+        for (index = 0; index < Vessels.Count(); index++)
+        {
+            VesselClass* obj = Vessels.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        for (index = 0; index < Units.Count(); index++)
+        {
+            UnitClass* obj = Units.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        for (index = 0; index < Infantry.Count(); index++)
+        {
+            InfantryClass* obj = Infantry.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        for (index = 0; index < Aircraft.Count(); index++)
+        {
+            AircraftClass* obj = Aircraft.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
 
-			/*
-			**	If a non team member is currently selected, then deselect all objects
-			**	before selecting this team.
-			*/
-			for (index = 0; index < CurrentObject.Count(); index++) {
-				ObjectClass * obj = CurrentObject[index];
-				if (obj->Is_Foot() && ((FootClass *)obj)->Group != team) {
-					Unselect_All();
-					break;
-				}
-			}
-			for (index = 0; index < Vessels.Count(); index++) {
-				VesselClass * obj = Vessels.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			for (index = 0; index < Units.Count(); index++) {
-				UnitClass * obj = Units.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			for (index = 0; index < Infantry.Count(); index++) {
-				InfantryClass * obj = Infantry.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			for (index = 0; index < Aircraft.Count(); index++) {
-				AircraftClass * obj = Aircraft.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-
-			/*
-			**	Center the map around the team if the ALT key was pressed too.
-			*/
-			if (action == 3) {
-				Map.Center_Map();
+    /*
+    **	Center the map around the team if the ALT key was pressed too.
+    */
+        if (action == 3)
+        {
+            Map.Center_Map();
 #ifdef WIN32
-				Map.Flag_To_Redraw(true);
+            Map.Flag_To_Redraw(true);
 #endif	//WIn32
-			}
-			break;
+        }
+        break;
 
-		/*
-		**	Additive selection of team.
-		*/
-		case 1:
-			for (index = 0; index < Units.Count(); index++) {
-				UnitClass * obj = Units.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			for (index = 0; index < Vessels.Count(); index++) {
-				VesselClass * obj = Vessels.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			for (index = 0; index < Infantry.Count(); index++) {
-				InfantryClass * obj = Infantry.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			for (index = 0; index < Aircraft.Count(); index++) {
-				AircraftClass * obj = Aircraft.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl) {
-					if (!obj->Is_Selected_By_Player()) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
-			break;
+    /*
+    **	Additive selection of team.
+    */
+    case 1:
+        for (index = 0; index < Units.Count(); index++)
+        {
+            UnitClass* obj = Units.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        for (index = 0; index < Vessels.Count(); index++)
+        {
+            VesselClass* obj = Vessels.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        for (index = 0; index < Infantry.Count(); index++)
+        {
+            InfantryClass* obj = Infantry.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        for (index = 0; index < Aircraft.Count(); index++)
+        {
+            AircraftClass* obj = Aircraft.Ptr(index);
+            if (obj && !obj->IsInLimbo && obj->Group == team && obj->House->IsPlayerControl)
+            {
+                if (!obj->Is_Selected_By_Player())
+                {
+                    obj->Select();
+                    AllowVoice = false;
+                }
+            }
+        }
+        break;
 
-		/*
-		**	Create the team.
-		*/
-		case 2: {
-			long minx = 0x7FFFFFFFL, miny = 0x7FFFFFFFL;
-			long maxx = 0, maxy = 0;
-			team_form_data.TeamSpeed[team] = SPEED_WHEEL;
-			team_form_data.TeamMaxSpeed[team] = MPH_LIGHT_SPEED;
-			for (index = 0; index < Units.Count(); index++) {
-				UnitClass * obj = Units.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl) {
-				 	if (obj->Group == team) obj->Group = 0xFF;
-					if (obj->Is_Selected_By_Player()) {
-						obj->Group = team;
-						obj->Mark(MARK_CHANGE);
-						long xc = Cell_X(Coord_Cell(obj->Center_Coord()));
-						long yc = Cell_Y(Coord_Cell(obj->Center_Coord()));
-						if (xc < minx) minx = xc;
-						if (xc > maxx) maxx = xc;
-						if (yc < miny) miny = yc;
-						if (yc > maxy) maxy = yc;
-						if (obj->Class->MaxSpeed < team_form_data.TeamMaxSpeed[team]) {
-							team_form_data.TeamMaxSpeed[team] = obj->Class->MaxSpeed;
-							team_form_data.TeamSpeed[team] = obj->Class->Speed;
-						}
-					}
-				}
-			}
+    /*
+    **	Create the team.
+    */
+    case 2:
+        {
+            long minx = 0x7FFFFFFFL, miny = 0x7FFFFFFFL;
+            long maxx = 0, maxy = 0;
+            team_form_data.TeamSpeed[team] = SPEED_WHEEL;
+            team_form_data.TeamMaxSpeed[team] = MPH_LIGHT_SPEED;
+            for (index = 0; index < Units.Count(); index++)
+            {
+                UnitClass* obj = Units.Ptr(index);
+                if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl)
+                {
+                    if (obj->Group == team) obj->Group = 0xFF;
+                    if (obj->Is_Selected_By_Player())
+                    {
+                        obj->Group = team;
+                        obj->Mark(MARK_CHANGE);
+                        long xc = Cell_X(Coord_Cell(obj->Center_Coord()));
+                        long yc = Cell_Y(Coord_Cell(obj->Center_Coord()));
+                        if (xc < minx) minx = xc;
+                        if (xc > maxx) maxx = xc;
+                        if (yc < miny) miny = yc;
+                        if (yc > maxy) maxy = yc;
+                        if (obj->Class->MaxSpeed < team_form_data.TeamMaxSpeed[team])
+                        {
+                            team_form_data.TeamMaxSpeed[team] = obj->Class->MaxSpeed;
+                            team_form_data.TeamSpeed[team] = obj->Class->Speed;
+                        }
+                    }
+                }
+            }
 
-			for (index = 0; index < Vessels.Count(); index++) {
-				VesselClass * obj = Vessels.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl) {
-				 	if (obj->Group == team) obj->Group = -1;
-					if (obj->Is_Selected_By_Player()) {
-						obj->Group = team;
-						obj->Mark(MARK_CHANGE);
-						long xc = Cell_X(Coord_Cell(obj->Center_Coord()));
-						long yc = Cell_Y(Coord_Cell(obj->Center_Coord()));
-						if (xc < minx) minx = xc;
-						if (xc > maxx) maxx = xc;
-						if (yc < miny) miny = yc;
-						if (yc > maxy) maxy = yc;
-						if (obj->Class->MaxSpeed < team_form_data.TeamMaxSpeed[team]) {
-							team_form_data.TeamMaxSpeed[team] = obj->Class->MaxSpeed;
-							team_form_data.TeamSpeed[team] = obj->Class->Speed;
-						}
-					}
-				}
-			}
+            for (index = 0; index < Vessels.Count(); index++)
+            {
+                VesselClass* obj = Vessels.Ptr(index);
+                if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl)
+                {
+                    if (obj->Group == team) obj->Group = -1;
+                    if (obj->Is_Selected_By_Player())
+                    {
+                        obj->Group = team;
+                        obj->Mark(MARK_CHANGE);
+                        long xc = Cell_X(Coord_Cell(obj->Center_Coord()));
+                        long yc = Cell_Y(Coord_Cell(obj->Center_Coord()));
+                        if (xc < minx) minx = xc;
+                        if (xc > maxx) maxx = xc;
+                        if (yc < miny) miny = yc;
+                        if (yc > maxy) maxy = yc;
+                        if (obj->Class->MaxSpeed < team_form_data.TeamMaxSpeed[team])
+                        {
+                            team_form_data.TeamMaxSpeed[team] = obj->Class->MaxSpeed;
+                            team_form_data.TeamSpeed[team] = obj->Class->Speed;
+                        }
+                    }
+                }
+            }
 
-			for (index = 0; index < Infantry.Count(); index++) {
-				InfantryClass * obj = Infantry.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl) {
-				 	if (obj->Group == team) obj->Group = 0xFF;
-					if (obj->Is_Selected_By_Player()) {
-						obj->Group = team;
-						obj->Mark(MARK_CHANGE);
-						long xc = Cell_X(Coord_Cell(obj->Center_Coord()));
-						long yc = Cell_Y(Coord_Cell(obj->Center_Coord()));
-						if (xc < minx) minx = xc;
-						if (xc > maxx) maxx = xc;
-						if (yc < miny) miny = yc;
-						if (yc > maxy) maxy = yc;
-						if (obj->Class->MaxSpeed < team_form_data.TeamMaxSpeed[team]) {
-							team_form_data.TeamMaxSpeed[team] = obj->Class->MaxSpeed;
-						}
-					}
-				}
-			}
-			for (index = 0; index < Aircraft.Count(); index++) {
-				AircraftClass * obj = Aircraft.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl) {
-				 	if (obj->Group == team) obj->Group = 0xFF;
-					if (obj->Is_Selected_By_Player()) {
-						obj->Group = team;
-						obj->Mark(MARK_CHANGE);
-					}
-				}
-			}
+            for (index = 0; index < Infantry.Count(); index++)
+            {
+                InfantryClass* obj = Infantry.Ptr(index);
+                if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl)
+                {
+                    if (obj->Group == team) obj->Group = 0xFF;
+                    if (obj->Is_Selected_By_Player())
+                    {
+                        obj->Group = team;
+                        obj->Mark(MARK_CHANGE);
+                        long xc = Cell_X(Coord_Cell(obj->Center_Coord()));
+                        long yc = Cell_Y(Coord_Cell(obj->Center_Coord()));
+                        if (xc < minx) minx = xc;
+                        if (xc > maxx) maxx = xc;
+                        if (yc < miny) miny = yc;
+                        if (yc > maxy) maxy = yc;
+                        if (obj->Class->MaxSpeed < team_form_data.TeamMaxSpeed[team])
+                        {
+                            team_form_data.TeamMaxSpeed[team] = obj->Class->MaxSpeed;
+                        }
+                    }
+                }
+            }
+            for (index = 0; index < Aircraft.Count(); index++)
+            {
+                AircraftClass* obj = Aircraft.Ptr(index);
+                if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl)
+                {
+                    if (obj->Group == team) obj->Group = 0xFF;
+                    if (obj->Is_Selected_By_Player())
+                    {
+                        obj->Group = team;
+                        obj->Mark(MARK_CHANGE);
+                    }
+                }
+            }
 
-			for (index = 0; index < Units.Count(); index++) {
-				UnitClass * obj = Units.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl &&
-				 	(obj->Group == team) && (obj->Is_Selected_By_Player()) ) {
-
-					/*
-					** When a team is first created, they're created without a
-					** formation offset, so they will not be created in
-					** formation.  Later, if they're assigned a formation, the
-					** XFormOffset & YFormOffset numbers will change to valid
-					** offsets, and they'll be formationed.
-					*/
+            for (index = 0; index < Units.Count(); index++)
+            {
+                UnitClass* obj = Units.Ptr(index);
+                if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl &&
+                    (obj->Group == team) && (obj->Is_Selected_By_Player()))
+                {
+                    /*
+                    ** When a team is first created, they're created without a
+                    ** formation offset, so they will not be created in
+                    ** formation.  Later, if they're assigned a formation, the
+                    ** XFormOffset & YFormOffset numbers will change to valid
+                    ** offsets, and they'll be formationed.
+                    */
 #if(1)
-					obj->XFormOffset = obj->YFormOffset = (int)0x80000000;
+                    obj->XFormOffset = obj->YFormOffset = (int)0x80000000;
 #else
 #if(1)
 // Old always-north formation stuff
@@ -4142,17 +4431,20 @@ void Handle_Team(int team, int action)
 						obj->YFormOffset = ::Distance (As_Coord(center), obj->Center_Coord());
 #endif
 #endif
-				}
-			}
+                }
+            }
 
-			for (index = 0; index < Infantry.Count(); index++) {
-				InfantryClass * obj = Infantry.Ptr(index);
-				if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl) {
-				 	if (obj->Group == team) obj->Group = 0xFF;
-					if (obj->Is_Selected_By_Player()) obj->Group = team;
-					if (obj->Group == team  && obj->Is_Selected_By_Player()) {
+            for (index = 0; index < Infantry.Count(); index++)
+            {
+                InfantryClass* obj = Infantry.Ptr(index);
+                if (obj && !obj->IsInLimbo && obj->House->IsPlayerControl)
+                {
+                    if (obj->Group == team) obj->Group = 0xFF;
+                    if (obj->Is_Selected_By_Player()) obj->Group = team;
+                    if (obj->Group == team && obj->Is_Selected_By_Player())
+                    {
 #if(1)
-						obj->XFormOffset = obj->YFormOffset = (int)0x80000000;
+                        obj->XFormOffset = obj->YFormOffset = (int)0x80000000;
 #else
 #if(1)
 // Old always-north formation stuff
@@ -4167,16 +4459,16 @@ void Handle_Team(int team, int action)
 						obj->YFormOffset = ::Distance (As_Coord(center), obj->Center_Coord());
 #endif
 #endif
-					}
-				}
-			}
-			break;
-		}
+                    }
+                }
+            }
+            break;
+        }
 
-		default:
-			break;
-	}
-	AllowVoice = true;
+    default:
+        break;
+    }
+    AllowVoice = true;
 }
 
 
@@ -4200,21 +4492,25 @@ void Handle_Team(int team, int action)
  *=============================================================================================*/
 void Handle_View(int view, int action)
 {
-	if ((unsigned)view < ARRAY_SIZE(Scen.Views)) {
-		if (action == 0) {
-
-			Map.Set_Tactical_Position(Coord_Whole(Cell_Coord(Scen.Views[view] - (MAP_CELL_W * 4 * RESFACTOR) - (5*RESFACTOR))));
+    if ((unsigned)view < ARRAY_SIZE(Scen.Views))
+    {
+        if (action == 0)
+        {
+            Map.Set_Tactical_Position(
+                Coord_Whole(Cell_Coord(Scen.Views[view] - (MAP_CELL_W * 4 * RESFACTOR) - (5 * RESFACTOR))));
 
 #ifdef WIN32
-			/*
-			** Win95 scrolling logic cant handle just jumps in screen position so redraw the lot.
-			*/
-			Map.Flag_To_Redraw (true);
+            /*
+            ** Win95 scrolling logic cant handle just jumps in screen position so redraw the lot.
+            */
+            Map.Flag_To_Redraw(true);
 #endif	//WIN32
-		} else {
-			Scen.Views[view] = Coord_Cell(Map.TacticalCoord) + (MAP_CELL_W*4*RESFACTOR) + (5*RESFACTOR);
-		}
-	}
+        }
+        else
+        {
+            Scen.Views[view] = Coord_Cell(Map.TacticalCoord) + (MAP_CELL_W * 4 * RESFACTOR) + (5 * RESFACTOR);
+        }
+    }
 }
 
 
@@ -4222,16 +4518,16 @@ void Handle_View(int view, int action)
 #define ROR_NOT_READY 21
 #endif
 
-static char * _CD_Volume_Label[] = {
-	"CD1",
-	"CD2",
-	"CD3",
-	"CD4",
-	// Denzil 4/15/98
-	#ifdef DVD
-	"CD1",		//	ajw - Pushes RADVD to position 5, to match enum in Force_CD_Available(). 4 will never be returned here.
-	"RADVD",
-	#endif
+static char* _CD_Volume_Label[] = {
+    "CD1",
+    "CD2",
+    "CD3",
+    "CD4",
+    // Denzil 4/15/98
+#ifdef DVD
+    "CD1", //	ajw - Pushes RADVD to position 5, to match enum in Force_CD_Available(). 4 will never be returned here.
+    "RADVD",
+#endif
 };
 static int _Num_Volumes = ARRAY_SIZE(_CD_Volume_Label);
 
@@ -4258,77 +4554,78 @@ static int _Num_Volumes = ARRAY_SIZE(_CD_Volume_Label);
  *    5/21/96 5:27PM ST : Created                                                              *
  *    01/20/97 V.Grippi added CS support											       *
  *=============================================================================================*/
-int Get_CD_Index (int cd_drive, int timeout)
-	{
-	char		volume_name[128];
-	char		buffer[128];
-	unsigned	filename_length;
-	unsigned	misc_dword;
-	int		count = 0;
+int Get_CD_Index(int cd_drive, int timeout)
+{
+    char volume_name[128];
+    char buffer[128];
+    unsigned filename_length;
+    unsigned misc_dword;
+    int count = 0;
 
-	CountDownTimerClass timer;
+    CountDownTimerClass timer;
 
-	timer.Set(timeout);
+    timer.Set(timeout);
 
-	/*
-	** Get the volume label. If we get a 'not ready' error then retry for the timeout
-	** period.
-	*/
-	for (;;)
-		{
-		sprintf(buffer, "%c:\\", 'A' + cd_drive);
+    /*
+    ** Get the volume label. If we get a 'not ready' error then retry for the timeout
+    ** period.
+    */
+    for (;;)
+    {
+        sprintf(buffer, "%c:\\", 'A' + cd_drive);
 
-		if (GetVolumeInformation ((char const *)buffer, &volume_name[0] ,
-				(unsigned long)sizeof(volume_name), (unsigned long *)NULL ,
-				(unsigned long *)&filename_length, (unsigned long *)&misc_dword,
-				(char *)NULL, (unsigned long)0))
-			{
-			/*
-			** Try opening 'movies.mix' to verify that the CD is really there and is what
-			** it says it is.
-			*/
-			sprintf(buffer, "%c:\\main.mix", 'A' + cd_drive);
+        if (GetVolumeInformation((char const*)buffer, &volume_name[0],
+                                 (unsigned long)sizeof(volume_name), (unsigned long*)NULL,
+                                 (unsigned long*)&filename_length, (unsigned long*)&misc_dword,
+                                 (char*)NULL, (unsigned long)0))
+        {
+            /*
+            ** Try opening 'movies.mix' to verify that the CD is really there and is what
+            ** it says it is.
+            */
+            sprintf(buffer, "%c:\\main.mix", 'A' + cd_drive);
 
-			HANDLE handle = CreateFile(buffer, GENERIC_READ, FILE_SHARE_READ,NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            HANDLE handle = CreateFile(buffer, GENERIC_READ, FILE_SHARE_READ,NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                       NULL);
 
-			if (handle != INVALID_HANDLE_VALUE)
-				{
-				CloseHandle(handle);
+            if (handle != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(handle);
 
-				/*
-				** Match the volume label to the list of known C&C volume labels.
-				*/
-				for (int i = 0 ; i < _Num_Volumes; i++)
-					{
-					if (!stricmp(_CD_Volume_Label[i], volume_name))
-						return(i);
-					}
-				}
-			else
-				{
-				if (!count)
-					count++;
-				else
-					return -1;
-				}
-			}
-		else
-			{
-			/*
-			** Failed to get the volume label on a known CD drive.
-			** If this is a CD changer it may require time to swap the disks so dont return
-			** immediately if the error is ROR_NOT_READY
-			*/
-			if (!timer.Time())
-				return -1;
-				
-			int val = GetLastError();
-			
-			if (val != ROR_NOT_READY)
-				return -1;
-			}	
-		}
-	}
+                /*
+                ** Match the volume label to the list of known C&C volume labels.
+                */
+                for (int i = 0; i < _Num_Volumes; i++)
+                {
+                    if (!stricmp(_CD_Volume_Label[i], volume_name))
+                        return (i);
+                }
+            }
+            else
+            {
+                if (!count)
+                    count++;
+                else
+                    return -1;
+            }
+        }
+        else
+        {
+            /*
+            ** Failed to get the volume label on a known CD drive.
+            ** If this is a CD changer it may require time to swap the disks so dont return
+            ** immediately if the error is ROR_NOT_READY
+            */
+            if (!timer.Time())
+                return -1;
+
+            int val = GetLastError();
+
+            if (val != ROR_NOT_READY)
+                return -1;
+        }
+    }
+}
 #else
 int Get_CD_Index(int cd_drive, int)
 	{
@@ -4429,45 +4726,51 @@ int Get_CD_Index(int cd_drive, int)
 #if (1) //ST - 5/13/2019
 bool Force_CD_Available(int cd)
 {
-	static int _last = -1;
+    static int _last = -1;
 
-	if (_last != cd || cd == ALWAYS_RELOAD_CD) {
-		if (cd != ALWAYS_RELOAD_CD) {
-			_last = cd;
-		}
-		Theme.Stop();
+    if (_last != cd || cd == ALWAYS_RELOAD_CD)
+    {
+        if (cd != ALWAYS_RELOAD_CD)
+        {
+            _last = cd;
+        }
+        Theme.Stop();
 
-		//		if (ConquerMix) delete ConquerMix;
-		if (MoviesMix) {
-			delete MoviesMix;
-			MoviesMix = 0;
-		}
-		if (GeneralMix) {
-			delete GeneralMix;
-			GeneralMix = 0;
-		}
-		if (ScoreMix) {
-			delete ScoreMix;
-			ScoreMix = 0;
-		}
-		if (MainMix) {
-			delete MainMix;
-			MainMix = 0;
-		}
+        //		if (ConquerMix) delete ConquerMix;
+        if (MoviesMix)
+        {
+            delete MoviesMix;
+            MoviesMix = 0;
+        }
+        if (GeneralMix)
+        {
+            delete GeneralMix;
+            GeneralMix = 0;
+        }
+        if (ScoreMix)
+        {
+            delete ScoreMix;
+            ScoreMix = 0;
+        }
+        if (MainMix)
+        {
+            delete MainMix;
+            MainMix = 0;
+        }
 
-		MainMix = new MFCD("MAIN.MIX", &FastKey);
-		assert(MainMix != NULL);
-		//		ConquerMix = new MFCD("CONQUER.MIX", &FastKey);
-		if (CCFileClass("MOVIES1.MIX").Is_Available())
-			MoviesMix = new MFCD("MOVIES1.MIX", &FastKey);
-		else
-			MoviesMix = new MFCD("MOVIES2.MIX", &FastKey);
-		assert(MoviesMix != NULL);
-		GeneralMix = new MFCD("GENERAL.MIX", &FastKey);
-		ScoreMix = new MFCD("SCORES.MIX", &FastKey);
-	}
+        MainMix = new MFCD("MAIN.MIX", &FastKey);
+        assert(MainMix != NULL);
+        //		ConquerMix = new MFCD("CONQUER.MIX", &FastKey);
+        if (CCFileClass("MOVIES1.MIX").Is_Available())
+            MoviesMix = new MFCD("MOVIES1.MIX", &FastKey);
+        else
+            MoviesMix = new MFCD("MOVIES2.MIX", &FastKey);
+        assert(MoviesMix != NULL);
+        GeneralMix = new MFCD("GENERAL.MIX", &FastKey);
+        ScoreMix = new MFCD("SCORES.MIX", &FastKey);
+    }
 
-	return true;
+    return true;
 }
 
 
@@ -4688,27 +4991,27 @@ bool Force_CD_Available( int cd_desired )				//	ajw
 			
 			if( cd_desired == CD_DVD )
 			{
-				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s",  _cd_name[4]);
-				#else
-				#ifdef GERMAN
+#ifdef FRENCH
+			   	sprintf(buffer, "Insï¿½rez le %s",  _cd_name[4]);
+#else
+#ifdef GERMAN
 				sprintf(buffer, "Bitte %s",  _cd_name[4]);
-				#else
+#else
 				sprintf(buffer, "Please insert the %s",  _cd_name[4]);
-				#endif
-				#endif
+#endif
+#endif
 			}
 			else if( cd_desired == CD_COUNTERSTRIKE || cd_desired == CD_AFTERMATH )
 			{
-				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s",  _cd_name[cd_desired]);
-				#else
-				#ifdef GERMAN
+#ifdef FRENCH
+			   	sprintf(buffer, "Insï¿½rez le %s",  _cd_name[cd_desired]);
+#else
+#ifdef GERMAN
 				sprintf(buffer, "Bitte %s",  _cd_name[cd_desired]);
-				#else
+#else
 				sprintf(buffer, "Please insert the %s",  _cd_name[cd_desired]);
-				#endif
-				#endif
+#endif
+#endif
 			}
 			else if( cd_desired == CD_ANY )
 			{
@@ -4817,9 +5120,9 @@ bool Force_CD_Available(int cd)
 		"CD Missions M.A.D.",
 
 		// Denzil 4/15/98
-		#ifdef DVD
+#ifdef DVD
 		"ALERTE ROUGE DVD",
-		#endif
+#endif
 };
 
 #endif
@@ -4831,9 +5134,9 @@ bool Force_CD_Available(int cd)
 		"CD TRANS einlegen",
 
 		// Denzil 4/15/98
-		#ifdef DVD
+#ifdef DVD
 		"ALARMSTUFE ROT DVD einlegen",
-		#endif
+#endif
 	};
 #endif
 #ifdef ENGLISH
@@ -4844,9 +5147,9 @@ bool Force_CD_Available(int cd)
 		"Aftermath CD",
 
 		// Denzil 4/15/98
-		#ifdef DVD
+#ifdef DVD
 		"RED ALERT DVD",
-		#endif
+#endif
 	};
 #endif
 
@@ -4875,21 +5178,21 @@ bool Force_CD_Available(int cd)
 	current_drive = CCFileClass::Get_CD_Drive();
 	cd_index = Get_CD_Index(current_drive, 1*60);
 
-	#ifdef CHEAT_KEYS
-	//	Mono_Printf("Get_CD_Index just returned %d\n", cd_index);
-	//	Mono_Printf("We are checking for %d\n", cd);
-	//	Mono_Printf("current_drive = %d\n", current_drive);
-	#endif	//CHEAT_KEYS
+#ifdef CHEAT_KEYS
+//	Mono_Printf("Get_CD_Index just returned %d\n", cd_index);
+//	Mono_Printf("We are checking for %d\n", cd);
+//	Mono_Printf("current_drive = %d\n", current_drive);
+#endif	//CHEAT_KEYS
 
-	#ifdef DVD // Denzil
+#ifdef DVD // Denzil
 	// CD1 and CD2 are ignored, force the DVD
 	if (cd_index == 0 || cd_index == 1)
 		cd_index = -1;
-	#endif
+#endif
 	
 	if (cd_index >= 0 )
 		{
-		#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
+#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 		// Require CS or AM
 		if (cd == CD_CS_OR_AM)
 			{
@@ -4900,9 +5203,9 @@ bool Force_CD_Available(int cd)
 				cd = cd_index;
 				}
 			}
-		#endif
+#endif
 
-		#ifdef DVD // Denzil
+#ifdef DVD // Denzil
 		// If the current drive is the DVD then requests for CD1 and CD2 are okay
 		if (cd_index == 4)
 			{
@@ -4912,8 +5215,8 @@ bool Force_CD_Available(int cd)
 				cd_index = cd;
 				}
 			}
-		#endif
-		
+#endif
+
 		// If the current CD is requested or any CD will work
 		if (cd == cd_index || cd == -1 )
 			{
@@ -4949,15 +5252,15 @@ bool Force_CD_Available(int cd)
 			*/
 			cd_index = Get_CD_Index(last_drive, 10*60);
 
-			#ifdef DVD // Denzil
+#ifdef DVD // Denzil
 			// Ignore CD1 and CD2 disks, force DVD
 			if (cd_index == 0 || cd_index == 1)
 				cd_index = -1;
-			#endif
+#endif
 			
 			if (cd_index >= 0 )
 				{
-				#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
+#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 				// Require CS or AM
 				if (cd == 4)
 					{
@@ -4967,9 +5270,9 @@ bool Force_CD_Available(int cd)
 						cd = cd_index;
 						}
 					}
-				#endif
+#endif
 
-				#ifdef DVD // Denzil
+#ifdef DVD // Denzil
 				// If DVD is in drive
 				if (cd_index == 4)
 					{
@@ -4979,7 +5282,7 @@ bool Force_CD_Available(int cd)
 						cd_index = cd;
 						}
 					}
-				#endif
+#endif
 
 				// If the cd is present or any cd will work
 				if (cd == cd_index || cd == -1 )
@@ -5014,18 +5317,18 @@ bool Force_CD_Available(int cd)
 				cd_drive = CDList.Get_Next_CD_Drive();
 				cd_index = Get_CD_Index(cd_drive, drive_search_timeout);
 
-				#ifdef DVD // Denzil
+#ifdef DVD // Denzil
 				// Ignore CD1 and CD2, force the DVD
 				if (cd_index == 0 || cd_index == 1)
 					cd_index = -1;
-				#endif
+#endif
 				
 				if (cd_index >= 0)
 					{
 					/*
 					** We found a C&C cd - lets see if it was the one we were looking for
 					*/
-					#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
+#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 					// Require CS or AM
 					if (cd == 4)
 						{
@@ -5035,9 +5338,9 @@ bool Force_CD_Available(int cd)
 							cd = cd_index;
 							}
 						}
-					#endif
+#endif
 
-					#ifdef DVD // Denzil
+#ifdef DVD // Denzil
 					if (cd_index == 4)
 						{
 						if ((cd == 0) || (cd == 1) || (cd == 5))
@@ -5045,7 +5348,7 @@ bool Force_CD_Available(int cd)
 							cd_index = cd;
 							}
 						}
-					#endif
+#endif
 					
 					if (cd == cd_index || cd == -1 || cd == -2 )
 						{
@@ -5073,40 +5376,40 @@ bool Force_CD_Available(int cd)
 			**	Prompt to insert the CD into the drive.
 			*/
 			//V.Grippi
-			#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
+#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 			if(cd == 4) cd--;
 			
 			// CS or AM
 			if(cd == 2 || cd == 3)
 				{
-			#else
+#else
 			if(cd == 2)
 		   		{
-			#endif
+#endif
 
-				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s",  _cd_name[cd]);
-				#else
-				#ifdef GERMAN
+#ifdef FRENCH
+			   	sprintf(buffer, "Insï¿½rez le %s",  _cd_name[cd]);
+#else
+#ifdef GERMAN
 				sprintf(buffer, "Bitte %s",  _cd_name[cd]);
-				#else
+#else
 				sprintf(buffer, "Please insert the %s",  _cd_name[cd]);
-				#endif
-				#endif
+#endif
+#endif
 				}
 			else
 				{
-				#ifdef DVD
-				#ifdef FRENCH
-			   	sprintf(buffer, "InsŠrez le %s", _cd_name[4]);
-				#else
-				#ifdef GERMAN 
+#ifdef DVD
+#ifdef FRENCH
+			   	sprintf(buffer, "Insï¿½rez le %s", _cd_name[4]);
+#else
+#ifdef GERMAN
 				sprintf(buffer, "Bitte %s", _cd_name[4]);
-				#else
+#else
 				sprintf(buffer, "Please insert the %s", _cd_name[4]);
-				#endif
-				#endif
-				#else
+#endif
+#endif
+#else
 				if (cd == -1 )
 					{
 					sprintf(buffer, Text_String(TXT_CD_DIALOG_1), cd+1, _cd_name[cd]);
@@ -5115,14 +5418,14 @@ bool Force_CD_Available(int cd)
 					{
 					sprintf(buffer, Text_String(TXT_CD_DIALOG_2), cd+1, _cd_name[cd]);
 					}
-				#endif
+#endif
 				}
 
-			#ifdef WIN32
+#ifdef WIN32
 			GraphicViewPortClass * oldpage = Set_Logic_Page(SeenBuff);
-			#else
+#else
 			GraphicBufferClass * oldpage = Set_Logic_Page(SeenBuff);
-			#endif
+#endif
 			theme_playing = Theme.What_Is_Playing();
 			Theme.Stop();
 			int hidden = Get_Mouse_State();
@@ -5164,9 +5467,9 @@ bool Force_CD_Available(int cd)
 	**	If it broke out of the query for CD-ROM loop, then this means that the
 	**	CD-ROM has been inserted.
 	*/
-	#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
+#ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 	if (cd == 4) cd--;
-	#endif
+#endif
 //	if (cd > -3 && _last != cd) {
 	if (cd > -1 && _last != cd)
 		{
@@ -5224,7 +5527,7 @@ bool Force_CD_Available(int cd)
  *=========================================================================*/
 unsigned long Disk_Space_Available(void)
 {
-	return 0x7fffffff;	//ST - 5/8/2019
+    return 0x7fffffff; //ST - 5/8/2019
 #if (0)
 	struct diskfree_t diskdata;
 	unsigned drive;
@@ -5254,137 +5557,148 @@ unsigned long Disk_Space_Available(void)
  *=============================================================================================*/
 static void Do_Record_Playback(void)
 {
-	int count;
-	TARGET tgt;
-	int i;
-	COORDINATE coord;
-	ObjectClass * obj;
-	unsigned long sum;
-	unsigned long sum2;
-	unsigned long ltgt;
+    int count;
+    TARGET tgt;
+    int i;
+    COORDINATE coord;
+    ObjectClass* obj;
+    unsigned long sum;
+    unsigned long sum2;
+    unsigned long ltgt;
 
-	/*
-	**	Record a game
-	*/
-	if (Session.Record) {
+    /*
+    **	Record a game
+    */
+    if (Session.Record)
+    {
+        /*
+        **	Save the map's location
+        */
+        Session.RecordFile.Write(&Map.DesiredTacticalCoord,
+                                 sizeof (Map.DesiredTacticalCoord));
 
-		/*
-		**	Save the map's location
-		*/
-		Session.RecordFile.Write(&Map.DesiredTacticalCoord,
-			sizeof (Map.DesiredTacticalCoord));
+        /*
+        **	Save the current object list count
+        */
+        count = CurrentObject.Count();
+        Session.RecordFile.Write(&count, sizeof(count));
 
-		/*
-		**	Save the current object list count
-		*/
-		count = CurrentObject.Count();
-		Session.RecordFile.Write(&count, sizeof(count));
+        /*
+        **	Save a CRC of the selected-object list.
+        */
+        sum = 0;
+        for (i = 0; i < count; i++)
+        {
+            ltgt = (unsigned long)(CurrentObject[i]->As_Target());
+            sum += ltgt;
+        }
+        Session.RecordFile.Write(&sum, sizeof(sum));
 
-		/*
-		**	Save a CRC of the selected-object list.
-		*/
-		sum = 0;
-		for (i = 0; i < count; i++) {
-			ltgt = (unsigned long)(CurrentObject[i]->As_Target());
-			sum += ltgt;
-		}
-		Session.RecordFile.Write (&sum, sizeof(sum));
+        /*
+        **	Save all selected objects.
+        */
+        for (i = 0; i < count; i++)
+        {
+            tgt = CurrentObject[i]->As_Target();
+            Session.RecordFile.Write(&tgt, sizeof(tgt));
+        }
 
-		/*
-		**	Save all selected objects.
-		*/
-		for (i = 0; i < count; i++) {
-			tgt = CurrentObject[i]->As_Target();
-			Session.RecordFile.Write (&tgt, sizeof(tgt));
-		}
+        //
+        // Save team-selection and formation events
+        //
+        Session.RecordFile.Write(&TeamEvent, sizeof(TeamEvent));
+        Session.RecordFile.Write(&TeamNumber, sizeof(TeamNumber));
+        Session.RecordFile.Write(&FormationEvent, sizeof(FormationEvent));
+        Session.RecordFile.Write(TeamFormData, sizeof(TeamFormData));
+        Session.RecordFile.Write(&FormMove, sizeof(FormMove));
+        Session.RecordFile.Write(&FormSpeed, sizeof(FormSpeed));
+        Session.RecordFile.Write(&FormMaxSpeed, sizeof(FormMaxSpeed));
+        TeamEvent = 0;
+        TeamNumber = 0;
+        FormationEvent = 0;
+    }
 
-		//
-		// Save team-selection and formation events
-		//
-		Session.RecordFile.Write (&TeamEvent, sizeof(TeamEvent));
-		Session.RecordFile.Write (&TeamNumber, sizeof(TeamNumber));
-		Session.RecordFile.Write (&FormationEvent, sizeof(FormationEvent));
-		Session.RecordFile.Write (TeamFormData, sizeof(TeamFormData));
-		Session.RecordFile.Write (&FormMove, sizeof(FormMove));
-		Session.RecordFile.Write (&FormSpeed, sizeof(FormSpeed));
-		Session.RecordFile.Write (&FormMaxSpeed, sizeof(FormMaxSpeed));
-		TeamEvent = 0;
-		TeamNumber = 0;
-		FormationEvent = 0;
-	}
+    /*
+    **	Play back a game ("attract" mode)
+    */
+    if (Session.Play)
+    {
+        /*
+        **	Read & set the map's location.
+        */
+        if (Session.RecordFile.Read(&coord, sizeof(coord)) == sizeof(coord))
+        {
+            if (coord != Map.DesiredTacticalCoord)
+            {
+                Map.Set_Tactical_Position(coord);
+            }
+        }
 
-	/*
-	**	Play back a game ("attract" mode)
-	*/
-	if (Session.Play) {
+        if (Session.RecordFile.Read(&count, sizeof(count)) == sizeof(count))
+        {
+            /*
+            **	Compute a CRC of the current object-selection list.
+            */
+            sum = 0;
+            for (i = 0; i < CurrentObject.Count(); i++)
+            {
+                ltgt = (unsigned long)(CurrentObject[i]->As_Target());
+                sum += ltgt;
+            }
 
-		/*
-		**	Read & set the map's location.
-		*/
-		if (Session.RecordFile.Read(&coord, sizeof(coord))==sizeof(coord)) {
-			if (coord != Map.DesiredTacticalCoord) {
-				Map.Set_Tactical_Position(coord);
-			}
-		}
+            /*
+            **	Load the CRC of the objects on disk; if it doesn't match, select
+            **	all objects as they're loaded.
+            */
+            Session.RecordFile.Read(&sum2, sizeof(sum2));
+            if (sum2 != sum)
+            {
+                Unselect_All();
+            }
 
-		if (Session.RecordFile.Read(&count, sizeof(count))==sizeof(count)) {
-			/*
-			**	Compute a CRC of the current object-selection list.
-			*/
-			sum = 0;
-			for (i = 0; i < CurrentObject.Count(); i++) {
-				ltgt = (unsigned long)(CurrentObject[i]->As_Target());
-				sum += ltgt;
-			}
+            AllowVoice = true;
 
-			/*
-			**	Load the CRC of the objects on disk; if it doesn't match, select
-			**	all objects as they're loaded.
-			*/
-			Session.RecordFile.Read (&sum2, sizeof(sum2));
-			if (sum2 != sum) {
-				Unselect_All();
-			}
+            for (i = 0; i < count; i++)
+            {
+                if (Session.RecordFile.Read(&tgt, sizeof(tgt)) == sizeof(tgt))
+                {
+                    obj = As_Object(tgt);
+                    if (obj && (sum2 != sum))
+                    {
+                        obj->Select();
+                        AllowVoice = false;
+                    }
+                }
+            }
 
-			AllowVoice = true;
+            AllowVoice = true;
+        }
 
-			for (i = 0; i < count; i++) {
-				if (Session.RecordFile.Read (&tgt, sizeof(tgt))==sizeof(tgt)) {
-					obj = As_Object(tgt);
-					if (obj && (sum2 != sum)) {
-						obj->Select();
-						AllowVoice = false;
-					}
-				}
-			}
+        //
+        // Save team-selection and formation events
+        //
+        Session.RecordFile.Read(&TeamEvent, sizeof(TeamEvent));
+        Session.RecordFile.Read(&TeamNumber, sizeof(TeamNumber));
+        Session.RecordFile.Read(&FormationEvent, sizeof(FormationEvent));
+        if (TeamEvent)
+        {
+            Handle_Team(TeamNumber, TeamEvent - 1);
+        }
+        if (FormationEvent)
+        {
+            Toggle_Formation();
+        }
 
-			AllowVoice = true;
+        Session.RecordFile.Read(TeamFormData, sizeof(TeamFormData));
+        Session.RecordFile.Read(&FormMove, sizeof(FormMove));
+        Session.RecordFile.Read(&FormSpeed, sizeof(FormSpeed));
+        Session.RecordFile.Read(&FormMaxSpeed, sizeof(FormMaxSpeed));
 
-		}
-
-		//
-		// Save team-selection and formation events
-		//
-		Session.RecordFile.Read (&TeamEvent, sizeof(TeamEvent));
-		Session.RecordFile.Read (&TeamNumber, sizeof(TeamNumber));
-		Session.RecordFile.Read (&FormationEvent, sizeof(FormationEvent));
-		if (TeamEvent) {
-			Handle_Team(TeamNumber, TeamEvent - 1);
-		}
-		if (FormationEvent) {
-			Toggle_Formation();
-		}
-
-		Session.RecordFile.Read (TeamFormData, sizeof(TeamFormData));
-		Session.RecordFile.Read (&FormMove, sizeof(FormMove));
-		Session.RecordFile.Read (&FormSpeed, sizeof(FormSpeed));
-		Session.RecordFile.Read (&FormMaxSpeed, sizeof(FormMaxSpeed));
-
-		/*
-		**	The map isn't drawn in playback mode, so draw it here.
-		*/
-		Map.Render();
-	}
+        /*
+        **	The map isn't drawn in playback mode, so draw it here.
+        */
+        Map.Render();
+    }
 }
 
 
@@ -5403,29 +5717,30 @@ static void Do_Record_Playback(void)
  * HISTORY:                                                                                    *
  *    5/13/96 3:20PM ST : Created                                                              *
  *=============================================================================================*/
-void * Hires_Load(char * name)
+void* Hires_Load(char* name)
 {
-	char 	filename[30];
-	int 	length;
-	void * return_ptr;
+    char filename[30];
+    int length;
+    void* return_ptr;
 
 #ifdef WIN32
-	sprintf(filename, "H%s", name);
+    sprintf(filename, "H%s", name);
 #else
    strcpy(filename, name);
 #endif
-	CCFileClass file (filename);
+    CCFileClass file(filename);
 
-	if (file.Is_Available()) {
-
-		length = file.Size();
-		return_ptr = new char[length];
-		file.Read(return_ptr, length);
-		return (return_ptr);
-
-	} else {
-		return (NULL);
-	}
+    if (file.Is_Available())
+    {
+        length = file.Size();
+        return_ptr = new char[length];
+        file.Read(return_ptr, length);
+        return (return_ptr);
+    }
+    else
+    {
+        return (NULL);
+    }
 }
 
 
@@ -5444,14 +5759,16 @@ void * Hires_Load(char * name)
  * HISTORY:                                                                                    *
  *   08/12/1996 JLB : Created.                                                                 *
  *=============================================================================================*/
-CrateType Crate_From_Name(char const * name)
+CrateType Crate_From_Name(char const* name)
 {
-	if (name != NULL) {
-		for (CrateType crate = CRATE_FIRST; crate < CRATE_COUNT; crate++) {
-			if (stricmp(name, CrateNames[crate]) == 0) return(crate);
-		}
-	}
-	return(CRATE_MONEY);
+    if (name != NULL)
+    {
+        for (CrateType crate = CRATE_FIRST; crate < CRATE_COUNT; crate++)
+        {
+            if (stricmp(name, CrateNames[crate]) == 0) return (crate);
+        }
+    }
+    return (CRATE_MONEY);
 }
 
 
@@ -5472,22 +5789,29 @@ CrateType Crate_From_Name(char const * name)
  * HISTORY:                                                                                    *
  *   08/12/1996 JLB : Created.                                                                 *
  *=============================================================================================*/
-int Owner_From_Name(char const * text)
+int Owner_From_Name(char const* text)
 {
-	int ownable = 0;
-	if (stricmp(text, "soviet") == 0) {
-		ownable |= HOUSEF_SOVIET;
-	} else {
-		if (stricmp(text, "allies") == 0 || stricmp(text, "allied") == 0) {
-			ownable |= HOUSEF_ALLIES;
-		} else {
-			HousesType h = HouseTypeClass::From_Name(text);
-			if (h != HOUSE_NONE && (h < HOUSE_MULTI1 || h > HOUSE_MULTI8)) {
-				ownable |= (1 << h);
-			}
-		}
-	}
-	return(ownable);
+    int ownable = 0;
+    if (stricmp(text, "soviet") == 0)
+    {
+        ownable |= HOUSEF_SOVIET;
+    }
+    else
+    {
+        if (stricmp(text, "allies") == 0 || stricmp(text, "allied") == 0)
+        {
+            ownable |= HOUSEF_ALLIES;
+        }
+        else
+        {
+            HousesType h = HouseTypeClass::From_Name(text);
+            if (h != HOUSE_NONE && (h < HOUSE_MULTI1 || h > HOUSE_MULTI8))
+            {
+                ownable |= (1 << h);
+            }
+        }
+    }
+    return (ownable);
 }
 
 
@@ -5508,16 +5832,19 @@ int Owner_From_Name(char const * text)
  *=============================================================================================*/
 void Shake_The_Screen(int shakes, HousesType house)
 {
-	for (char h = HOUSE_FIRST; h < HOUSE_COUNT; ++h) {
-		if ((house != HOUSE_NONE) && (h != house)) {
-			continue;
-		}
-		HouseClass* hptr = HouseClass::As_Pointer((HousesType)h);
-		if ((hptr != nullptr) && hptr->IsActive && hptr->IsHuman) {
-			hptr->ScreenShakeTime = CDTimerClass<FrameTimerClass>(hptr->ScreenShakeTime + shakes + shakes);
-			hptr->ScreenShakeTime.Start();
-		}
-	}
+    for (char h = HOUSE_FIRST; h < HOUSE_COUNT; ++h)
+    {
+        if ((house != HOUSE_NONE) && (h != house))
+        {
+            continue;
+        }
+        HouseClass* hptr = HouseClass::As_Pointer((HousesType)h);
+        if ((hptr != nullptr) && hptr->IsActive && hptr->IsHuman)
+        {
+            hptr->ScreenShakeTime = CDTimerClass<FrameTimerClass>(hptr->ScreenShakeTime + shakes + shakes);
+            hptr->ScreenShakeTime.Start();
+        }
+    }
 #if (0)
 #ifdef WIN32
 	shakes += shakes;
@@ -5574,21 +5901,22 @@ void Shake_The_Screen(int shakes, HousesType house)
  * HISTORY:                                                                                    *
  *   09/04/1996 JLB : Created.                                                                 *
  *=============================================================================================*/
-void List_Copy(short const * source, int len, short * dest)
+void List_Copy(short const* source, int len, short* dest)
 {
-	if (dest == NULL || dest == NULL) {
-		return;
-	}
+    if (dest == NULL || dest == NULL)
+    {
+        return;
+    }
 
-	while (len > 0) {
-		*dest = *source;
-		if (*dest == REFRESH_EOL) break;
-		dest++;
-		source++;
-		len--;
-	}
+    while (len > 0)
+    {
+        *dest = *source;
+        if (*dest == REFRESH_EOL) break;
+        dest++;
+        source++;
+        len--;
+    }
 }
-
 
 
 #if 0
@@ -5604,7 +5932,6 @@ void Crummy(int crumb1, int crumb2)
 #endif
 
 
-
 /***********************************************************************************************
  * Game_Registry_Key -- Returns pointer to string containing the registry subkey for the game.
  *                      This is located under HKEY_LOCAL_MACHINE.
@@ -5614,7 +5941,7 @@ void Crummy(int crumb1, int crumb2)
 const char* Game_Registry_Key()
 {
 #ifdef ENGLISH
-	static char szKey[] = "SOFTWARE\\Westwood\\Red Alert Windows 95 Edition";
+    static char szKey[] = "SOFTWARE\\Westwood\\Red Alert Windows 95 Edition";
 #else
 #ifdef GERMAN
 	static char szKey[] = "SOFTWARE\\Westwood\\Alarmstufe Rot Windows 95 Edition";
@@ -5622,7 +5949,7 @@ const char* Game_Registry_Key()
 	static char szKey[] = "SOFTWARE\\Westwood\\Alerte Rouge version Windows 95";
 #endif
 #endif
-	return szKey;
+    return szKey;
 }
 
 
@@ -5640,9 +5967,9 @@ const char* Game_Registry_Key()
  * HISTORY:                                                                                    *
  *    4/1/97 11:39PM ST : Created                                                              *
  *=============================================================================================*/
-bool Is_Counterstrike_Installed (void)
+bool Is_Counterstrike_Installed(void)
 {
-	return true;		// Remasters always have Counterstrike. ST - 10/18/2019 11:06AM
+    return true; // Remasters always have Counterstrike. ST - 10/18/2019 11:06AM
 
 #if (0)
 	//	ajw 9/29/98
@@ -5674,11 +6001,11 @@ bool Is_Counterstrike_Installed (void)
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
 /***********************************************************************************************
  *=============================================================================================*/
-bool Is_Aftermath_Installed (void)
+bool Is_Aftermath_Installed(void)
 {
-	return true;		// Remasters always have Aftermath. ST - 10/18/2019 11:06AM
+    return true; // Remasters always have Aftermath. ST - 10/18/2019 11:06AM
 
-#if (0)	 
+#if (0)
 	//	ajw 9/29/98
 	static bool	bAlreadyChecked = false;
 	static bool bInstalled = false;
@@ -5721,19 +6048,19 @@ void Enable_Secret_Units(void)
 #endif
 
 #ifdef FIXIT_VERSION_3
-bool Force_Scenario_Available( const char* szName )
+bool Force_Scenario_Available(const char* szName)
 {
-	//	Calls Force_CD_Available based on type of scenario. szName is assumed to be an official scenario here.
-	if( Is_Mission_Counterstrike( (char*)szName ) )
-	{
-//		debugprint( "Force_Scenario_Available requiring disk 4...\n" );
-		return Force_CD_Available( 4 );
-	}
-	else if( Is_Mission_Aftermath( (char*)szName ) )
-	{
-//		debugprint( "Force_Scenario_Available requiring disk 3...\n" );
-		return Force_CD_Available( 3 );
-	}
-	return true;
+    //	Calls Force_CD_Available based on type of scenario. szName is assumed to be an official scenario here.
+    if (Is_Mission_Counterstrike((char*)szName))
+    {
+        //		debugprint( "Force_Scenario_Available requiring disk 4...\n" );
+        return Force_CD_Available(4);
+    }
+    else if (Is_Mission_Aftermath((char*)szName))
+    {
+        //		debugprint( "Force_Scenario_Available requiring disk 3...\n" );
+        return Force_CD_Available(3);
+    }
+    return true;
 }
 #endif

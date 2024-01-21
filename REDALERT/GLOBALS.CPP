@@ -31,6 +31,7 @@
  *---------------------------------------------------------------------------------------------*
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
+#include "GameModifierManager.h"
 #include "function.h"
 
 bool IsVQ640 = false;
@@ -548,7 +549,6 @@ PaletteClass WhitePalette(RGBClass(RGBClass::MAX_VALUE, RGBClass::MAX_VALUE, RGB
 PaletteClass OriginalPalette;
 PaletteClass ScorePalette;
 
-
 /***************************************************************************
 **	These are the event queues. One is for holding events until they are ready to be
 **	sent to the remote computer for processing. The other list is for incoming events
@@ -816,3 +816,11 @@ bool MMXAvailable = false;
 // ST - 5/14/2019
 bool RunningAsDLL = false;
 bool RunningFromEditor = false;
+
+/***************************************************************************
+ * Game Modifier Controller
+ */
+GameModifierManager Modifiers;
+/***************************************************************************
+*/
+
