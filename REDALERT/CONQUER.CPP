@@ -80,7 +80,6 @@ class B {
 B<A> test;
 #endif
 
-
 #include	"function.h"
 #ifdef WIN32
 #ifdef WINSOCK_IPX
@@ -119,7 +118,8 @@ extern WolapiObject* pWolapi;
 #include "movie.h"
 MPG_RESPONSE far __stdcall MpegCallback(MPG_CMD cmd, LPVOID data, LPVOID user);
 #endif
-
+#include "GameModifierManager.h"
+extern GameModifierManager Modifiers;
 #define SHAPE_TRANS		0x40
 
 void* Get_Shape_Header_Data(void* ptr);
@@ -222,9 +222,8 @@ void Main_Game(int argc, char* argv[])
         return;
     }
 
-	//  setup modifiers
-	
-//	Modifiers.Setup();
+    //  setup modifiers
+    Modifiers.Setup();
 
     /*
     **	Game processing loop:
@@ -1726,8 +1725,6 @@ void Color_Cycle(void)
         }
     }
 }
-
-
 
 
 /***********************************************************************************************

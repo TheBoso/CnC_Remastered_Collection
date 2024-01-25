@@ -31,8 +31,8 @@
  *---------------------------------------------------------------------------------------------*
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-#include "GameModifierManager.h"
 #include "function.h"
+#include "GameModifierManager.h"
 
 bool IsVQ640 = false;
 unsigned long GameVersion = 0;

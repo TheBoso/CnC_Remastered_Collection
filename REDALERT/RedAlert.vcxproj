@@ -75,7 +75,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>..\bin\$(PlatformName)\</OutDir>
+    <OutDir>C:\Users\Dom\Documents\CnCRemastered\Mods\Red_Alert\Chaos\Data</OutDir>
     <IntDir>$(PlatformName)\$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
@@ -167,14 +167,17 @@
     <ClCompile Include="ABSTRACT.CPP" />
     <ClCompile Include="ADATA.CPP" />
     <ClCompile Include="ADPCM.CPP" />
+    <ClCompile Include="AIControlledHumanGameModifier.cpp" />
     <ClCompile Include="AIRCRAFT.CPP" />
     <ClCompile Include="ANIM.CPP" />
+    <ClCompile Include="AntInvasionGameModifier.cpp" />
     <ClCompile Include="AUDIO.CPP" />
     <ClCompile Include="B64PIPE.CPP" />
     <ClCompile Include="B64STRAW.CPP" />
     <ClCompile Include="BAR.CPP" />
     <ClCompile Include="BASE.CPP" />
     <ClCompile Include="BASE64.CPP" />
+    <ClCompile Include="BaseSwapGameModifier.cpp" />
     <ClCompile Include="BBDATA.CPP" />
     <ClCompile Include="BDATA.CPP" />
     <ClCompile Include="BENCH.CPP" />
@@ -200,6 +203,7 @@
     <ClCompile Include="CHECKBOX.CPP" />
     <ClCompile Include="CHEKLIST.CPP" />
     <ClCompile Include="CLASS.CPP" />
+    <ClCompile Include="AllIronCurtainGameModifier.cpp" />
     <ClCompile Include="COLRLIST.CPP" />
     <ClCompile Include="COMBAT.CPP" />
     <ClCompile Include="COMBUF.CPP" />
@@ -239,6 +243,7 @@
     <ClCompile Include="ENDING.CPP" />
     <ClCompile Include="EVENT.CPP" />
     <ClCompile Include="EXPAND.CPP" />
+    <ClCompile Include="ExtraMCVGameModifier.cpp" />
     <ClCompile Include="FACE.CPP" />
     <ClCompile Include="FACING.CPP" />
     <ClCompile Include="FACTORY.CPP" />
@@ -251,6 +256,8 @@
     <ClCompile Include="FUSE.CPP" />
     <ClCompile Include="GADGET.CPP" />
     <ClCompile Include="GAMEDLG.CPP" />
+    <ClCompile Include="GameModifier.cpp" />
+    <ClCompile Include="GameModifierManager.cpp" />
     <ClCompile Include="GAUGE.CPP" />
     <ClCompile Include="GETCPU.CPP" />
     <ClCompile Include="GLOBALS.CPP" />
@@ -261,6 +268,7 @@
     <ClCompile Include="HELP.CPP" />
     <ClCompile Include="HOUSE.CPP" />
     <ClCompile Include="HSV.CPP" />
+    <ClCompile Include="HuntFrenzyGameModifier.cpp" />
     <ClCompile Include="ICONLIST.CPP" />
     <ClCompile Include="IDATA.CPP" />
     <ClCompile Include="INFANTRY.CPP" />
@@ -268,6 +276,7 @@
     <ClCompile Include="INIBIN.CPP" />
     <ClCompile Include="INICODE.CPP" />
     <ClCompile Include="INIT.CPP" />
+    <ClCompile Include="InstantBuildGameModifier.cpp" />
     <ClCompile Include="INT.CPP" />
     <ClCompile Include="INTERNET.CPP" />
     <ClCompile Include="INTERPAL.CPP" />
@@ -343,6 +352,7 @@
     <ClCompile Include="RAMFILE.CPP" />
     <ClCompile Include="RAND.CPP" />
     <ClCompile Include="RANDOM.CPP" />
+    <ClCompile Include="RandomUnitLossGameModifier.cpp" />
     <ClCompile Include="RAWFILE.CPP" />
     <ClCompile Include="RAWOLAPI.CPP" />
     <ClCompile Include="READLINE.CPP" />
@@ -403,6 +413,7 @@
     <ClCompile Include="UDATA.CPP" />
     <ClCompile Include="UDPADDR.CPP" />
     <ClCompile Include="UNIT.CPP" />
+    <ClCompile Include="UnitShiftGameModifier.cpp" />
     <ClCompile Include="UTRACKER.CPP" />
     <ClCompile Include="VDATA.CPP" />
     <ClCompile Include="VECTOR.CPP" />
@@ -458,14 +469,17 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ABSTRACT.H" />
+    <ClInclude Include="AIControlledHumanGameModifier.h" />
     <ClInclude Include="AIRCRAFT.H" />
     <ClInclude Include="ANIM.H" />
+    <ClInclude Include="AntInvasionGameModifier.h" />
     <ClInclude Include="AUDIO.H" />
     <ClInclude Include="B64PIPE.H" />
     <ClInclude Include="B64STRAW.H" />
     <ClInclude Include="BAR.H" />
     <ClInclude Include="BASE.H" />
     <ClInclude Include="BASE64.H" />
+    <ClInclude Include="BaseSwapGameModifier.h" />
     <ClInclude Include="BENCH.H" />
     <ClInclude Include="BFIOFILE.H" />
     <ClInclude Include="BIGCHECK.H" />
@@ -487,6 +501,7 @@
     <ClInclude Include="CELL.H" />
     <ClInclude Include="CHECKBOX.H" />
     <ClInclude Include="CHEKLIST.H" />
+    <ClInclude Include="AllIronCurtainGameModifier.h" />
     <ClInclude Include="COLRLIST.H" />
     <ClInclude Include="COMBUF.H" />
     <ClInclude Include="COMINIT.H" />
@@ -524,6 +539,7 @@
     <ClInclude Include="ENDING.H" />
     <ClInclude Include="EVENT.H" />
     <ClInclude Include="EXTERNS.H" />
+    <ClInclude Include="ExtraMCVGameModifier.h" />
     <ClInclude Include="FACE.H" />
     <ClInclude Include="FACING.H" />
     <ClInclude Include="FACTORY.H" />
@@ -539,6 +555,8 @@
     <ClInclude Include="FUSE.H" />
     <ClInclude Include="GADGET.H" />
     <ClInclude Include="GAMEDLG.H" />
+    <ClInclude Include="GameModifier.h" />
+    <ClInclude Include="GameModifierManager.h" />
     <ClInclude Include="GAUGE.H" />
     <ClInclude Include="GOPTIONS.H" />
     <ClInclude Include="GSCREEN.H" />
@@ -546,10 +564,12 @@
     <ClInclude Include="HELP.H" />
     <ClInclude Include="HOUSE.H" />
     <ClInclude Include="HSV.H" />
+    <ClInclude Include="HuntFrenzyGameModifier.h" />
     <ClInclude Include="ICONLIST.H" />
     <ClInclude Include="INFANTRY.H" />
     <ClInclude Include="INI.H" />
     <ClInclude Include="INLINE.H" />
+    <ClInclude Include="InstantBuildGameModifier.h" />
     <ClInclude Include="INT.H" />
     <ClInclude Include="INTERNET.H" />
     <ClInclude Include="INTRO.H" />
@@ -617,6 +637,7 @@
     <ClInclude Include="RADIO.H" />
     <ClInclude Include="RAMFILE.H" />
     <ClInclude Include="RANDOM.H" />
+    <ClInclude Include="RandomUnitLossGameModifier.h" />
     <ClInclude Include="RAWFILE.H" />
     <ClInclude Include="RAWOLAPI.H" />
     <ClInclude Include="READLINE.H" />
@@ -673,6 +694,7 @@
     <ClInclude Include="TXTLABEL.H" />
     <ClInclude Include="TYPE.H" />
     <ClInclude Include="UNIT.H" />
+    <ClInclude Include="UnitShiftGameModifier.h" />
     <ClInclude Include="UTRACKER.H" />
     <ClInclude Include="VECTOR.H" />
     <ClInclude Include="VERSION.H" />

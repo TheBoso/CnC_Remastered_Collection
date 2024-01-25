@@ -1,16 +1,17 @@
 ﻿#pragma once
-class GameModifier;
+#include "function.h"
 #include "vector.h"
+class GameModifier;
 
 class GameModifierManager
 {
 public:
-    const float NEXT_TIMER = 15.0f;
+    const float NEXT_TIMER = 800.0f;
 
 protected:
     DynamicVectorClass<GameModifier*> _modifiers;
     GameModifier* _currentModifier;
-    float _lastModifierChange;
+    long _lastModifierChange;
 public:
     GameModifierManager(void);
     ~GameModifierManager();

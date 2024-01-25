@@ -1,6 +1,15 @@
 ﻿#include "GameModifierManager.h"
+
+#include "AIControlledHumanGameModifier.h"
+#include "AntInvasionGameModifier.h"
+#include "AllIronCurtainGameModifier.h"
+#include "BaseSwapGameModifier.h"
+#include "ExtraMCVGameModifier.h"
 #include "function.h"
+#include "HuntFrenzyGameModifier.h"
+#include "InstantBuildGameModifier.h"
 #include "RandomUnitLossGameModifier.h"
+#include "UnitShiftGameModifier.h"
 
 GameModifierManager::GameModifierManager()
 {
@@ -21,47 +30,62 @@ void GameModifierManager::Setup()
     if(_modifiers.Count() == 0)
     {
         _modifiers.Add(new RandomUnitLossGameModifier("Random Unit Possessed"));
+        _modifiers.Add(new AllIronCurtainGameModifier("Curtain All"));
+        _modifiers.Add(new InstantBuildGameModifier("Instant Build"));
+        _modifiers.Add(new HuntFrenzyGameModifier("Hunt Frenzy"));
+        //_modifiers.Add(new AntInvasionGameModifier("Ant Invasion"));
+        _modifiers.Add(new BaseSwapGameModifier("Base Swap"));
+        _modifiers.Add(new AIControlledHumanGameModifier("AI Base"));
+        _modifiers.Add(new ExtraMCVGameModifier("MCV Reinforcements"));
+        _modifiers.Add(new UnitShiftGameModifier("Object Transformations", false));
     }
 }
 
 void GameModifierManager::Update()
 {
         //  Run Modifiers
-        if (_currentModifier == nullptr && Score.ElapsedTime > NEXT_TIMER)
+        if (_currentModifier == NULL && Scen.Timer.Value() > NEXT_TIMER)
         {
             if(_modifiers.Count() == 0)
             {
                 return;
             }
             //  Special fallback if we are null
-            const int element = Random_Pick(0, _modifiers.Count());
+            const int element = Random_Pick(0, _modifiers.Count() - 1);
             _currentModifier = _modifiers[element];
+            if(_currentModifier == NULL)
+            {
+                printf("Fallback");
+                _currentModifier = _modifiers[0];
+            }
             _currentModifier->OnBegin();
             Session.Messages.Add_Message(NULL, 0, _currentModifier->GetModifierName(),
                                          PlayerColorType::PCOLOR_GREY,
                                          TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW,
-                                         TICKS_PER_MINUTE * Rule.MessageDelay);
-            printf("Modifier Changed");
+                                         120);
+
+            _lastModifierChange = Scen.Timer.Value();
+
         }
 
-        if (_currentModifier != nullptr)
+        if (_currentModifier != NULL)
         {
             _currentModifier->OnUpdate();
             //  Check if our current modifier is completed and atleast NEXT_TIMER seconds has passed 
-            if (_currentModifier->IsCompleted() && Score.ElapsedTime > _lastModifierChange + NEXT_TIMER)
+            if (_currentModifier->IsCompleted() && Scen.Timer.Value() > _lastModifierChange + NEXT_TIMER)
             {
-                _lastModifierChange = Score.ElapsedTime;
+                _lastModifierChange = Scen.Timer.Value();
                 _currentModifier->OnEnd();
 
                 //  Assign next modifier
-                const int element = Random_Pick(0, _modifiers.Count());
+                const int element = Random_Pick(0, _modifiers.Count() - 1);
                 _currentModifier = _modifiers[element];
                 _currentModifier->OnBegin();
                 Session.Messages.Add_Message(NULL, 0, _currentModifier->GetModifierName(),
                                              PlayerColorType::PCOLOR_GREY,
                                              TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW,
-                                             TICKS_PER_MINUTE * Rule.MessageDelay);
-                printf("Modifier Changed");
+                                             120);
+
             }
         }
 }

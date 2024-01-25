@@ -218,6 +218,7 @@ class InfantryClass : public FootClass
 		virtual void Enter_Idle_Mode(bool initial=false);
 		virtual void Scatter(COORDINATE threat, bool forced=false, bool nokidding=false);
 		virtual void Look(bool incremental=false);
+	InfantryClass* Clone();
 
 		/*
 		**	Translation table to convert facing into infantry shape number. This special

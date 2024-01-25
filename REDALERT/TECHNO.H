@@ -57,6 +57,8 @@ class TechnoClass :	public RadioClass,
 	public:
 		CrewClass Crew;
 
+	bool IsBerserk;
+
 		/*
 		**	If this techno object has detected that it has outlived its
 		**	purpose, then this flag will be true. Such object will either

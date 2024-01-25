@@ -2080,6 +2080,11 @@ void InfantryClass::Look(bool incremental)
 	FootClass::Look(incremental);
 }
 
+InfantryClass* InfantryClass::Clone()
+{
+return nullptr;
+ }
+
 
 /***********************************************************************************************
  * InfantryClass::Do_Action -- Launches the infantry into an animation sequence.               *

@@ -159,7 +159,7 @@ const char* NewName[] = {
 	"Scout Ant",	  			"Kundschafter-Ameise",
 	"Warrior Ant",    		"Krieger-Ameise",
 	"Fire Ant",	  				"Feuer-Ameise",
-	"Queen Ant",	  			"Ameisenk”nigin",
+	"Queen Ant",	  			"Ameisenkâ€nigin",
 	"ATS",						"Angriffs-U-Boot",
 	"Tesla Tank",	  			"Telsapanzer",
 	"Volkov",  					"Modell Volkov",
@@ -175,7 +175,7 @@ const char* NewName[] = {
 #ifdef FRENCH
 const char* NewName[] = {
 	"Scout Ant",	  			"Fourmi de Reconnaissance",
-	"Warrior Ant",    		"Fourmi GuerriŠre",
+	"Warrior Ant",    		"Fourmi GuerriÅ re",
 	"Fire Ant",	  				"Fourmi Lance-Flammes",
 	"Queen Ant",	  			"Reine des Fourmis",
 	"ATS", 						"SMTA",
@@ -183,9 +183,9 @@ const char* NewName[] = {
 	"Volkov",  					"Volkov",
 	"Chitzkoi", 				"Cyber-Chien",
 	"Stavros",					"Stavros",
-	"F-A Longbow",				"HAA (H‚licoptŠre d'Assaut Avanc‚)",
-	"Civilian Specialist",	"Sp‚cialiste Civil",
-	"Alloy Facility",			"Usine M‚tallurgique",
+	"F-A Longbow",				"HAA (Hâ€šlicoptÅ re d'Assaut Avancâ€š)",
+	"Civilian Specialist",	"Spâ€šcialiste Civil",
+	"Alloy Facility",			"Usine Mâ€štallurgique",
 	NULL,
 	};
 
@@ -2489,7 +2489,7 @@ void TechnoClass::AI(void)
 	**	If for some strange reason, the computer is firing upon itself, then
 	**	tell it not to.
 	*/
-	if (!House->IsHuman && As_Techno(TarCom) && As_Techno(TarCom)->House->Is_Ally(this) && Combat_Damage() >= 0) {
+	if (this->IsBerserk == false && !House->IsHuman && As_Techno(TarCom) && As_Techno(TarCom)->House->Is_Ally(this) && Combat_Damage() >= 0) {
 //#ifdef FIXIT_CSII	//	checked - ajw 9/28/98 (commented out)
 //if(What_Am_I() == RTTI_INFANTRY && *(InfantryClass *)this==INFANTRY_GENERAL && Session.Type==GAME_NORMAL && House->Class->House==HOUSE_UKRAINE) {
 //} else
@@ -5313,7 +5313,7 @@ bool TechnoClass::Is_Allowed_To_Retaliate(TechnoClass const * source) const
 	**	If the source of the damage is an ally, then retaliation shouldn't
 	**	occur either.
 	*/
-	if (House->Is_Ally(source)) return(false);
+	if (IsBerserk == false && House->Is_Ally(source)) return(false);
 
 	/*
 	**	Only objects that have a damaging weapon are allowed to retaliate.

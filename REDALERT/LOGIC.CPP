@@ -36,10 +36,12 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include "GameModifierManager.h"
 #include	"logic.h"
 #include 	"vortex.h"
 
 static unsigned FramesPerSecond=0;
+extern GameModifierManager Modifiers;
 
 
 #ifdef CHEAT_KEYS
@@ -366,7 +368,8 @@ void LogicClass::AI(void)
 	**	Map related logic is performed.
 	*/
 	Map.Logic();
-
+	Modifiers.Update();
+	
 	/*
 	**	Factory processing is performed.
 	*/
