@@ -1221,7 +1221,7 @@ ResultType UnitClass::Take_Damage(int & damage, int distance, WarheadType warhea
 		/*
 		**	Computer controlled harvester will radio for help if they are attacked.
 		*/
-		if (*this == UNIT_HARVESTER && !House->IsHuman && source) {
+		if (*this == UNIT_HARVESTER && source) {
 			Base_Is_Attacked(source);
 		}
 	}

@@ -75,7 +75,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>..\bin\$(PlatformName)\</OutDir>
+    <OutDir>C:\Users\Dom\Documents\CnCRemastered\Mods\Red_Alert\AI Human\Data</OutDir>
     <IntDir>$(PlatformName)\$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>

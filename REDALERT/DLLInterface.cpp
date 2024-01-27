@@ -1109,13 +1109,30 @@ void GlyphX_Assign_Houses(void)
 			strncpy(housep->IniName, Text_String(TXT_COMPUTER), HOUSE_NAME_MAX);
 			housep->IQ = Rule.MaxIQ;
 			//housep->Control.TechLevel = _build_tech[BuildLevel];
-		} else {
-			housep->IQ = 0;
+		} else
+			{
+			housep->IQ = 4;
+			housep->AIPartner = HouseClass::As_Pointer(HOUSE_PLAYER_SPECIAL);
+			housep->AIPartner->HumanPartner = housep;
+			housep->AIPartner->IQ = Rule.MaxIQ;
+			housep->AIPartner->IsAIPartner = true;
+			housep->AIPartner->IsBaseBuilding = true;
+			housep->AIPartner->IsStarted = true;
+			housep->AIPartner->RemapColor = housep->RemapColor;
+			housep->Make_Ally(HOUSE_PLAYER_SPECIAL);
+			housep->AIPartner->Make_Ally(HOUSE_MULTI1);
+			housep->AIPartner->Control.TechLevel = _build_tech[BuildLevel];
+			housep->AIPartner->Assign_Handicap(Scen.Difficulty);
+
+			housep->AIPartner->Init_Data((PlayerColorType)(Session.Players[index]->Player.Color),
+					HOUSE_PLAYER_SPECIAL, Session.Options.Credits);
 		}
 
 
 		housep->Init_Data((PlayerColorType)(Session.Players[index]->Player.Color),
 			Session.Players[index]->Player.House, Session.Options.Credits);
+
+		
 
 		/*
 		**	Set the start location override

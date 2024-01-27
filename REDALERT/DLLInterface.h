@@ -337,7 +337,8 @@ enum DllSuperweaponTypeEnum {
 	SW_SPY_MISSION,
 	SW_IRON_CURTAIN,
 	SW_GPS,
-	SW_CHRONOSPHERE_DESTINATION
+	SW_CHRONOSPHERE_DESTINATION,
+
 };
 
 struct CNCSidebarEntryStruct {

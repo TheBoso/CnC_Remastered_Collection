@@ -813,6 +813,8 @@ typedef enum SpecialWeaponType : char {
 	SPC_IRON_CURTAIN,			// Bestow invulnerability on a unit/building
 	SPC_GPS,						// give allies free unjammable radar.
 
+    //  AI Partner
+	SPC_AI_PARTNER_HUNT,
 	SPC_COUNT,
 	SPC_FIRST=0,
 	SPC_ANY=1
@@ -1190,6 +1192,7 @@ typedef enum HousesType : char {
 	HOUSE_MULTI6,				// Multi-Player house #6
 	HOUSE_MULTI7,				// Multi-Player house #7
 	HOUSE_MULTI8,				// Multi-Player house #8
+	HOUSE_PLAYER_SPECIAL,       // AI Partner for player
 	HOUSE_COUNT,
 	HOUSE_FIRST=0
 } HousesType;
@@ -1199,7 +1202,7 @@ inline HousesType operator++(HousesType &ht) { ht = (HousesType)(((int)ht)+1); r
 
 #define	HOUSEF_ALLIES	(HOUSEF_ENGLAND|HOUSEF_SPAIN|HOUSEF_GREECE|HOUSEF_GERMANY|HOUSEF_FRANCE|HOUSEF_TURKEY|HOUSEF_GOOD)
 #define	HOUSEF_SOVIET	(HOUSEF_USSR|HOUSEF_UKRAINE|HOUSEF_BAD)
-#define	HOUSEF_OTHERS	(HOUSEF_NEUTRAL|HOUSEF_JP|HOUSEF_MULTI1|HOUSEF_MULTI2|HOUSEF_MULTI3|HOUSEF_MULTI4|HOUSEF_MULTI5|HOUSEF_MULTI6|HOUSEF_MULTI7|HOUSEF_MULTI8)
+#define	HOUSEF_OTHERS	(HOUSEF_NEUTRAL|HOUSEF_JP|HOUSEF_MULTI1|HOUSEF_MULTI2|HOUSEF_MULTI3|HOUSEF_MULTI4|HOUSEF_MULTI5|HOUSEF_MULTI6|HOUSEF_MULTI7|HOUSEF_MULTI8|HOUSEF_PSPECIAL)
 #define	HOUSEF_NONE		0
 
 #define	HOUSEF_ENGLAND	(1L<<HOUSE_ENGLAND)
@@ -1222,6 +1225,7 @@ inline HousesType operator++(HousesType &ht) { ht = (HousesType)(((int)ht)+1); r
 #define	HOUSEF_MULTI6	(1L<<HOUSE_MULTI6)
 #define	HOUSEF_MULTI7	(1L<<HOUSE_MULTI7)
 #define	HOUSEF_MULTI8	(1L<<HOUSE_MULTI8)
+#define HOUSEF_PSPECIAL (1L<<HOUSE_PLAYER_SPECIAL)
 
 typedef enum PlayerColorType : char {
 	PCOLOR_NONE = -1,

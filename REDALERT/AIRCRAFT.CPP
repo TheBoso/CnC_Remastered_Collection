@@ -3781,7 +3781,7 @@ int AircraftClass::Mission_Guard(void)
 	*/
 	if (Ammo == 0 && Is_Weapon_Equipped()) {
 		if (!In_Radio_Contact()) {
-			BuildingClass * building = Find_Docking_Bay(STRUCT_HELIPAD, false);
+			BuildingClass * building = Find_Docking_Bay(STRUCT_HELIPAD, true);
 #ifdef FIXIT_CARRIER	//	checked - ajw 9/28/98
 	if (!Class->IsFixedWing) {
 		int dist = 0x7FFFFFFF;

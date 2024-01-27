@@ -127,6 +127,10 @@ bool _Need_To_Take(AircraftClass const * air)
 {
 	if (*air == AIRCRAFT_YAK || *air == AIRCRAFT_MIG) {
 		int deficit = air->House->Get_Quantity(STRUCT_AIRSTRIP);
+		if(air->House->IsAIPartner)
+		{
+			deficit = air->House->HumanPartner->Get_Quantity(STRUCT_AIRSTRIP);
+		}
 //		int deficit = air->House->Get_Quantity(STRUCT_AIRSTRIP) - (air->House->Get_Quantity(AIRCRAFT_YAK)+air->House->Get_Quantity(AIRCRAFT_MIG));
 
 		/*

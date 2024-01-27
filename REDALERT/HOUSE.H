@@ -110,6 +110,7 @@ class HouseClass {
 	public:
 		RTTIType RTTI;
 		int ID;
+	HouseClass* AIPartner;
 
 		/*
 		**	Pointer to the HouseTypeClass that this house is "owned" by.
@@ -160,6 +161,8 @@ class HouseClass {
 		*/
 		unsigned IsHuman:1;
 		unsigned WasHuman:1;
+	bool IsAIPartner;
+	HouseClass* HumanPartner;
 
 		/*
 		**	If the player can control units of this house even if the player doesn't

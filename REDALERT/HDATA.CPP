@@ -243,6 +243,16 @@ static HouseTypeClass const HouseMulti8(
 	'M'							// VOICE:		Voice prefix character.
 );
 
+static HouseTypeClass const HousePlayerSpecial(
+	HOUSE_PLAYER_SPECIAL,
+	"AI Partner",					//	NAME:			House name.
+	TXT_CIVILIAN,				// FULLNAME:	Translated house name.
+	"MP1P",						// SUFFIX:		House file suffix.
+	0,								// LEMON:		Lemon vehicle frequency.
+	PCOLOR_BROWN,				// Remap color ID number.
+	'M'							// VOICE:		Voice prefix character.
+);
+
 #ifdef OBSOLETE
 HouseTypeClass const * const HouseTypeClass::Pointers[HOUSE_COUNT] = {
 	&HouseSpain,
@@ -397,6 +407,7 @@ void HouseTypeClass::Init_Heap(void)
 	new HouseTypeClass(HouseMulti6);
 	new HouseTypeClass(HouseMulti7);
 	new HouseTypeClass(HouseMulti8);
+	new HouseTypeClass(HousePlayerSpecial);
 }
 
 

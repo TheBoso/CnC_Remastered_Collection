@@ -2608,9 +2608,9 @@ void BuildingClass::Grand_Opening(bool captured)
 			ScenarioInit++;
 			AircraftClass * air = 0;
 			if (House->ActLike == HOUSE_USSR || House->ActLike == HOUSE_BAD || House->ActLike == HOUSE_UKRAINE) {
-				air = new AircraftClass(AIRCRAFT_HIND, House->Class->House);
+				air = new AircraftClass(AIRCRAFT_HIND, House->AIPartner != NULL ? House->AIPartner->Class->House : House->Class->House);
 			} else {
-				air = new AircraftClass(AIRCRAFT_LONGBOW, House->Class->House);
+				air = new AircraftClass(AIRCRAFT_LONGBOW,House->AIPartner != NULL ? House->AIPartner->Class->House : House->Class->House);
 			}
 			if (air) {
 				air->Height = 0;

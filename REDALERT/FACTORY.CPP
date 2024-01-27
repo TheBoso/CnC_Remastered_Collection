@@ -68,19 +68,19 @@
  *   12/26/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
 FactoryClass::FactoryClass(void) :
-	RTTI(RTTI_FACTORY),
-	ID(Factories.ID(this)),
-	IsSuspended(false),
-	IsDifferent(false),
-	IsBlocked(false),
-	Balance(0),
-	OriginalBalance(0),
-	Object(0),
-	SpecialItem(SPC_NONE),
-	House(0)
+    RTTI(RTTI_FACTORY),
+    ID(Factories.ID(this)),
+    IsSuspended(false),
+    IsDifferent(false),
+    IsBlocked(false),
+    Balance(0),
+    OriginalBalance(0),
+    Object(0),
+    SpecialItem(SPC_NONE),
+    House(0)
 {
-	Set_Rate(0);
-	Set_Stage(0);
+    Set_Rate(0);
+    Set_Stage(0);
 }
 
 
@@ -101,9 +101,10 @@ FactoryClass::FactoryClass(void) :
  *=============================================================================================*/
 FactoryClass::~FactoryClass(void)
 {
-	if (GameActive) {
-		Abandon();
-	}
+    if (GameActive)
+    {
+        Abandon();
+    }
 }
 
 
@@ -125,7 +126,7 @@ FactoryClass::~FactoryClass(void)
  *=============================================================================================*/
 void FactoryClass::Init(void)
 {
-	Factories.Free_All();
+    Factories.Free_All();
 }
 
 
@@ -144,13 +145,14 @@ void FactoryClass::Init(void)
  * HISTORY:                                                                                    *
  *   12/26/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-void * FactoryClass::operator new(size_t)
+void* FactoryClass::operator new(size_t)
 {
-	void * ptr = Factories.Allocate();
-	if (ptr) {
-		((FactoryClass *)ptr)->IsActive = true;
-	}
-	return(ptr);
+    void* ptr = Factories.Allocate();
+    if (ptr)
+    {
+        ((FactoryClass*)ptr)->IsActive = true;
+    }
+    return (ptr);
 }
 
 
@@ -169,12 +171,13 @@ void * FactoryClass::operator new(size_t)
  * HISTORY:                                                                                    *
  *   12/26/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-void FactoryClass::operator delete(void * ptr)
+void FactoryClass::operator delete(void* ptr)
 {
-	if (ptr) {
-		((FactoryClass *)ptr)->IsActive = false;
-	}
-	Factories.Free((FactoryClass *)ptr);
+    if (ptr)
+    {
+        ((FactoryClass*)ptr)->IsActive = false;
+    }
+    Factories.Free((FactoryClass*)ptr);
 }
 
 
@@ -198,44 +201,50 @@ void FactoryClass::operator delete(void * ptr)
  *=============================================================================================*/
 void FactoryClass::AI(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if (!IsSuspended && (Object != NULL || SpecialItem)) {
-		for (int index = 0; index < 1; index++) {
-			if (!Has_Completed() && Graphic_Logic() ) {
-				IsDifferent = true;
+    if (!IsSuspended && (Object != NULL || SpecialItem))
+    {
+        for (int index = 0; index < 1; index++)
+        {
+            if (!Has_Completed() && Graphic_Logic())
+            {
+                IsDifferent = true;
 
-				int cost = Cost_Per_Tick();
+                int cost = Cost_Per_Tick();
 
-				cost = min(cost, Balance);
+                cost = min(cost, Balance);
 
-				/*
-				**	Enough time has expired so that another production step can occur.
-				**	If there is insufficient funds, then go back one production step and
-				**	continue the countdown. The idea being that by the time the next
-				**	production step occurs, there may be sufficient funds available.
-				*/
-				if (cost > House->Available_Money()) {
-					Set_Stage(Fetch_Stage()-1);
-				} else {
-					House->Spend_Money(cost);
-					Balance -= cost;
-				}
+                /*
+                **	Enough time has expired so that another production step can occur.
+                **	If there is insufficient funds, then go back one production step and
+                **	continue the countdown. The idea being that by the time the next
+                **	production step occurs, there may be sufficient funds available.
+                */
+                if (cost > House->Available_Money())
+                {
+                    Set_Stage(Fetch_Stage() - 1);
+                }
+                else
+                {
+                    House->Spend_Money(cost);
+                    Balance -= cost;
+                }
 
-				/*
-				**	If the production has completed, then suspend further production.
-				*/
-				if (Fetch_Stage() == STEP_COUNT) {
-					IsSuspended = true;
-					Set_Rate(0);
-					House->Spend_Money(Balance);
-					Balance = 0;
-				}
-			}
-		}
-	}
+                /*
+                **	If the production has completed, then suspend further production.
+                */
+                if (Fetch_Stage() == STEP_COUNT)
+                {
+                    IsSuspended = true;
+                    Set_Rate(0);
+                    House->Spend_Money(Balance);
+                    Balance = 0;
+                }
+            }
+        }
+    }
 }
-
 
 
 /***********************************************************************************************
@@ -255,15 +264,16 @@ void FactoryClass::AI(void)
  *=============================================================================================*/
 void FactoryClass::Force_Complete(void)
 {
-	assert(Factories.ID(this) == ID);
-	
-	if (!IsSuspended && (Object != NULL || SpecialItem)) {
-		Set_Stage(STEP_COUNT);
-		IsSuspended = true;
-		Set_Rate(0);
-		Balance = 0;
-		IsDifferent = true;
-	}
+    assert(Factories.ID(this) == ID);
+
+    if (!IsSuspended && (Object != NULL || SpecialItem))
+    {
+        Set_Stage(STEP_COUNT);
+        IsSuspended = true;
+        Set_Rate(0);
+        Balance = 0;
+        IsDifferent = true;
+    }
 }
 
 
@@ -285,11 +295,11 @@ void FactoryClass::Force_Complete(void)
  *=============================================================================================*/
 bool FactoryClass::Has_Changed(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	bool changed = IsDifferent;
-	IsDifferent = false;
-	return(changed);
+    bool changed = IsDifferent;
+    IsDifferent = false;
+    return (changed);
 }
 
 
@@ -315,46 +325,51 @@ bool FactoryClass::Has_Changed(void)
  * HISTORY:                                                                                    *
  *   12/26/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-bool FactoryClass::Set(TechnoTypeClass const & object, HouseClass & house)
+bool FactoryClass::Set(TechnoTypeClass const& object, HouseClass& house)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	/*
-	**	If there is any production currently in progress, abandon it.
-	*/
-	Abandon();
+    /*
+    **	If there is any production currently in progress, abandon it.
+    */
+    Abandon();
 
-	/*
-	**	Set up the factory for the new production process.
-	*/
-	IsDifferent = true;
-	IsSuspended = true;
-	Set_Rate(0);
-	Set_Stage(0);
+    /*
+    **	Set up the factory for the new production process.
+    */
+    IsDifferent = true;
+    IsSuspended = true;
+    Set_Rate(0);
+    Set_Stage(0);
 
-	/*
-	**	Create an object of the type requested.
-	*/
-	Object = (TechnoClass *)object.Create_One_Of(&house);
+    /*
+    **	Create an object of the type requested.
+    */
 
-	/*
-	**	Buildings that are constructed, will default to rebuilding on so that
-	**	repair can commence and base rebuilding can occur.
-	*/
-	if (!house.IsHuman && Object != NULL && Object->What_Am_I() == RTTI_BUILDING) {
-		((BuildingClass *)Object)->IsToRebuild = true;
-	}
+    // Special logic that turns out created objects owner into our ai partner
 
-	if (Object) {
-		House  = Object->House;
-		Balance = object.Cost_Of() * house.CostBias;
-		Object->PurchasePrice = Balance;
-	}
+    HouseClass* targetHouse = &house;
+    Object = (TechnoClass*)object.Create_One_Of(targetHouse);
+    /*
+    **	Buildings that are constructed, will default to rebuilding on so that
+    **	repair can commence and base rebuilding can occur.
+    */
+    if (!house.IsHuman && Object != NULL && Object->What_Am_I() == RTTI_BUILDING)
+    {
+        ((BuildingClass*)Object)->IsToRebuild = true;
+    }
 
-	/*
-	**	If all was set up successfully, then return true.
-	*/
-	return(Object != NULL);
+    if (Object)
+    {
+        House = Object->House;
+        Balance = object.Cost_Of() * house.CostBias;
+        Object->PurchasePrice = Balance;
+    }
+
+    /*
+    **	If all was set up successfully, then return true.
+    */
+    return (Object != NULL);
 }
 
 
@@ -375,18 +390,18 @@ bool FactoryClass::Set(TechnoTypeClass const & object, HouseClass & house)
  * HISTORY:                                                                                    *
  *   12/26/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-void FactoryClass::Set(TechnoClass & object)
+void FactoryClass::Set(TechnoClass& object)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	Abandon();
-	Object = &object;
-	House  = Object->House;
-	Balance = 0;
-	Set_Rate(0);
-	Set_Stage(STEP_COUNT);
-	IsDifferent = true;
-	IsSuspended = true;
+    Abandon();
+    Object = &object;
+    House = Object->House;
+    Balance = 0;
+    Set_Rate(0);
+    Set_Stage(STEP_COUNT);
+    IsDifferent = true;
+    IsSuspended = true;
 }
 
 
@@ -409,14 +424,15 @@ void FactoryClass::Set(TechnoClass & object)
  *=============================================================================================*/
 bool FactoryClass::Suspend(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if (!IsSuspended) {
-		IsSuspended = true;
-		Set_Rate(0);
-		return(true);
-	}
-	return(false);
+    if (!IsSuspended)
+    {
+        IsSuspended = true;
+        Set_Rate(0);
+        return (true);
+    }
+    return (false);
 }
 
 
@@ -438,25 +454,28 @@ bool FactoryClass::Suspend(void)
  *=============================================================================================*/
 bool FactoryClass::Start(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if ((Object || SpecialItem) && IsSuspended && !Has_Completed()) {
-		if (House->IsHuman || House->Available_Money() >= Cost_Per_Tick()) {
-			int time;
+    if ((Object || SpecialItem) && IsSuspended && !Has_Completed())
+    {
+        if (House->IsHuman || House->Available_Money() >= Cost_Per_Tick())
+        {
+            int time;
 
-			if (Object) {
-				time = Object->Class_Of().Time_To_Build(House->Class->House);
-			}
+            if (Object)
+            {
+                time = Object->Class_Of().Time_To_Build(House->Class->House);
+            }
 
-			time /= STEP_COUNT;
-			time = Bound(time, 1, 255);
+            time /= STEP_COUNT;
+            time = Bound(time, 1, 255);
 
-			Set_Rate(time);
-			IsSuspended = false;
-			return(true);
-		}
-	}
-	return(false);
+            Set_Rate(time);
+            IsSuspended = false;
+            return (true);
+        }
+    }
+    return (false);
 }
 
 
@@ -480,41 +499,43 @@ bool FactoryClass::Start(void)
  *=============================================================================================*/
 bool FactoryClass::Abandon(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if (Object) {
+    if (Object)
+    {
+        if (Object)
+        {
+            /*
+            **	Refund all money expended so far, back to the owner of the object under construction.
+            */
+            int money = Object->Class_Of().Cost_Of() * Object->House->CostBias;
+            House->Refund_Money(money - Balance);
+            Balance = 0;
 
-		if (Object) {
-			/*
-			**	Refund all money expended so far, back to the owner of the object under construction.
-			*/
-			int money = Object->Class_Of().Cost_Of() * Object->House->CostBias;
-			House->Refund_Money(money - Balance);
-			Balance = 0;
+            /*
+            **	Delete the object under construction.
+            */
+            ScenarioInit++;
+            delete Object;
+            Object = NULL;
+            ScenarioInit--;
+        }
+        if (SpecialItem)
+        {
+            SpecialItem = SPC_NONE;
+        }
 
-			/*
-			**	Delete the object under construction.
-			*/
-			ScenarioInit++;
-			delete Object;
-			Object = NULL;
-			ScenarioInit--;
-		}
-		if (SpecialItem) {
-			SpecialItem = SPC_NONE;
-		}
+        /*
+        **	Set the factory back to the idle and empty state.
+        */
+        Set_Rate(0);
+        Set_Stage(0);
+        IsSuspended = true;
+        IsDifferent = true;
 
-		/*
-		**	Set the factory back to the idle and empty state.
-		*/
-		Set_Rate(0);
-		Set_Stage(0);
-		IsSuspended = true;
-		IsDifferent = true;
-
-		return(true);
-	}
-	return(false);
+        return (true);
+    }
+    return (false);
 }
 
 
@@ -535,9 +556,9 @@ bool FactoryClass::Abandon(void)
  *=============================================================================================*/
 int FactoryClass::Completion(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	return(Fetch_Stage());
+    return (Fetch_Stage());
 }
 
 
@@ -558,15 +579,17 @@ int FactoryClass::Completion(void)
  *=============================================================================================*/
 bool FactoryClass::Has_Completed(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if (Object && Fetch_Stage() == STEP_COUNT) {
-		return(true);
-	}
-	if (SpecialItem && Fetch_Stage() == STEP_COUNT) {
-		return(true);
-	}
-	return(false);
+    if (Object && Fetch_Stage() == STEP_COUNT)
+    {
+        return (true);
+    }
+    if (SpecialItem && Fetch_Stage() == STEP_COUNT)
+    {
+        return (true);
+    }
+    return (false);
 }
 
 
@@ -584,11 +607,11 @@ bool FactoryClass::Has_Completed(void)
  * HISTORY:                                                                                    *
  *   12/26/1994 JLB : Created.                                                                 *
  *=============================================================================================*/
-TechnoClass * FactoryClass::Get_Object(void) const
+TechnoClass* FactoryClass::Get_Object(void) const
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	return(Object);
+    return (Object);
 }
 
 
@@ -604,9 +627,9 @@ TechnoClass * FactoryClass::Get_Object(void) const
  *=========================================================================*/
 int FactoryClass::Get_Special_Item(void) const
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	return(SpecialItem);
+    return (SpecialItem);
 }
 
 
@@ -626,16 +649,18 @@ int FactoryClass::Get_Special_Item(void) const
  *=============================================================================================*/
 int FactoryClass::Cost_Per_Tick(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if (Object) {
-		int steps = STEP_COUNT - Fetch_Stage();
-		if (steps) {
-			return(Balance / steps);
-		}
-		return(Balance);
-	}
-	return(0);
+    if (Object)
+    {
+        int steps = STEP_COUNT - Fetch_Stage();
+        if (steps)
+        {
+            return (Balance / steps);
+        }
+        return (Balance);
+    }
+    return (0);
 }
 
 
@@ -658,24 +683,48 @@ int FactoryClass::Cost_Per_Tick(void)
  *=============================================================================================*/
 bool FactoryClass::Completed(void)
 {
-	assert(Factories.ID(this) == ID);
+    assert(Factories.ID(this) == ID);
 
-	if (Object && Fetch_Stage() == STEP_COUNT) {
-		Object = NULL;
-		IsSuspended = true;
-		IsDifferent = true;
-		Set_Stage(0);
-		Set_Rate(0);
-		return(true);
-	}
+    if (Object && Fetch_Stage() == STEP_COUNT)
+    {
+        bool shouldGiveToPartner = House->IsHuman && Object->What_Am_I() != RTTI_BUILDING && Object->What_Am_I() !=
+            RTTI_BUILDINGTYPE;
+        
+        UnitClass* specialUnit = nullptr;
+        specialUnit = dynamic_cast<UnitClass*>(Object);
+        if(specialUnit != NULL)
+        {
+            //  Check if its these specific units
+            UnitType type = specialUnit->Class->Type;
+            if(type == UNIT_HARVESTER || type == UNIT_MCV)
+            {
+                //  We dont want to give our AI Partner these
+                shouldGiveToPartner = false;
+            }
+        }
+        
+        if (shouldGiveToPartner)
+        {
+            Object->Captured(House->AIPartner);
+            //  Update our enemy often
+            House->AIPartner->Enemy = House->Enemy;
+        }
+        Object = NULL;
+        IsSuspended = true;
+        IsDifferent = true;
+        Set_Stage(0);
+        Set_Rate(0);
+        return (true);
+    }
 
-	if (SpecialItem && Fetch_Stage() == STEP_COUNT) {
-		SpecialItem = SPC_NONE;
-		IsSuspended = true;
-		IsDifferent = true;
-		Set_Stage(0);
-		Set_Rate(0);
-		return(true);
-	}
-	return(false);
+    if (SpecialItem && Fetch_Stage() == STEP_COUNT)
+    {
+        SpecialItem = SPC_NONE;
+        IsSuspended = true;
+        IsDifferent = true;
+        Set_Stage(0);
+        Set_Rate(0);
+        return (true);
+    }
+    return (false);
 }
