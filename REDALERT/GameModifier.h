@@ -15,6 +15,10 @@ public:
     virtual void OnBegin() = 0;
     virtual void OnEnd() = 0;
     virtual bool IsCompleted() = 0;
+    virtual bool AllowedToRun()
+    {
+        return true;
+    }
     
     char* GetModifierName();
 };

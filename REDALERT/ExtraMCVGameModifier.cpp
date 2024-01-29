@@ -30,7 +30,7 @@ void ExtraMCVGameModifier::CreateMCV(HouseClass* house)
 
 void ExtraMCVGameModifier::OnBegin()
 {
-    if (Session.Type == GAME_SKIRMISH)
+    if (Session.Type == GAME_GLYPHX_MULTIPLAYER)
     {
         
         for (HousesType house = HOUSE_MULTI1; house < (HOUSE_MULTI1 + Session.Players.Count()); house++)

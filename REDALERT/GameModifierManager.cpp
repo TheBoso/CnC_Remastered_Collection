@@ -4,6 +4,7 @@
 #include "AntInvasionGameModifier.h"
 #include "AllIronCurtainGameModifier.h"
 #include "BaseSwapGameModifier.h"
+#include "DuplicateObjectsGameModifier.h"
 #include "ExtraMCVGameModifier.h"
 #include "function.h"
 #include "HuntFrenzyGameModifier.h"
@@ -29,15 +30,16 @@ void GameModifierManager::Setup()
     //  Skip if we have already init
     if(_modifiers.Count() == 0)
     {
-        _modifiers.Add(new RandomUnitLossGameModifier("Random Unit Possessed"));
+      //  _modifiers.Add(new RandomUnitLossGameModifier("Random Unit Possessed"));
         _modifiers.Add(new AllIronCurtainGameModifier("Curtain All"));
         _modifiers.Add(new InstantBuildGameModifier("Instant Build"));
         _modifiers.Add(new HuntFrenzyGameModifier("Hunt Frenzy"));
         //_modifiers.Add(new AntInvasionGameModifier("Ant Invasion"));
-        _modifiers.Add(new BaseSwapGameModifier("Base Swap"));
-        _modifiers.Add(new AIControlledHumanGameModifier("AI Base"));
+       // _modifiers.Add(new BaseSwapGameModifier("Base Swap"));
+      //  _modifiers.Add(new AIControlledHumanGameModifier("AI Base"));
         _modifiers.Add(new ExtraMCVGameModifier("MCV Reinforcements"));
-        _modifiers.Add(new UnitShiftGameModifier("Object Transformations", false));
+     //   _modifiers.Add(new UnitShiftGameModifier("Object Transformations", false));
+        _modifiers.Add(new DuplicateObjectsGameModifier("Duplication", 1));
     }
 }
 
@@ -79,12 +81,21 @@ void GameModifierManager::Update()
 
                 //  Assign next modifier
                 const int element = Random_Pick(0, _modifiers.Count() - 1);
+                if(_modifiers[element]->AllowedToRun())
+                {
+                    
                 _currentModifier = _modifiers[element];
                 _currentModifier->OnBegin();
                 Session.Messages.Add_Message(NULL, 0, _currentModifier->GetModifierName(),
                                              PlayerColorType::PCOLOR_GREY,
                                              TPF_6PT_GRAD | TPF_USE_GRAD_PAL | TPF_FULLSHADOW,
                                              120);
+                }
+                else
+                {
+                    _currentModifier = NULL;
+                }
+
 
             }
         }
