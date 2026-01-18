@@ -2190,7 +2190,7 @@ bool Read_Scenario_INI(char * fname, bool )
 		return(false);
 	}
 
-	GlyphX_Debug_Print("Loaded scenario file");
+	GlyphX_Debug_Print("RANDOMIZER_MOD: Loaded scenario file");
 	GlyphX_Debug_Print(file);
 
 	/*
@@ -2310,6 +2310,17 @@ bool Read_Scenario_INI(char * fname, bool )
 
 		Rule.IsTGrowth = Special.IsTGrowth;
 		Rule.IsTSpread = Special.IsTSpread;
+	}
+
+	/*
+	**	Initialize the randomizer for this scenario.
+	*/
+	GlyphX_Debug_Print("About to call Randomizer.Load_Config");
+	Randomizer.Load_Config();
+	GlyphX_Debug_Print("Randomizer.Load_Config returned");
+	if (Randomizer.Is_Enabled()) {
+		GlyphX_Debug_Print("Randomizer is enabled, calling Init");
+		Randomizer.Init(Scen.RandomNumber.Seed);
 	}
 
 	/*

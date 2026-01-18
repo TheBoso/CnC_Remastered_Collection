@@ -3491,6 +3491,13 @@ void InfantryClass::Read_INI(CCINIClass & ini)
 			*/
 			classid = InfantryTypeClass::From_Name(strtok(NULL, ",\n\r"));
 
+			/*
+			**	Apply randomizer swap if enabled.
+			*/
+			if (Randomizer.Is_Enabled()) {
+				classid = Randomizer.Swap_Infantry(classid);
+			}
+
 			if (classid != INFANTRY_NONE) {
 
 				if (HouseClass::As_Pointer(inhouse) != NULL) {

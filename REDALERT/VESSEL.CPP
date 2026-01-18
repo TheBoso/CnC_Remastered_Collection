@@ -2075,6 +2075,13 @@ void VesselClass::Read_INI(CCINIClass & ini)
 		if (inhouse != HOUSE_NONE) {
 			classid = VesselTypeClass::From_Name(strtok(NULL, ","));
 
+			/*
+			**	Apply randomizer swap if enabled.
+			*/
+			if (Randomizer.Is_Enabled()) {
+				classid = Randomizer.Swap_Vessel(classid);
+			}
+
 			if (classid != VESSEL_NONE) {
 
 				if (HouseClass::As_Pointer(inhouse) != NULL) {

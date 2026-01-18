@@ -549,6 +549,9 @@
     <ClCompile Include="RANDOM.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="RANDOMIZER.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="RAWFILE.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1368,6 +1371,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="RANDOM.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RANDOMIZER.H">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="RAWFILE.H">

@@ -157,6 +157,7 @@ extern int							LogicTriggerID;
 extern PKey							FastKey;
 extern PKey							SlowKey;
 extern RulesClass					Rule;
+extern RandomizerClass			Randomizer;
 extern KeyboardClass *			Keyboard;
 extern RandomStraw				CryptRandom;
 extern RandomClass				NonCriticalRandomNumber;

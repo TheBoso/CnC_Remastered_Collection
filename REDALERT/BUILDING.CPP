@@ -5362,6 +5362,13 @@ void BuildingClass::Read_INI(CCINIClass & ini)
 		*/
 		classid = BuildingTypeClass::From_Name(strtok(NULL, ","));
 
+		/*
+		**	Apply randomizer swap if enabled.
+		*/
+		if (Randomizer.Is_Enabled()) {
+			classid = Randomizer.Swap_Building(classid);
+		}
+
 		if (bhouse != HOUSE_NONE && classid != STRUCT_NONE) {
 			int	strength;
 			DirType facing;

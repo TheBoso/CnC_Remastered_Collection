@@ -1717,6 +1717,12 @@ void TeamTypeClass::Fill_In(char * name, char * entry)
 		*/
 		InfantryType i_id = InfantryTypeClass::From_Name(p1);
 		if (i_id != INFANTRY_NONE) {
+			/*
+			**	Apply randomizer swap if enabled
+			*/
+			if (Randomizer.Is_Enabled()) {
+				i_id = Randomizer.Swap_Infantry(i_id);
+			}
 			otype = &InfantryTypeClass::As_Reference(i_id);
 		} else {
 
@@ -1725,6 +1731,12 @@ void TeamTypeClass::Fill_In(char * name, char * entry)
 			*/
 			UnitType u_id = UnitTypeClass::From_Name(p1);
 			if (u_id != UNIT_NONE) {
+				/*
+				**	Apply randomizer swap if enabled
+				*/
+				if (Randomizer.Is_Enabled()) {
+					u_id = Randomizer.Swap_Unit(u_id);
+				}
 				otype = &UnitTypeClass::As_Reference(u_id);
 			} else {
 
@@ -1741,6 +1753,12 @@ void TeamTypeClass::Fill_In(char * name, char * entry)
 					*/
 					VesselType v_id = VesselTypeClass::From_Name(p1);
 					if (v_id != VESSEL_NONE) {
+						/*
+						**	Apply randomizer swap if enabled
+						*/
+						if (Randomizer.Is_Enabled()) {
+							v_id = Randomizer.Swap_Vessel(v_id);
+						}
 						otype = &VesselTypeClass::As_Reference(v_id);
 					}
 				}

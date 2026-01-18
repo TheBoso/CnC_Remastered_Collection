@@ -4868,6 +4868,13 @@ void UnitClass::Read_INI(CCINIClass & ini)
 		if (inhouse != HOUSE_NONE) {
 			classid = UnitTypeClass::From_Name(strtok(NULL, ","));
 
+			/*
+			**	Apply randomizer swap if enabled.
+			*/
+			if (Randomizer.Is_Enabled()) {
+				classid = Randomizer.Swap_Unit(classid);
+			}
+
 			if (classid != UNIT_NONE) {
 
 				if (HouseClass::As_Pointer(inhouse) != NULL) {

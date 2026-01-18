@@ -343,6 +343,7 @@
     <ClCompile Include="RAMFILE.CPP" />
     <ClCompile Include="RAND.CPP" />
     <ClCompile Include="RANDOM.CPP" />
+    <ClCompile Include="RANDOMIZER.CPP" />
     <ClCompile Include="RAWFILE.CPP" />
     <ClCompile Include="RAWOLAPI.CPP" />
     <ClCompile Include="READLINE.CPP" />
@@ -617,6 +618,7 @@
     <ClInclude Include="RADIO.H" />
     <ClInclude Include="RAMFILE.H" />
     <ClInclude Include="RANDOM.H" />
+    <ClInclude Include="RANDOMIZER.H" />
     <ClInclude Include="RAWFILE.H" />
     <ClInclude Include="RAWOLAPI.H" />
     <ClInclude Include="READLINE.H" />
