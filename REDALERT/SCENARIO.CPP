@@ -79,6 +79,8 @@ extern bool UseGlyphXStartLocations;		//ST - 3/31/2020 9:54AM
 #include "WolStrng.h"
 #endif
 
+#include "PROCMISSION.H"
+
 static void Remove_AI_Players(void);
 static void Create_Units(bool official);
 static CELL Clip_Scatter(CELL cell, int maxdist);
@@ -2353,6 +2355,9 @@ bool Read_Scenario_INI(char * fname, bool )
 	Scen.IsNoMapSel = ini.Get_Bool(BASIC, "SkipMapSelect", Scen.IsNoMapSel);
 	Scen.IsTruckCrate = ini.Get_Bool(BASIC, "TruckCrate", Scen.IsTruckCrate);
 	Scen.IsMoneyTiberium = ini.Get_Bool(BASIC, "FillSilos", Scen.IsMoneyTiberium);
+	Scen.IsProcedural = ini.Get_Bool(BASIC, "Procedural", false);
+	Scen.ProceduralTheme = ini.Get_Int(BASIC, "ProceduralTheme", -1);  // -1 = randomly chosen
+	Scen.SurvivalTime = ini.Get_Int(BASIC, "SurvivalTime", 0);         // 0 = use default
 	Scen.Percent = ini.Get_Int(BASIC, "Percent", Scen.Percent);
 
 	/*
@@ -2661,6 +2666,15 @@ bool Read_Scenario_INI(char * fname, bool )
 	Call_Back();
 
 	/*
+	**	If this is a procedural mission, initialize the procedural mission system.
+	**	This loads the mission rules from the scenario INI and injects dynamic
+	**	content (teams, triggers, objectives) at runtime.
+	*/
+	if (Scen.IsProcedural && Session.Type == GAME_NORMAL) {
+		ProcMission.Auto_Generate_And_Inject(Scen.Difficulty);
+	}
+
+	/*
 	**	Return with flag saying that the scenario file was read.
 	*/
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98 - Added runtime check.
@@ -2669,7 +2683,7 @@ bool Read_Scenario_INI(char * fname, bool )
 		if (Session.Type == GAME_SKIRMISH || Session.Type == GAME_GLYPHX_MULTIPLAYER) {
 			bAftermathMultiplayer = NewUnitsEnabled = OverrideNewUnitsEnabled;
 		}
-	}	
+	}
 #endif
 	ScenarioInit--;
 	return(true);

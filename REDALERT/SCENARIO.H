@@ -310,6 +310,24 @@ class ScenarioClass {
 		unsigned IsMoneyTiberium:1;
 
 		/*
+		**	If this scenario should use procedural mission generation, then this
+		**	flag will be set to true. Procedural missions dynamically create
+		**	triggers, teams, and objectives at runtime based on rules in the INI.
+		*/
+		unsigned IsProcedural:1;
+
+		/*
+		**	Procedural mission theme (0=BASE_ASSAULT, 1=SURVIVAL, etc.)
+		**	Only used when IsProcedural is true.
+		*/
+		int ProceduralTheme;
+
+		/*
+		**	Survival time in seconds for SURVIVAL theme. 0 = use default (10 min).
+		*/
+		int SurvivalTime;
+
+		/*
 		**	This is the fading countdown timer.  As this timer counts down, the
 		**	fading to b&w or color will progress.  This timer represents a
 		** percentage of the Options.Get_Saturation() to fade towards.

@@ -38,6 +38,7 @@
 #include	"function.h"
 #include	"logic.h"
 #include 	"vortex.h"
+#include	"procmission.h"
 
 static unsigned FramesPerSecond=0;
 
@@ -418,6 +419,13 @@ void LogicClass::AI(void)
 		Scen.AutoSonarTimer = AUTOSONAR_PERIOD;
 	}
 #endif
+
+	/*
+	**	Procedural mission director AI (enemy wave spawning).
+	*/
+	if (Session.Type == GAME_NORMAL && Scen.IsProcedural) {
+		ProcMission.AI();
+	}
 }
 
 
