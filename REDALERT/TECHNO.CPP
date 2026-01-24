@@ -131,6 +131,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"autoplay.h"
 
 
 /***************************************************************************
@@ -159,7 +160,7 @@ const char* NewName[] = {
 	"Scout Ant",	  			"Kundschafter-Ameise",
 	"Warrior Ant",    		"Krieger-Ameise",
 	"Fire Ant",	  				"Feuer-Ameise",
-	"Queen Ant",	  			"Ameisenk”nigin",
+	"Queen Ant",	  			"Ameisenkï¿½nigin",
 	"ATS",						"Angriffs-U-Boot",
 	"Tesla Tank",	  			"Telsapanzer",
 	"Volkov",  					"Modell Volkov",
@@ -175,7 +176,7 @@ const char* NewName[] = {
 #ifdef FRENCH
 const char* NewName[] = {
 	"Scout Ant",	  			"Fourmi de Reconnaissance",
-	"Warrior Ant",    		"Fourmi GuerriŠre",
+	"Warrior Ant",    		"Fourmi Guerriï¿½re",
 	"Fire Ant",	  				"Fourmi Lance-Flammes",
 	"Queen Ant",	  			"Reine des Fourmis",
 	"ATS", 						"SMTA",
@@ -183,9 +184,9 @@ const char* NewName[] = {
 	"Volkov",  					"Volkov",
 	"Chitzkoi", 				"Cyber-Chien",
 	"Stavros",					"Stavros",
-	"F-A Longbow",				"HAA (H‚licoptŠre d'Assaut Avanc‚)",
-	"Civilian Specialist",	"Sp‚cialiste Civil",
-	"Alloy Facility",			"Usine M‚tallurgique",
+	"F-A Longbow",				"HAA (Hï¿½licoptï¿½re d'Assaut Avancï¿½)",
+	"Civilian Specialist",	"Spï¿½cialiste Civil",
+	"Alloy Facility",			"Usine Mï¿½tallurgique",
 	NULL,
 	};
 
@@ -5022,10 +5023,12 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 
 	/*
 	** Humans have to deal with their own base is attacked problems.
+	** Exception: Autonomous Player Mod allows autonomous units to respond.
 	*/
-	if (enemy == NULL || House->Is_Ally(enemy) || House->IsHuman) {
+	if (enemy == NULL || House->Is_Ally(enemy)) {
 		return;
 	}
+	bool human_house = House->IsHuman;
 
 	/*
 	**	Don't overreact if this building can defend itself.
@@ -5058,9 +5061,11 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 
 	/*
 	** We will need units to defend our base.  We need to suspend teams until
-	** the situation has been dealt with.
+	** the situation has been dealt with. (Not needed for human houses)
 	*/
-	TeamClass::Suspend_Teams(Rule.SuspendPriority, House);
+	if (!human_house) {
+		TeamClass::Suspend_Teams(Rule.SuspendPriority, House);
+	}
 
 	/*
 	** Loop through the infantry looking for those who are capable of going
@@ -5069,6 +5074,11 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 	for (int index = 0; index < Infantry.Count() && desired > 0; index++) {
 	 	InfantryClass * infantry = Infantry.Ptr(index);
 		if (infantry != NULL && infantry->Owner() == Owner()) {
+
+			/*
+			**	For human houses, only recruit autonomous units.
+			*/
+			if (human_house && !infantry->IsAutonomous) continue;
 
 			/*
 			**	Never recruit sticky guard units to defend a base.
@@ -5154,6 +5164,11 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 	for (int index = 0; index < Units.Count() && desired > 0; index++) {
 	 	UnitClass * unit = Units.Ptr(index);
 		if (unit != NULL && unit->Owner() == Owner()) {
+
+			/*
+			**	For human houses, only recruit autonomous units.
+			*/
+			if (human_house && !unit->IsAutonomous) continue;
 
 			/*
 			**	Never recruit sticky guard units to defend a base.

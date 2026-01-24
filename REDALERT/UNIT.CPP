@@ -993,6 +993,13 @@ bool UnitClass::Unlimbo(COORDINATE coord, DirType dir)
 		Set_Rate(0);
 		Set_Stage(0);
 
+		/*
+		**	Autonomous Player Mod: Auto-deploy MCV for player.
+		*/
+		if (House && House->IsPlayerControl && *this == UNIT_MCV) {
+			IsDeploying = true;
+		}
+
 		return(true);
 	}
 	return(false);
@@ -1220,8 +1227,9 @@ ResultType UnitClass::Take_Damage(int & damage, int distance, WarheadType warhea
 
 		/*
 		**	Computer controlled harvester will radio for help if they are attacked.
+		**	Autonomous Player Mod: Player harvesters also call for help.
 		*/
-		if (*this == UNIT_HARVESTER && !House->IsHuman && source) {
+		if (*this == UNIT_HARVESTER && source) {
 			Base_Is_Attacked(source);
 		}
 	}
@@ -1424,10 +1432,15 @@ void UnitClass::Enter_Idle_Mode(bool initial)
 				return;
 			}
 
-			if (House->IQ < Rule.IQGuardArea || Team.Is_Valid()) {
+			if (Team.Is_Valid()) {
 				order = MISSION_GUARD;
+			} else if (House->IsHuman || House->IQ >= Rule.IQGuardArea) {
+				if (House->IsHuman) 
+					this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+				else
+					order = MISSION_GUARD_AREA;
 			} else {
-				order = MISSION_GUARD_AREA;
+				order = MISSION_GUARD;
 			}
 		}
 	}

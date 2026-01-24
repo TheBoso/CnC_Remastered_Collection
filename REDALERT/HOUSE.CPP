@@ -139,6 +139,7 @@
 ** New sidebar for GlyphX multiplayer. ST - 8/7/2019 10:10AM
 */
 #include "SidebarGlyphx.h"
+#include "AUTOPLAY.H"
 
 TFixedIHeapClass<HouseClass::BuildChoiceClass> HouseClass::BuildChoice;
 
@@ -662,6 +663,9 @@ HouseClass::HouseClass(HousesType house) :
 	new (&SuperWeapon[SPC_SPY_MISSION]) SuperClass(TICKS_PER_MINUTE * Rule.SpyTime, false, VOX_NONE, VOX_SPY_PLANE, VOX_NOT_READY, VOX_NOT_READY);
 	new (&SuperWeapon[SPC_IRON_CURTAIN]) SuperClass(TICKS_PER_MINUTE * Rule.IronCurtainTime, true, VOX_IRON_CHARGING, VOX_IRON_READY, VOX_NOT_READY, VOX_INSUFFICIENT_POWER);
 	new (&SuperWeapon[SPC_GPS]) SuperClass(TICKS_PER_MINUTE * Rule.GPSTime, true, VOX_NONE, VOX_NONE, VOX_NOT_READY, VOX_INSUFFICIENT_POWER);
+	new (&SuperWeapon[SPC_AUTO_SCOUT]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
+	new (&SuperWeapon[SPC_AUTO_PATROL]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
+	new (&SuperWeapon[SPC_AUTO_ATTACK]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
 
 	memset(UnitsKilled, '\0', sizeof(UnitsKilled));
 	memset(BuildingsKilled, '\0', sizeof(BuildingsKilled));
@@ -1402,6 +1406,55 @@ void HouseClass::Super_Weapon_Handler(void)
 			*/
 			if (!super->Is_Ready() && super->Is_Powered() && !super->Is_One_Time()) {
 				super->Suspend(Power_Fraction() < 1);
+			}
+		}
+	}
+
+	/*
+	** Enable autonomous mode buttons for player-controlled houses.
+	** These are always available and instant-fire (no charging).
+	*/
+	if (IsPlayerControl) {
+		if (!SuperWeapon[SPC_AUTO_SCOUT].Is_Present()) {
+			SuperWeapon[SPC_AUTO_SCOUT].Enable(false, true, false);
+			SuperWeapon[SPC_AUTO_SCOUT].Forced_Charge(this == PlayerPtr);
+			if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+				if (IsHuman) {
+					Sidebar_Glyphx_Add(RTTI_SPECIAL, SPC_AUTO_SCOUT, this);
+				}
+			} else {
+				if (this == PlayerPtr) {
+					Map.Add(RTTI_SPECIAL, SPC_AUTO_SCOUT);
+					Map.Column[1].Flag_To_Redraw();
+				}
+			}
+		}
+		if (!SuperWeapon[SPC_AUTO_PATROL].Is_Present()) {
+			SuperWeapon[SPC_AUTO_PATROL].Enable(false, true, false);
+			SuperWeapon[SPC_AUTO_PATROL].Forced_Charge(this == PlayerPtr);
+			if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+				if (IsHuman) {
+					Sidebar_Glyphx_Add(RTTI_SPECIAL, SPC_AUTO_PATROL, this);
+				}
+			} else {
+				if (this == PlayerPtr) {
+					Map.Add(RTTI_SPECIAL, SPC_AUTO_PATROL);
+					Map.Column[1].Flag_To_Redraw();
+				}
+			}
+		}
+		if (!SuperWeapon[SPC_AUTO_ATTACK].Is_Present()) {
+			SuperWeapon[SPC_AUTO_ATTACK].Enable(false, true, false);
+			SuperWeapon[SPC_AUTO_ATTACK].Forced_Charge(this == PlayerPtr);
+			if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+				if (IsHuman) {
+					Sidebar_Glyphx_Add(RTTI_SPECIAL, SPC_AUTO_ATTACK, this);
+				}
+			} else {
+				if (this == PlayerPtr) {
+					Map.Add(RTTI_SPECIAL, SPC_AUTO_ATTACK);
+					Map.Column[1].Flag_To_Redraw();
+				}
 			}
 		}
 	}
@@ -2708,6 +2761,11 @@ bool HouseClass::Place_Special_Blast(SpecialWeaponType id, CELL cell)
 {
 	assert(Houses.ID(this) == ID);
 
+	// Debug output for tracing
+	char debug_buf[128];
+	sprintf(debug_buf, "Place_Special_Blast called: id=%d cell=%d", (int)id, (int)cell);
+	GlyphX_Debug_Print(debug_buf);
+
 	// Added. ST - 12/2/2019 11:26AM
 	bool fired = false;
 	const char *what = NULL;
@@ -3031,6 +3089,84 @@ bool HouseClass::Place_Special_Blast(SpecialWeaponType id, CELL cell)
 
 				break;
 			}
+
+		case SPC_AUTO_SCOUT:
+		case SPC_AUTO_PATROL:
+			{
+				AutoModeType mode = (id == SPC_AUTO_SCOUT) ? AUTOMODE_SCOUT : AUTOMODE_PATROL;
+				what = (id == SPC_AUTO_SCOUT) ? "AUTO_SCOUT" : "AUTO_PATROL";
+
+				int units_affected = 0;
+
+				// Set autonomous mode on all selected units owned by this house
+				for (int index = 0; index < Units.Count(); index++) {
+					UnitClass * unit = Units.Ptr(index);
+					if (unit != NULL && unit->House == this && unit->Is_Selected_By_Player(this)) {
+						unit->Set_Autonomous_Mode(mode);
+						units_affected++;
+					}
+				}
+				for (int index = 0; index < Infantry.Count(); index++) {
+					InfantryClass * inf = Infantry.Ptr(index);
+					if (inf != NULL && inf->House == this && inf->Is_Selected_By_Player(this)) {
+						inf->Set_Autonomous_Mode(mode);
+						units_affected++;
+					}
+				}
+				for (int index = 0; index < Vessels.Count(); index++) {
+					VesselClass * vessel = Vessels.Ptr(index);
+					if (vessel != NULL && vessel->House == this && vessel->Is_Selected_By_Player(this)) {
+						vessel->Set_Autonomous_Mode(mode);
+						units_affected++;
+					}
+				}
+				for (int index = 0; index < Aircraft.Count(); index++) {
+					AircraftClass * aircraft = Aircraft.Ptr(index);
+					if (aircraft != NULL && aircraft->House == this && aircraft->Is_Selected_By_Player(this)) {
+						aircraft->Set_Autonomous_Mode(mode);
+						units_affected++;
+					}
+				}
+
+				// Debug output
+				char debug_msg[128];
+				sprintf(debug_msg, "Auto mode %d set on %d units", (int)mode, units_affected);
+				GlyphX_Debug_Print(debug_msg);
+
+				// Play sound if any units were affected
+				if (units_affected > 0) {
+					Sound_Effect(VOC_RADAR_ON);
+				}
+
+				// Immediately recharge so button stays available
+				SuperWeapon[id].Forced_Charge(this == PlayerPtr);
+				fired = true;
+			}
+			break;
+
+		case SPC_AUTO_ATTACK:
+			{
+				what = "AUTO_ATTACK";
+
+				// Create a temporary team for coordinated attack
+				// Use the clicked cell as the gather point
+				int units_affected = Create_Attack_Team(this, cell);
+
+				// Debug output
+				char debug_msg[128];
+				sprintf(debug_msg, "Attack team created with %d units, gather at cell %d", units_affected, cell);
+				GlyphX_Debug_Print(debug_msg);
+
+				// Play sound if any units were affected
+				if (units_affected > 0) {
+					Sound_Effect(VOC_RADAR_ON);
+				}
+
+				// Immediately recharge so button stays available
+				SuperWeapon[id].Forced_Charge(this == PlayerPtr);
+				fired = true;
+			}
+			break;
 	}
 
 	/*
@@ -7147,6 +7283,49 @@ TARGET HouseClass::Find_Juicy_Target(COORDINATE coord) const
 		return(best->As_Target());
 	}
 	return(TARGET_NONE);
+}
+
+
+/***********************************************************************************************
+ * HouseClass::Find_Enemy_Base_Center -- Finds the center of the enemy base.                   *
+ *                                                                                             *
+ *    This routine is used by the Autonomous Player Mod to find the center of the enemy's      *
+ *    base so that attack groups can approach and assault it.                                  *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Returns with the coordinate of the enemy base center, or 0 if none found.          *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/2026 - Created for Autonomous Player Mod                                               *
+ *=============================================================================================*/
+COORDINATE HouseClass::Find_Enemy_Base_Center(void) const
+{
+	assert(Houses.ID(this) == ID);
+
+	/*
+	** First try to use the designated enemy house's base center
+	*/
+	if (Enemy != HOUSE_NONE) {
+		HouseClass * enemy = HouseClass::As_Pointer(Enemy);
+		if (enemy && enemy->Center) {
+			return enemy->Center;
+		}
+	}
+
+	/*
+	** Fallback: scan for any enemy building and return its coordinate
+	*/
+	for (int index = 0; index < Buildings.Count(); index++) {
+		BuildingClass * bldg = Buildings.Ptr(index);
+		if (bldg && !bldg->IsInLimbo && !Is_Ally(bldg)) {
+			return bldg->Center_Coord();
+		}
+	}
+
+	return 0;
 }
 
 

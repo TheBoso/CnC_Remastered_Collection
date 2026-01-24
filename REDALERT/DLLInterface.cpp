@@ -38,6 +38,7 @@
 #include "Gadget.h"
 #include "defines.h" // VOC_COUNT, VOX_COUNT
 #include "SidebarGlyphx.h"
+#include "autoplay.h"
 
 #include <chrono>
 
@@ -210,6 +211,9 @@ class DLLExportClass {
 		static void Selected_Stop(uint64 player_id);
 		static void Team_Units_Formation_Toggle_On(uint64 player_id);
 		static void Units_Queued_Movement_Toggle(uint64 player_id, bool toggle);
+
+		// Autonomous Player Mod: Set autonomous mode for selected units
+		static void Set_Selected_AutoMode(uint64 player_id, AutoModeType mode);
 
 		static void Cell_Class_Draw_It(CNCDynamicMapStruct *dynamic_map, int &entry_index, CellClass *cell_ptr, int xpixel, int ypixel, bool debug_output);
 		static bool Get_Dynamic_Map_State(uint64 player_id, unsigned char *buffer_in, unsigned int buffer_size);
@@ -1767,6 +1771,7 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 		HouseClass *old_player_ptr = PlayerPtr;
 		Logic.Clear_Recently_Created_Bits();
 		Logic.AI();
+		Autonomous_Player_AI();  // Autonomous Player Mod
 		DLLExportClass::Logic_Switch_Player_Context(old_player_ptr);
 	}
 	FirstUpdate = false;
@@ -4128,9 +4133,25 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Input(InputRequestEnum 
 		}
 
 		// MBL 09.08.2020 - Mod Support
+		// Modified for Autonomous Player Mod - use hotkeys 1/2/3 to set unit modes
 		case INPUT_REQUEST_MOD_GAME_COMMAND_1_AT_POSITION:
+		{
+			// Autonomous Player Mod: Hotkey 1 = Scout mode (Hunt)
+			DLLExportClass::Set_Selected_AutoMode(player_id, AUTOMODE_SCOUT);
+			break;
+		}
 		case INPUT_REQUEST_MOD_GAME_COMMAND_2_AT_POSITION:
+		{
+			// Autonomous Player Mod: Hotkey 2 = Patrol mode (Guard Area)
+			DLLExportClass::Set_Selected_AutoMode(player_id, AUTOMODE_PATROL);
+			break;
+		}
 		case INPUT_REQUEST_MOD_GAME_COMMAND_3_AT_POSITION:
+		{
+			// Autonomous Player Mod: Hotkey 3 = Attack mode (Coordinated Assault)
+			DLLExportClass::Set_Selected_AutoMode(player_id, AUTOMODE_ATTACK);
+			break;
+		}
 		case INPUT_REQUEST_MOD_GAME_COMMAND_4_AT_POSITION:
 		{
 			DLLExportClass::Adjust_Internal_View();
@@ -4323,6 +4344,10 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Sidebar_Request(Sidebar
 **************************************************************************************************/
 extern "C" __declspec(dllexport) void __cdecl CNC_Handle_SuperWeapon_Request(SuperWeaponRequestEnum request_type, uint64 player_id, int buildable_type, int buildable_id, int x1, int y1)
 {
+	char debug_buf[128];
+	sprintf(debug_buf, "SuperWeapon_Request: type=%d id=%d x=%d y=%d", buildable_type, buildable_id, x1, y1);
+	GlyphX_Debug_Print(debug_buf);
+
 	if (!DLLExportClass::Set_Player_Context(player_id)) {
 		return;
 	}
@@ -4939,6 +4964,27 @@ void DLLExportClass::Convert_Special_Weapon_Type(SpecialWeaponType weapon_type, 
 			strncpy(weapon_name, "SW_Chrono2", 16);
 		}
 		break;
+	case SPC_AUTO_SCOUT:
+		dll_weapon_type = SW_AUTO_SCOUT;
+		if (weapon_name != NULL)
+		{
+			strncpy(weapon_name, "SW_AutoScout", 16);
+		}
+		break;
+	case SPC_AUTO_PATROL:
+		dll_weapon_type = SW_AUTO_PATROL;
+		if (weapon_name != NULL)
+		{
+			strncpy(weapon_name, "SW_AutoPatrol", 16);
+		}
+		break;
+	case SPC_AUTO_ATTACK:
+		dll_weapon_type = SW_AUTO_ATTACK;
+		if (weapon_name != NULL)
+		{
+			strncpy(weapon_name, "SW_AutoAttack", 16);
+		}
+		break;
 	default:
 		dll_weapon_type = SW_UNKNOWN;
 		if (weapon_name != NULL)
@@ -4965,6 +5011,9 @@ void DLLExportClass::Fill_Sidebar_Entry_From_Special_Weapon(CNCSidebarEntryStruc
 	case SPC_IRON_CURTAIN:
 	case SPC_GPS:
 	case SPC_CHRONO2:
+	case SPC_AUTO_SCOUT:
+	case SPC_AUTO_PATROL:
+	case SPC_AUTO_ATTACK:
 		Convert_Special_Weapon_Type(weapon_type, sidebar_entry_out.SuperWeaponType, sidebar_entry_out.AssetName);
 		break;
 	default:
@@ -7040,9 +7089,10 @@ void DLLExportClass::Refresh_Player_Control_Flags(void)
 		HouseClass *player_ptr = HouseClass::As_Pointer(Session.Players[i]->Player.ID);
 
 		if (player_ptr) {
-			  
+
 			if (i == CurrentLocalPlayerIndex && player_ptr->IsHuman) {
 				player_ptr->IsPlayerControl = true;
+				player_ptr->IQ = 3;  // Autonomous Player Mod: Give player IQ for AI features
 			} else {
 				player_ptr->IsPlayerControl = false;
 			}
@@ -7590,6 +7640,34 @@ void DLLExportClass::Selected_Stop(uint64 player_id)
 
 			if (tech != NULL && (tech->Can_Player_Move() || (tech->Can_Player_Fire() && tech->What_Am_I() != RTTI_BUILDING))) {
 				OutList.Add(EventClass(EventClass::IDLE, TargetClass(tech)));
+			}
+		}
+	}
+}
+
+/**************************************************************************************************
+* DLLExportClass::Set_Selected_AutoMode
+*
+* Autonomous Player Mod: Set the autonomous behavior mode for all selected units.
+*
+* History: 01/2026 - Created for Autonomous Player Mod
+**************************************************************************************************/
+void DLLExportClass::Set_Selected_AutoMode(uint64 player_id, AutoModeType mode)
+{
+	/*
+	** Get the player for this...
+	*/
+	if (!DLLExportClass::Set_Player_Context(player_id)) {
+		return;
+	}
+
+	if (CurrentObject.Count()) {
+		for (int index = 0; index < CurrentObject.Count(); index++) {
+			ObjectClass * obj = CurrentObject[index];
+
+			if (obj != NULL && obj->Is_Foot()) {
+				FootClass * foot = (FootClass *)obj;
+				foot->Set_Autonomous_Mode(mode);
 			}
 		}
 	}

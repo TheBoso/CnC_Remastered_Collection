@@ -76,6 +76,8 @@ TeamMissionClass TeamMissions[TMISSION_COUNT] = {
 	{TMISSION_LOAD},
 	{TMISSION_SPY},
 	{TMISSION_PATROL},
+	{TMISSION_GATHER},
+	{TMISSION_MOVE_NEAR_ENEMY},
 };
 
 
@@ -142,7 +144,9 @@ char const * TeamTypeClass::TMissions[TMISSION_COUNT] = {
 	"Invulnerable",
 	"Load onto Transport",
 	"Spy on bldg @ waypt...",
-	"Patrol to waypoint..."
+	"Patrol to waypoint...",
+	"Gather",
+	"Move near enemy base"
 };
 
 

@@ -215,7 +215,7 @@ class TeamClass : public AbstractClass
 
 		bool Is_Empty(void) const {return(Member == (void*)NULL);}
 		bool Has_Entered_Map(void) const;
-		void Force_Active(void) {IsForcedActive = true;IsUnderStrength=false;};
+		void Force_Active(void) {IsForcedActive = true; IsUnderStrength = false; IsReforming = false;};
 		bool Remove(FootClass *, int typeindex=-1);
 		void Detach(TARGET target, bool all);
 		void AI(void);
@@ -250,6 +250,7 @@ class TeamClass : public AbstractClass
 		int TMission_Set_Global(void);
 		int TMission_Patrol(void);
 		int TMission_Deploy(void);
+		int TMission_Move_Near_Enemy(void);
 		bool Coordinate_Regroup(void);
 		void Coordinate_Attack(void);
 		void Coordinate_Move(void);

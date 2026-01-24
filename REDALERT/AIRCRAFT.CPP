@@ -329,6 +329,7 @@ bool AircraftClass::Unlimbo(COORDINATE coord, DirType dir)
 		} else {
 			Set_Speed(0);
 		}
+
 		return(true);
 	}
 	return(false);
@@ -1996,7 +1997,7 @@ void AircraftClass::Enter_Idle_Mode(bool )
 			} else {
 				Assign_Destination(TARGET_NONE);
 				Assign_Target(TARGET_NONE);
-				mission = MISSION_GUARD;
+				mission = House->IsHuman ? MISSION_GUARD_AREA : MISSION_GUARD;
 			}
 		} else {
 			if (Is_Something_Attached()) {
@@ -3874,7 +3875,6 @@ int AircraftClass::Mission_Guard_Area(void)
 		if (!Team.Is_Valid()) Enter_Idle_Mode();
 		return(1);
 	}
-	if (House->IsHuman) return(TICKS_PER_SECOND);
 
 	if (Height == 0 && !In_Radio_Contact()) {
 		Scatter(0, true);

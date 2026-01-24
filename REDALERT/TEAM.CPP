@@ -74,6 +74,7 @@
 
 #include "function.h"
 #include "mission.h"
+#include "autoplay.h"
 
 
 /***********************************************************************************************
@@ -293,6 +294,15 @@ TeamClass::~TeamClass(void)
 			Remove(Member);
 		}
 		Class->Number--;
+
+		/*
+		**	If this was a transient team type and no more teams of this type exist,
+		**	delete the team type to free memory. This handles temporary attack teams
+		**	created by the Autonomous Player system.
+		*/
+		if (Class->IsTransient && Class->Number == 0) {
+			delete (TeamTypeClass *)Class.operator->();
+		}
 
 		/*
 		**	When the team dies, any trigger associated with it, dies as well. This will only occur
@@ -701,6 +711,11 @@ void TeamClass::AI(void)
 	if (IsMoving && !IsReforming && IsNextMission) {
 		IsNextMission = false;
 		CurrentMission++;
+
+		char dbg[128];
+		sprintf(dbg, "Team advancing to mission %d of %d", CurrentMission, Class->MissionCount);
+		GlyphX_Debug_Print(dbg);
+
 		if (CurrentMission < Class->MissionCount) {
 			TeamMissionClass const * mission = &Class->MissionList[CurrentMission];
 
@@ -840,6 +855,84 @@ void TeamClass::AI(void)
 
 			case TMISSION_LOOP:
 				TMission_Loop();
+				break;
+
+			case TMISSION_GATHER:
+				/*
+				** Autonomous Player: Gather at player-specified location
+				** The gather cell is stored in mission->Data.Value
+				** Uses looser gathering check - advance when most units are close enough
+				*/
+				{
+					/*
+					** If we don't have a target yet, use the player-specified gather cell
+					*/
+					if (!Target_Legal(Target)) {
+						CELL gather_cell = (CELL)mission->Data.Value;
+						if (gather_cell != 0) {
+							Target = ::As_Target(gather_cell);
+							char buf[128];
+							sprintf(buf, "TMISSION_GATHER: Rally point set to player-specified cell %d", gather_cell);
+							GlyphX_Debug_Print(buf);
+						} else {
+							// Fallback to team center if no cell specified
+							Target = Zone;
+							GlyphX_Debug_Print("TMISSION_GATHER: No cell specified, using team center");
+						}
+					}
+
+					/*
+					** Count units and check how many are within gather radius
+					*/
+					int total_units = 0;
+					int gathered_units = 0;
+					const int GATHER_RADIUS = CELL_LEPTON_W * 6;  // 6 cells is "close enough"
+
+					FootClass * unit = Member;
+					while (unit != NULL) {
+						if (_Is_It_Playing(unit)) {
+							total_units++;
+
+							int dist = unit->Distance(Target);
+							if (dist <= GATHER_RADIUS) {
+								gathered_units++;
+							} else {
+								// Unit is too far - tell it to move toward target
+								if (unit->Mission != MISSION_MOVE || unit->NavCom != Target) {
+									unit->Assign_Mission(MISSION_MOVE);
+									unit->Assign_Destination(Target);
+								}
+							}
+						}
+						unit = unit->Member;
+					}
+
+					/*
+					** Advance to next mission when 60% of units are gathered
+					** (or if no units remain)
+					*/
+					if (total_units == 0) {
+						IsNextMission = true;
+					} else {
+						int threshold = (total_units * 60) / 100;
+						if (threshold < 1) threshold = 1;
+
+						if (gathered_units >= threshold) {
+							char buf[128];
+							sprintf(buf, "TMISSION_GATHER: %d/%d units gathered, advancing", gathered_units, total_units);
+							GlyphX_Debug_Print(buf);
+							IsNextMission = true;
+						}
+					}
+				}
+				break;
+
+			case TMISSION_MOVE_NEAR_ENEMY:
+				/*
+				** Autonomous Player: Move to position near enemy base
+				** Calculate target position and move there
+				*/
+				TMission_Move_Near_Enemy();
 				break;
 		}
 
@@ -3029,6 +3122,152 @@ int TeamClass::TMission_Deploy(void)
 	if (finished) {
 		IsNextMission = true;
 	}
+	return(1);
+}
+
+
+/***********************************************************************************************
+ * TeamClass::TMission_Move_Near_Enemy -- Moves team to position near enemy base.              *
+ *                                                                                             *
+ *    This routine is used by the Autonomous Player Mod. It finds the enemy base and moves     *
+ *    the team to a position a safe distance away to regroup before attacking.                 *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Returns the time delay before calling this routine again.                          *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/2026 - Created for Autonomous Player Mod                                               *
+ *=============================================================================================*/
+int TeamClass::TMission_Move_Near_Enemy(void)
+{
+	assert(IsActive);
+	assert(Teams.ID(this) == ID);
+
+	/*
+	** If we don't have a target yet, calculate position near enemy base
+	*/
+	if (!Target_Legal(Target)) {
+		GlyphX_Debug_Print("TMission_Move_Near_Enemy: Calculating rally point");
+
+		COORDINATE enemy_base = House->Find_Enemy_Base_Center();
+
+		if (enemy_base != 0) {
+			/*
+			** Find team center to determine approach direction
+			*/
+			TARGET center_target;
+			TARGET obj_target;
+			Calc_Center(center_target, obj_target);
+
+			COORDINATE team_center = As_Coord(center_target);
+			if (team_center == 0) {
+				FootClass * leader = Fetch_A_Leader();
+				if (leader != NULL) {
+					team_center = leader->Center_Coord();
+				}
+			}
+
+			if (team_center != 0) {
+				/*
+				** Calculate a rally point between us and the enemy base,
+				** APPROACH_RANGE away from the enemy
+				*/
+				int dx = Coord_X(enemy_base) - Coord_X(team_center);
+				int dy = Coord_Y(enemy_base) - Coord_Y(team_center);
+
+				int distance = ::Distance(team_center, enemy_base);
+				if (distance > APPROACH_RANGE) {
+					/*
+					** Move towards enemy but stop APPROACH_RANGE away
+					*/
+					int target_dist = distance - APPROACH_RANGE;
+					int new_x = Coord_X(team_center) + (dx * target_dist / distance);
+					int new_y = Coord_Y(team_center) + (dy * target_dist / distance);
+
+					COORDINATE rally_point = XY_Coord(new_x, new_y);
+					CELL rally_cell = Coord_Cell(rally_point);
+
+					Target = ::As_Target(rally_cell);
+					Assign_Mission_Target(::As_Target(rally_cell));
+
+					char buf[128];
+					sprintf(buf, "TMission_Move_Near_Enemy: Rally point set, dist=%d cells, approach=%d",
+					        distance / CELL_LEPTON_W, APPROACH_RANGE / CELL_LEPTON_W);
+					GlyphX_Debug_Print(buf);
+				} else {
+					/*
+					** We're already close enough, proceed to next mission
+					*/
+					char buf[128];
+					sprintf(buf, "TMission_Move_Near_Enemy: Already within %d cells, advancing",
+					        APPROACH_RANGE / CELL_LEPTON_W);
+					GlyphX_Debug_Print(buf);
+					IsNextMission = true;
+					return(1);
+				}
+			} else {
+				GlyphX_Debug_Print("TMission_Move_Near_Enemy: No team center found, skipping");
+				IsNextMission = true;
+				return(1);
+			}
+		} else {
+			/*
+			** No enemy base found, skip to attack mission
+			*/
+			GlyphX_Debug_Print("TMission_Move_Near_Enemy: No enemy base found, skipping");
+			IsNextMission = true;
+			return(1);
+		}
+	}
+
+	/*
+	** Move units toward the destination with looser gathering check
+	** Advance when 60% of units are within gather radius
+	*/
+	int total_units = 0;
+	int gathered_units = 0;
+	const int GATHER_RADIUS = CELL_LEPTON_W * 6;  // 6 cells is "close enough"
+
+	FootClass * unit = Member;
+	while (unit != NULL) {
+		if (_Is_It_Playing(unit)) {
+			total_units++;
+
+			int dist = unit->Distance(Target);
+			if (dist <= GATHER_RADIUS) {
+				gathered_units++;
+			} else {
+				// Unit is too far - tell it to move toward target
+				if (unit->Mission != MISSION_MOVE || unit->NavCom != Target) {
+					unit->Assign_Mission(MISSION_MOVE);
+					unit->Assign_Destination(Target);
+				}
+			}
+		}
+		unit = unit->Member;
+	}
+
+	/*
+	** Advance to next mission when 60% of units are gathered
+	** (or if no units remain)
+	*/
+	if (total_units == 0) {
+		IsNextMission = true;
+	} else {
+		int threshold = (total_units * 60) / 100;
+		if (threshold < 1) threshold = 1;
+
+		if (gathered_units >= threshold) {
+			char buf[128];
+			sprintf(buf, "TMission_Move_Near_Enemy: %d/%d units gathered, advancing", gathered_units, total_units);
+			GlyphX_Debug_Print(buf);
+			IsNextMission = true;
+		}
+	}
+
 	return(1);
 }
 

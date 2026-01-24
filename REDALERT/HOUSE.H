@@ -662,6 +662,7 @@ class HouseClass {
 		int Factory_Count(RTTIType rtti) const;
 		DiffType Assign_Handicap(DiffType handicap);
 		TARGET Find_Juicy_Target(COORDINATE coord) const;
+		COORDINATE Find_Enemy_Base_Center(void) const;  // Autonomous Player Mod
 		void Print_Zone_Stats(int x, int y, ZoneType zone, MonoClass * mono) const;
 		CELL Where_To_Go(FootClass const * object) const;
 		CELL Zone_Cell(ZoneType zone) const;

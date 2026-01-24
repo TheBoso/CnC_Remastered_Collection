@@ -2406,6 +2406,7 @@ bool Read_Scenario_INI(char * fname, bool )
 	}
 	PlayerPtr->IsHuman = true;
 	PlayerPtr->IsPlayerControl = true;
+	PlayerPtr->IQ = 3;  // Autonomous Player Mod: Give player IQ for AI features like auto-repair
 
 //	if (NewINIFormat < 2 || !ini.Is_Present("MapPack")) {
 //		Map.Read_Binary(root, &ScenarioCRC);

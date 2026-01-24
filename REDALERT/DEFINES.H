@@ -812,6 +812,9 @@ typedef enum SpecialWeaponType : char {
 	SPC_SPY_MISSION,			// Spy plane to take photo recon mission.
 	SPC_IRON_CURTAIN,			// Bestow invulnerability on a unit/building
 	SPC_GPS,						// give allies free unjammable radar.
+	SPC_AUTO_SCOUT,				// Set selected units to autonomous scout mode
+	SPC_AUTO_PATROL,			// Set selected units to autonomous patrol mode
+	SPC_AUTO_ATTACK,			// Set selected units to autonomous attack mode
 
 	SPC_COUNT,
 	SPC_FIRST=0,

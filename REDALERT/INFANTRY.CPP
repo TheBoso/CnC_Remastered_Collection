@@ -1821,25 +1821,22 @@ void InfantryClass::Enter_Idle_Mode(bool )
 			}
 
 			if (Class->IsDog) {
-				if (House->IsHuman || Team.Is_Valid()) {
+				if (Team.Is_Valid()) {
 					order = MISSION_GUARD;
 				} else {
 					order = MISSION_GUARD_AREA;
 					ArchiveTarget = ::As_Target(Coord_Cell(Center_Coord()));
 				}
 			} else {
-				if (House->IsHuman || Team.Is_Valid()) {
+				if (Team.Is_Valid()) {
 					order = MISSION_GUARD;
+				} else if (Is_Weapon_Equipped() && (House->IsHuman || House->IQ >= Rule.IQGuardArea)) {
+					if (House->IsHuman) 
+						this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+					else
+						order = MISSION_GUARD_AREA;
 				} else {
-					if (House->IQ < Rule.IQGuardArea) {
-						order = MISSION_GUARD;
-					} else {
-						if (Is_Weapon_Equipped()) {
-							order = MISSION_GUARD_AREA;
-						} else {
-							order = MISSION_GUARD;
-						}
-					}
+					order = MISSION_GUARD;
 				}
 			}
 		}
@@ -2405,6 +2402,7 @@ bool InfantryClass::Unlimbo(COORDINATE coord, DirType facing)
 		}
 
 		Set_Occupy_Bit(coord);
+
 		return(true);
 	}
 	return(false);

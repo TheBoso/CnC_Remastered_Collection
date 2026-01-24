@@ -57,6 +57,8 @@ typedef enum TeamMissionType : char {
 	TMISSION_LOAD,						// Load onto transport member of team.
 	TMISSION_SPY,						// Spy enter the building at specified waypoint
 	TMISSION_PATROL,					// Move but look for enemies as well.
+	TMISSION_GATHER,					// Autonomous Player: Gather/regroup at current location.
+	TMISSION_MOVE_NEAR_ENEMY,		// Autonomous Player: Move to position near enemy base.
 
 	TMISSION_COUNT,
 	TMISSION_FIRST=0

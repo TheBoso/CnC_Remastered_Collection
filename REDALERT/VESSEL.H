@@ -84,6 +84,7 @@ class VesselClass : public DriveClass
 
 		virtual ~VesselClass(void);
 		virtual ObjectTypeClass const & Class_Of(void) const;
+		virtual bool Unlimbo(COORDINATE coord, DirType dir = DIR_N);
 
 		virtual MZoneType Zone_Check_Type(void) const {return(MZONE_WATER);}
 		int Shape_Number(void) const;

@@ -39,6 +39,7 @@
 #include	"type.h"
 #include	"techno.h"
 #include	"ftimer.h"
+#include	"autoplay.h"
 
 class UnitClass;
 class BuildingClass;
@@ -153,6 +154,37 @@ class FootClass :	public TechnoClass
 		**	If this object is moving onto a bridge, then this flag will be true.
 		*/
 		unsigned IsMovingOntoBridge:1;
+
+		/*
+		**	Autonomous Player Mod: If this unit is in autonomous mode, this flag will be true.
+		**	The player cannot directly control units in autonomous mode.
+		*/
+		unsigned IsAutonomous:1;
+
+		/*
+		**	Autonomous Player Mod: Current behavior mode for autonomous units.
+		*/
+		AutoModeType AutonomousMode;
+
+		/*
+		**	Autonomous Player Mod: Current phase in attack sequence for coordinated assault.
+		*/
+		AttackPhaseType AttackPhase;
+
+		/*
+		**	Autonomous Player Mod: Current phase in patrol sequence.
+		*/
+		PatrolPhaseType PatrolPhase;
+
+		/*
+		**	Autonomous Player Mod: Timer for patrol guard duration (counts down each frame).
+		*/
+		int PatrolTimer;
+
+		/*
+		**	Autonomous Player Mod: Home coordinate for patrol area center.
+		*/
+		COORDINATE PatrolHome;
 
 		/*
 		**	This is the "throttle setting" of the unit. It is a fractional value with 0 = stop
@@ -328,6 +360,11 @@ class FootClass :	public TechnoClass
 		virtual int Mission_Guard(void);
 		virtual int Mission_Hunt(void);
 		virtual int Mission_Guard_Area(void);
+
+		/*
+		**	Autonomous Player Mod: Set the autonomous behavior mode.
+		*/
+		void Set_Autonomous_Mode(AutoModeType mode);
 
 		/*
 		**	Scenario and debug support.

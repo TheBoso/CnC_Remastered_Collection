@@ -116,7 +116,10 @@ char const * const SpecialWeaponName[SPC_COUNT] = {
 	"Paratroopers",
 	"Recon Plane",
 	"Iron Curtain",
-	"GPS Satellite"
+	"GPS Satellite",
+	"Auto Scout",
+	"Auto Patrol",
+	"Auto Attack"
 };
 #endif
 int const SpecialWeaponHelp[SPC_COUNT] = {
@@ -127,7 +130,10 @@ int const SpecialWeaponHelp[SPC_COUNT] = {
 	TXT_PARA_INFANTRY,
 	TXT_SPY_MISSION,
 	TXT_INVUL,
-	TXT_GPS_SATELLITE
+	TXT_GPS_SATELLITE,
+	TXT_NONE,
+	TXT_NONE,
+	TXT_NONE
 };
 char const * const SpecialWeaponFile[SPC_COUNT] = {
 	"SONR",
@@ -137,7 +143,10 @@ char const * const SpecialWeaponFile[SPC_COUNT] = {
 	"PINF",
 	"CAM",
 	"INFX",
-	"GPSS"
+	"GPSS",
+	"ASCT",
+	"APTL",
+	"AATK"
 };
 
 

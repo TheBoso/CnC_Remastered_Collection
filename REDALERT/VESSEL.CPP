@@ -124,6 +124,42 @@ VesselClass::VesselClass(VesselType classid, HousesType house) :
 
 
 /***********************************************************************************************
+ * VesselClass::Unlimbo -- Removes vessel from stasis.                                         *
+ *                                                                                             *
+ *    This routine will place a vessel into the game and out of its limbo state. This occurs   *
+ *    whenever a vessel is unloaded or first placed on the map.                                *
+ *                                                                                             *
+ * INPUT:   coord    -- The coordinate to make the vessel appear.                              *
+ *                                                                                             *
+ *          dir      -- The initial facing to impart upon the vessel.                          *
+ *                                                                                             *
+ * OUTPUT:  bool; Was the vessel unlimboed successfully?                                       *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/2026 - Created for Autonomous Player Mod                                               *
+ *=============================================================================================*/
+bool VesselClass::Unlimbo(COORDINATE coord, DirType dir)
+{
+	assert(Vessels.ID(this) == ID);
+	assert(IsActive);
+
+	if (DriveClass::Unlimbo(coord, dir)) {
+
+		/*
+		**	Ensure that the owning house knows about the new object.
+		*/
+		House->VScan |= (1L << Class->Type);
+		House->ActiveVScan |= (1L << Class->Type);
+
+		return(true);
+	}
+	return(false);
+}
+
+
+/***********************************************************************************************
  * VesselClass::~VesselClass -- Destructor for vessel objects.                                 *
  *                                                                                             *
  *    The destructor will destroy the vessel and ensure that it is properly removed from the   *
@@ -1362,14 +1398,15 @@ void VesselClass::Enter_Idle_Mode(bool )
 				return;
 			}
 
-			if (House->IsHuman || Team.Is_Valid()) {
+			if (Team.Is_Valid()) {
 				order = MISSION_GUARD;
-			} else {
-				if (House->IQ < Rule.IQGuardArea) {
-					order = MISSION_GUARD;
-				} else {
+			} else if (House->IsHuman || House->IQ >= Rule.IQGuardArea) {
+				if (House->IsHuman) 
+					this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+				else
 					order = MISSION_GUARD_AREA;
-				}
+			} else {
+				order = MISSION_GUARD;
 			}
 		}
 	}

@@ -111,6 +111,12 @@ FootClass::FootClass(RTTIType rtti, int id, HousesType house) :
 	IsNavQueueLoop(false),
 	IsScattering(false),
 	IsMovingOntoBridge(false),
+	IsAutonomous(false),
+	AutonomousMode(AUTOMODE_NONE),
+	AttackPhase(ATTACK_PHASE_GROUPING),
+	PatrolPhase(PATROL_PHASE_GUARDING),
+	PatrolTimer(0),
+	PatrolHome(0),
 	Speed(0),
 	SpeedBias(1),
 	XFormOffset(0x80000000),
@@ -1221,6 +1227,16 @@ void FootClass::Active_Click_With(ActionType action, ObjectClass * object)
 	assert(IsActive);
 	assert(object != NULL);
 
+	/*
+	** Autonomous Player Mod: Block direct unit control for player-controlled autonomous units.
+	** Allow ACTION_SELF (MCV deploy, unload) to still work.
+	*/
+	if (House && House->IsPlayerControl && IsAutonomous) {
+		if (action != ACTION_SELF) {
+			return;
+		}
+	}
+
 	switch (action) {
 		case ACTION_GUARD_AREA:
 			if (Can_Player_Fire() && Can_Player_Move()) {
@@ -1319,6 +1335,14 @@ void FootClass::Active_Click_With(ActionType action, ObjectClass * object)
 void FootClass::Active_Click_With(ActionType action, CELL cell)
 {
 	assert(IsActive);
+
+	/*
+	** Autonomous Player Mod: Block direct unit control for player-controlled autonomous units.
+	** Cell-based actions (move, attack ground) are all blocked.
+	*/
+	if (House && House->IsPlayerControl && IsAutonomous) {
+		return;
+	}
 
 	action = What_Action(cell);
 	switch (action) {
@@ -2633,4 +2657,67 @@ int FootClass::Mission_Retreat(void)
 	}
 
 	return(MissionControl[Mission].Normal_Delay() + Random_Pick(0, 2));
+}
+
+
+/***********************************************************************************************
+ * FootClass::Set_Autonomous_Mode -- Set the autonomous behavior mode for this unit.           *
+ *                                                                                             *
+ *    This routine sets the autonomous behavior mode for this unit. It's used by the           *
+ *    Autonomous Player Mod to control unit behavior without direct player input.              *
+ *                                                                                             *
+ * INPUT:   mode     -- The autonomous mode to assign to this unit.                            *
+ *                                                                                             *
+ * OUTPUT:  none                                                                               *
+ *                                                                                             *
+ * WARNINGS:   none                                                                            *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/2026 - Created for Autonomous Player Mod                                               *
+ *=============================================================================================*/
+void FootClass::Set_Autonomous_Mode(AutoModeType mode)
+{
+	AutonomousMode = mode;
+	IsAutonomous = (mode != AUTOMODE_NONE);
+
+	// Debug output
+	char buf[128];
+	sprintf(buf, "Set_Autonomous_Mode: mode=%d IsAutonomous=%d", (int)mode, IsAutonomous ? 1 : 0);
+	GlyphX_Debug_Print(buf);
+
+	switch (mode) {
+		case AUTOMODE_SCOUT:
+			/*
+			** Scout mode: Hunt enemies aggressively
+			*/
+			Assign_Mission(MISSION_HUNT);
+			break;
+
+		case AUTOMODE_PATROL:
+			/*
+			** Patrol mode:
+			** Ground units: Patrol around home position
+			** Aircraft: Stay on helipad, autonomous AI handles threat scanning
+			** Use MISSION_GUARD so units stay recruitable for teams
+			*/
+			PatrolHome = Coord;
+			PatrolPhase = PATROL_PHASE_GUARDING;
+			PatrolTimer = PATROL_GUARD_TIME;
+			ArchiveTarget = ::As_Target(Coord);
+			Assign_Mission(MISSION_GUARD);
+			break;
+
+		case AUTOMODE_ATTACK:
+			/*
+			** Attack mode: Coordinated assault
+			** Initialize attack state for Autonomous_Player_AI() to process
+			** Assign GUARD to stop auto-engaging during grouping phase
+			*/
+			AttackPhase = ATTACK_PHASE_GROUPING;
+			Assign_Mission(MISSION_GUARD);
+			break;
+
+		default:
+			break;
+	}
 }
