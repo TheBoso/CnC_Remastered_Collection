@@ -933,25 +933,25 @@ void HouseClass::AI(void)
 	}
 
 	/*
-	**	Autonomous Player Mod: Enable AI base building for human players with autonomous
-	**	construction yards. This allows the AI's building suggestion and placement logic
-	**	to handle autonomous base expansion.
+	**	Autonomous Player Mod: Enable AI production logic for human players with autonomous
+	**	factories. This allows the AI's building/unit/infantry/aircraft/vessel suggestion
+	**	logic to handle autonomous production using battle-tested AI code.
 	*/
 	if (IsHuman && IsPlayerControl) {
-		bool has_autonomous_conyard = false;
+		bool has_autonomous_factory = false;
 		for (int index = 0; index < Buildings.Count(); index++) {
 			BuildingClass * building = Buildings.Ptr(index);
 			if (building != NULL && building->IsActive && building->House == this &&
-			    building->IsAutonomous && *building == STRUCT_CONST) {
-				has_autonomous_conyard = true;
+			    building->IsAutonomous && building->Class->ToBuild != RTTI_NONE) {
+				has_autonomous_factory = true;
 				break;
 			}
 		}
-		if (has_autonomous_conyard) {
+		if (has_autonomous_factory) {
 			IsBaseBuilding = true;
 			IsStarted = true;
 		} else if (IsBaseBuilding && IsHuman) {
-			// Disable base building if no autonomous construction yard exists
+			// Disable AI production if no autonomous factories exist
 			IsBaseBuilding = false;
 			IsStarted = false;
 		}
