@@ -933,6 +933,31 @@ void HouseClass::AI(void)
 	}
 
 	/*
+	**	Autonomous Player Mod: Enable AI base building for human players with autonomous
+	**	construction yards. This allows the AI's building suggestion and placement logic
+	**	to handle autonomous base expansion.
+	*/
+	if (IsHuman && IsPlayerControl) {
+		bool has_autonomous_conyard = false;
+		for (int index = 0; index < Buildings.Count(); index++) {
+			BuildingClass * building = Buildings.Ptr(index);
+			if (building != NULL && building->IsActive && building->House == this &&
+			    building->IsAutonomous && *building == STRUCT_CONST) {
+				has_autonomous_conyard = true;
+				break;
+			}
+		}
+		if (has_autonomous_conyard) {
+			IsBaseBuilding = true;
+			IsStarted = true;
+		} else if (IsBaseBuilding && IsHuman) {
+			// Disable base building if no autonomous construction yard exists
+			IsBaseBuilding = false;
+			IsStarted = false;
+		}
+	}
+
+	/*
 	**	Check to see if the house wins.
 	*/
 	if (Session.Type == GAME_NORMAL && IsToWin && BorrowedTime == 0 && Blockage <= 0) {

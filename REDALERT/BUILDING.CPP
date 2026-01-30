@@ -5627,8 +5627,11 @@ void BuildingClass::Factory_AI(void)
 	/*
 	**	Autonomous Factory Production: Handle player-owned autonomous factories.
 	**	These factories auto-produce combat units independently of the sidebar.
+	**	NOTE: Construction yards (ToBuild == RTTI_BUILDINGTYPE) use the AI building
+	**	system instead via House->IsBaseBuilding.
 	*/
 	if (IsAutonomous && House->IsPlayerControl && Class->ToBuild != RTTI_NONE &&
+	    Class->ToBuild != RTTI_BUILDINGTYPE &&  // Construction yards use AI system below
 	    Mission != MISSION_CONSTRUCTION && Mission != MISSION_DECONSTRUCTION) {
 
 		if (!Factory.Is_Valid() && House->Available_Money() > 100) {
@@ -5650,8 +5653,14 @@ void BuildingClass::Factory_AI(void)
 
 	/*
 	**	Pick something to create for this factory (AI controlled).
+	**	For AI houses: uses AI production suggestions (BuildUnit, BuildInfantry, etc.)
+	**	For human players with autonomous construction yards: uses AI_Building() suggestions
+	**	via BuildStructure for base construction only.
 	*/
-	if (House->IsStarted && Mission != MISSION_CONSTRUCTION && Mission != MISSION_DECONSTRUCTION) {
+	bool is_autonomous_conyard = (IsAutonomous && House->IsPlayerControl &&
+	                              Class->ToBuild == RTTI_BUILDINGTYPE);
+	if (((House->IsStarted && !House->IsHuman) || is_autonomous_conyard) &&
+	    Mission != MISSION_CONSTRUCTION && Mission != MISSION_DECONSTRUCTION) {
 
 		/*
 		**	Buildings that produce other objects have special factory logic handled here.
@@ -5676,7 +5685,7 @@ void BuildingClass::Factory_AI(void)
 				**	money available. In cases where there is no practical money left, then
 				**	production can never complete -- don't bother starting it.
 				*/
-				if (House->IsStarted && House->Available_Money() > 10) {
+				if ((House->IsStarted || is_autonomous_conyard) && House->Available_Money() > 10) {
 					TechnoTypeClass const * techno = House->Suggest_New_Object(Class->ToBuild, *this == STRUCT_KENNEL);
 
 					/*
