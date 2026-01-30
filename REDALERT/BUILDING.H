@@ -317,15 +317,6 @@ class BuildingClass : public TechnoClass
 		void Repair_AI(void);
 		void Animation_AI(void);
 
-		/*
-		**	Autonomous production helpers.
-		*/
-		TechnoTypeClass const * Suggest_Autonomous_Production(void);
-		TechnoTypeClass const * Suggest_Autonomous_Infantry(void);
-		TechnoTypeClass const * Suggest_Autonomous_Unit(void);
-		TechnoTypeClass const * Suggest_Autonomous_Vessel(void);
-		TechnoTypeClass const * Suggest_Autonomous_Aircraft(void);
-		TechnoTypeClass const * Suggest_Autonomous_Building(void);
 		virtual bool Revealed(HouseClass * house);
 		virtual void Repair(int control);
 		virtual void Sell_Back(int control);
