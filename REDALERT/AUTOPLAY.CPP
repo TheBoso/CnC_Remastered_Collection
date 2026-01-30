@@ -273,6 +273,9 @@ int Create_Attack_Team(HouseClass * house, CELL gather_cell)
             if (unit->Team.Is_Valid()) {
                 unit->Team->Remove(unit);
             }
+            // Clear autonomous mode but keep IsAutonomous flag so they can return to autonomous after team disbands
+            // The team check (!Team.Is_Valid()) in Autonomous_Player_AI will skip units in teams
+            unit->AutonomousMode = AUTOMODE_NONE;
             // Change mission to GUARD (recruitable) before adding - GUARD_AREA is not recruitable
             unit->Assign_Mission(MISSION_GUARD);
             if (team->Add(unit)) {
@@ -293,6 +296,8 @@ int Create_Attack_Team(HouseClass * house, CELL gather_cell)
             if (inf->Team.Is_Valid()) {
                 inf->Team->Remove(inf);
             }
+            // Clear autonomous mode but keep IsAutonomous flag so they can return to autonomous after team disbands
+            inf->AutonomousMode = AUTOMODE_NONE;
             // Change mission to GUARD (recruitable) before adding - GUARD_AREA is not recruitable
             inf->Assign_Mission(MISSION_GUARD);
             if (team->Add(inf)) {
@@ -313,6 +318,8 @@ int Create_Attack_Team(HouseClass * house, CELL gather_cell)
             if (vessel->Team.Is_Valid()) {
                 vessel->Team->Remove(vessel);
             }
+            // Clear autonomous mode but keep IsAutonomous flag so they can return to autonomous after team disbands
+            vessel->AutonomousMode = AUTOMODE_NONE;
             // Change mission to GUARD (recruitable) before adding - GUARD_AREA is not recruitable
             vessel->Assign_Mission(MISSION_GUARD);
             if (team->Add(vessel)) {
@@ -333,6 +340,8 @@ int Create_Attack_Team(HouseClass * house, CELL gather_cell)
             if (aircraft->Team.Is_Valid()) {
                 aircraft->Team->Remove(aircraft);
             }
+            // Clear autonomous mode but keep IsAutonomous flag so they can return to autonomous after team disbands
+            aircraft->AutonomousMode = AUTOMODE_NONE;
             // Change mission to GUARD (recruitable) before adding - GUARD_AREA is not recruitable
             aircraft->Assign_Mission(MISSION_GUARD);
             if (team->Add(aircraft)) {
@@ -371,6 +380,25 @@ int Create_Attack_Team(HouseClass * house, CELL gather_cell)
 static void Process_Patrol_Unit(FootClass* unit)
 {
     if (!unit || !unit->IsActive) return;
+
+    /*
+    ** First check for threats - patrol units should attack enemies they see
+    */
+    if (unit->Is_Weapon_Equipped() && !Target_Legal(unit->TarCom)) {
+        TARGET threat = unit->Greatest_Threat(THREAT_AREA | THREAT_BUILDINGS | THREAT_VEHICLES | THREAT_INFANTRY);
+        if (Target_Legal(threat)) {
+            unit->Assign_Target(threat);
+            unit->Assign_Mission(MISSION_ATTACK);
+            return;  // Skip patrol logic while attacking
+        }
+    }
+
+    /*
+    ** If currently attacking, let it finish
+    */
+    if (unit->Mission == MISSION_ATTACK && Target_Legal(unit->TarCom)) {
+        return;
+    }
 
     switch (unit->PatrolPhase) {
         case PATROL_PHASE_GUARDING:
@@ -474,40 +502,40 @@ static void Process_Attack_Units(void)
     DynamicVectorClass<FootClass*> attackers;
     int count = 0;
 
-    // Process ground units
+    // Process ground units - skip units in teams (team system handles them)
     for (int i = 0; i < Units.Count(); i++) {
         UnitClass* unit = Units.Ptr(i);
-        if (unit && unit->IsActive && unit->IsAutonomous &&
+        if (unit && unit->IsActive && unit->IsAutonomous && !unit->Team.Is_Valid() &&
             unit->AutonomousMode == AUTOMODE_ATTACK) {
             attackers.Add(unit);
             count++;
         }
     }
 
-    // Process infantry
+    // Process infantry - skip units in teams
     for (int i = 0; i < Infantry.Count(); i++) {
         InfantryClass* inf = Infantry.Ptr(i);
-        if (inf && inf->IsActive && inf->IsAutonomous &&
+        if (inf && inf->IsActive && inf->IsAutonomous && !inf->Team.Is_Valid() &&
             inf->AutonomousMode == AUTOMODE_ATTACK) {
             attackers.Add(inf);
             count++;
         }
     }
 
-    // Process aircraft
+    // Process aircraft - skip units in teams
     for (int i = 0; i < Aircraft.Count(); i++) {
         AircraftClass* air = Aircraft.Ptr(i);
-        if (air && air->IsActive && air->IsAutonomous &&
+        if (air && air->IsActive && air->IsAutonomous && !air->Team.Is_Valid() &&
             air->AutonomousMode == AUTOMODE_ATTACK) {
             attackers.Add(air);
             count++;
         }
     }
 
-    // Process vessels
+    // Process vessels - skip units in teams
     for (int i = 0; i < Vessels.Count(); i++) {
         VesselClass* ship = Vessels.Ptr(i);
-        if (ship && ship->IsActive && ship->IsAutonomous &&
+        if (ship && ship->IsActive && ship->IsAutonomous && !ship->Team.Is_Valid() &&
             ship->AutonomousMode == AUTOMODE_ATTACK) {
             attackers.Add(ship);
             count++;
@@ -748,10 +776,10 @@ static void Process_Attack_Units(void)
             }
 
             /*
-            ** Have the leader pick a target
+            ** Have the leader pick a target - include buildings, vehicles, infantry
             */
             if (leader != NULL) {
-                SharedAttackTarget = leader->Greatest_Threat(THREAT_NORMAL);
+                SharedAttackTarget = leader->Greatest_Threat(THREAT_NORMAL | THREAT_BUILDINGS | THREAT_VEHICLES | THREAT_INFANTRY);
             }
         }
 
@@ -819,9 +847,10 @@ void Autonomous_Player_AI(void)
     }
 
     // Process ground units
+    // Skip units in teams - let the team system handle them
     for (int i = 0; i < Units.Count(); i++) {
         UnitClass* unit = Units.Ptr(i);
-        if (unit && unit->IsActive && unit->IsAutonomous) {
+        if (unit && unit->IsActive && unit->IsAutonomous && !unit->Team.Is_Valid()) {
             if (unit->AutonomousMode == AUTOMODE_PATROL) {
                 patrol_count++;
                 Process_Patrol_Unit(unit);
@@ -832,9 +861,10 @@ void Autonomous_Player_AI(void)
     }
 
     // Process infantry
+    // Skip units in teams - let the team system handle them
     for (int i = 0; i < Infantry.Count(); i++) {
         InfantryClass* inf = Infantry.Ptr(i);
-        if (inf && inf->IsActive && inf->IsAutonomous) {
+        if (inf && inf->IsActive && inf->IsAutonomous && !inf->Team.Is_Valid()) {
             if (inf->AutonomousMode == AUTOMODE_PATROL) {
                 patrol_count++;
                 Process_Patrol_Unit(inf);
@@ -845,9 +875,10 @@ void Autonomous_Player_AI(void)
     }
 
     // Process aircraft - special handling (aircraft can't patrol like ground units)
+    // Skip units in teams - let the team system handle them
     for (int i = 0; i < Aircraft.Count(); i++) {
         AircraftClass* air = Aircraft.Ptr(i);
-        if (air && air->IsActive && air->IsAutonomous) {
+        if (air && air->IsActive && air->IsAutonomous && !air->Team.Is_Valid()) {
             if (air->AutonomousMode == AUTOMODE_PATROL) {
                 patrol_count++;
 
@@ -891,9 +922,9 @@ void Autonomous_Player_AI(void)
                 if (air->Is_Weapon_Equipped() && air->Ammo > 0) {
                     if (!Target_Legal(air->TarCom)) {
                         /*
-                        ** Scan for nearby threats
+                        ** Scan for nearby threats - include buildings, vehicles, infantry
                         */
-                        TARGET threat = air->Greatest_Threat(THREAT_AREA);
+                        TARGET threat = air->Greatest_Threat(THREAT_AREA | THREAT_BUILDINGS | THREAT_VEHICLES | THREAT_INFANTRY);
                         if (Target_Legal(threat)) {
                             air->Assign_Target(threat);
                             air->Assign_Mission(MISSION_ATTACK);
@@ -913,9 +944,10 @@ void Autonomous_Player_AI(void)
     }
 
     // Process vessels
+    // Skip units in teams - let the team system handle them
     for (int i = 0; i < Vessels.Count(); i++) {
         VesselClass* ship = Vessels.Ptr(i);
-        if (ship && ship->IsActive && ship->IsAutonomous) {
+        if (ship && ship->IsActive && ship->IsAutonomous && !ship->Team.Is_Valid()) {
             if (ship->AutonomousMode == AUTOMODE_PATROL) {
                 patrol_count++;
                 Process_Patrol_Unit(ship);

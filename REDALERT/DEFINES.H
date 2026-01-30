@@ -815,6 +815,7 @@ typedef enum SpecialWeaponType : char {
 	SPC_AUTO_SCOUT,				// Set selected units to autonomous scout mode
 	SPC_AUTO_PATROL,			// Set selected units to autonomous patrol mode
 	SPC_AUTO_ATTACK,			// Set selected units to autonomous attack mode
+	SPC_DELEGATE,				// Transfer selected units to delegate AI house
 
 	SPC_COUNT,
 	SPC_FIRST=0,

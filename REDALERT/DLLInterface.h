@@ -340,7 +340,8 @@ enum DllSuperweaponTypeEnum {
 	SW_CHRONOSPHERE_DESTINATION,
 	SW_AUTO_SCOUT,
 	SW_AUTO_PATROL,
-	SW_AUTO_ATTACK
+	SW_AUTO_ATTACK,
+	SW_DELEGATE
 };
 
 struct CNCSidebarEntryStruct {

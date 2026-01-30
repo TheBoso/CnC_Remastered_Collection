@@ -163,6 +163,12 @@ class BuildingClass : public TechnoClass
 		unsigned HasOpened:1;
 
 		/*
+		**	Autonomous Player Mod: If this building is in autonomous mode.
+		**	Autonomous factories auto-produce units that inherit autonomous behavior.
+		*/
+		unsigned IsAutonomous:1;
+
+		/*
 		**	Special countdown to destruction value. If the building is destroyed,
 		**	it won't actually be removed from the map until this value reaches
 		**	zero. This delay is for cosmetic reasons.
@@ -310,6 +316,16 @@ class BuildingClass : public TechnoClass
 		void Factory_AI(void);
 		void Repair_AI(void);
 		void Animation_AI(void);
+
+		/*
+		**	Autonomous production helpers.
+		*/
+		TechnoTypeClass const * Suggest_Autonomous_Production(void);
+		TechnoTypeClass const * Suggest_Autonomous_Infantry(void);
+		TechnoTypeClass const * Suggest_Autonomous_Unit(void);
+		TechnoTypeClass const * Suggest_Autonomous_Vessel(void);
+		TechnoTypeClass const * Suggest_Autonomous_Aircraft(void);
+		TechnoTypeClass const * Suggest_Autonomous_Building(void);
 		virtual bool Revealed(HouseClass * house);
 		virtual void Repair(int control);
 		virtual void Sell_Back(int control);

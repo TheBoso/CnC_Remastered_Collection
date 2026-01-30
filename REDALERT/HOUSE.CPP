@@ -666,6 +666,7 @@ HouseClass::HouseClass(HousesType house) :
 	new (&SuperWeapon[SPC_AUTO_SCOUT]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
 	new (&SuperWeapon[SPC_AUTO_PATROL]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
 	new (&SuperWeapon[SPC_AUTO_ATTACK]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
+	new (&SuperWeapon[SPC_DELEGATE]) SuperClass(0, false, VOX_NONE, VOX_NONE, VOX_NONE, VOX_NONE);
 
 	memset(UnitsKilled, '\0', sizeof(UnitsKilled));
 	memset(BuildingsKilled, '\0', sizeof(BuildingsKilled));
@@ -1453,6 +1454,20 @@ void HouseClass::Super_Weapon_Handler(void)
 			} else {
 				if (this == PlayerPtr) {
 					Map.Add(RTTI_SPECIAL, SPC_AUTO_ATTACK);
+					Map.Column[1].Flag_To_Redraw();
+				}
+			}
+		}
+		if (!SuperWeapon[SPC_DELEGATE].Is_Present()) {
+			SuperWeapon[SPC_DELEGATE].Enable(false, true, false);
+			SuperWeapon[SPC_DELEGATE].Forced_Charge(this == PlayerPtr);
+			if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+				if (IsHuman) {
+					Sidebar_Glyphx_Add(RTTI_SPECIAL, SPC_DELEGATE, this);
+				}
+			} else {
+				if (this == PlayerPtr) {
+					Map.Add(RTTI_SPECIAL, SPC_DELEGATE);
 					Map.Column[1].Flag_To_Redraw();
 				}
 			}
@@ -3163,6 +3178,90 @@ bool HouseClass::Place_Special_Blast(SpecialWeaponType id, CELL cell)
 				}
 
 				// Immediately recharge so button stays available
+				SuperWeapon[id].Forced_Charge(this == PlayerPtr);
+				fired = true;
+			}
+			break;
+
+		case SPC_DELEGATE:
+			{
+				what = "AUTONOMOUS";
+				int units_enabled = 0;
+				int units_disabled = 0;
+
+				// Toggle selected units autonomous mode (skip units in teams - they're under team control)
+				for (int index = 0; index < Units.Count(); index++) {
+					UnitClass* unit = Units.Ptr(index);
+					if (unit != NULL && unit->House == this && unit->Is_Selected_By_Player(this) && !unit->Team.Is_Valid()) {
+						if (unit->IsAutonomous) {
+							unit->Set_Autonomous_Mode(AUTOMODE_NONE);
+							units_disabled++;
+						} else {
+							unit->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							units_enabled++;
+						}
+					}
+				}
+
+				// Toggle selected infantry autonomous mode (skip units in teams)
+				for (int index = 0; index < Infantry.Count(); index++) {
+					InfantryClass* inf = Infantry.Ptr(index);
+					if (inf != NULL && inf->House == this && inf->Is_Selected_By_Player(this) && !inf->Team.Is_Valid()) {
+						if (inf->IsAutonomous) {
+							inf->Set_Autonomous_Mode(AUTOMODE_NONE);
+							units_disabled++;
+						} else {
+							inf->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							units_enabled++;
+						}
+					}
+				}
+
+				// Toggle selected vessels autonomous mode (skip units in teams)
+				for (int index = 0; index < Vessels.Count(); index++) {
+					VesselClass* vessel = Vessels.Ptr(index);
+					if (vessel != NULL && vessel->House == this && vessel->Is_Selected_By_Player(this) && !vessel->Team.Is_Valid()) {
+						if (vessel->IsAutonomous) {
+							vessel->Set_Autonomous_Mode(AUTOMODE_NONE);
+							units_disabled++;
+						} else {
+							vessel->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							units_enabled++;
+						}
+					}
+				}
+
+				// Toggle selected aircraft autonomous mode (skip units in teams)
+				for (int index = 0; index < Aircraft.Count(); index++) {
+					AircraftClass* aircraft = Aircraft.Ptr(index);
+					if (aircraft != NULL && aircraft->House == this && aircraft->Is_Selected_By_Player(this) && !aircraft->Team.Is_Valid()) {
+						if (aircraft->IsAutonomous) {
+							aircraft->Set_Autonomous_Mode(AUTOMODE_NONE);
+							units_disabled++;
+						} else {
+							aircraft->Set_Autonomous_Mode(AUTOMODE_ATTACK);
+							units_enabled++;
+						}
+					}
+				}
+
+				// Toggle selected buildings autonomous mode (factories will auto-produce)
+				for (int index = 0; index < Buildings.Count(); index++) {
+					BuildingClass* building = Buildings.Ptr(index);
+					if (building != NULL && building->House == this && building->Is_Selected_By_Player(this)) {
+						building->IsAutonomous = !building->IsAutonomous;
+						if (building->IsAutonomous) {
+							units_enabled++;
+						} else {
+							units_disabled++;
+						}
+					}
+				}
+
+				if (units_enabled > 0 || units_disabled > 0) {
+					Sound_Effect(units_enabled > 0 ? VOC_RADAR_ON : VOC_RADAR_OFF);
+				}
+
 				SuperWeapon[id].Forced_Charge(this == PlayerPtr);
 				fired = true;
 			}

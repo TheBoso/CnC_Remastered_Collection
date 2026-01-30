@@ -105,6 +105,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"AUTOPLAY.H"
 
 /*
 ** New sidebar for GlyphX multiplayer. ST - 8/2/2019 2:35PM
@@ -1619,6 +1620,7 @@ BuildingClass::BuildingClass(StructType type, HousesType house) :
 	IsJammed(false),
 	HasFired(false),
 	HasOpened(false),
+	IsAutonomous(false),
 	CountDown(0),
 	BState(BSTATE_NONE),
 	QueueBState(BSTATE_NONE),
@@ -1962,6 +1964,9 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 					Transmit_Message(RADIO_HELLO, air);
 					Transmit_Message(RADIO_TETHER);
 					ScenarioInit--;
+					if (IsAutonomous) {
+						air->Set_Autonomous_Mode(AUTOMODE_ATTACK);
+					}
 					return(2);
 				}
 				ScenarioInit--;
@@ -1979,6 +1984,9 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 /*BG*/			air->Assign_Destination(::As_Target(air->Nearby_Location(this)));
 					air->Assign_Mission(MISSION_MOVE);
 					ScenarioInit--;
+					if (IsAutonomous) {
+						air->Set_Autonomous_Mode(AUTOMODE_ATTACK);
+					}
 					return(2);
 				}
 				ScenarioInit--;
@@ -1994,6 +2002,9 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 					if (cell != 0 && base->Unlimbo(Cell_Coord(cell), Direction(Cell_Coord(cell)))) {
 						base->Assign_Mission(MISSION_GUARD);
 						ScenarioInit--;
+						if (IsAutonomous && base->Is_Foot()) {
+							((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+						}
 						return(2);
 					}
 					ScenarioInit--;
@@ -2049,6 +2060,9 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 						Transmit_Message(RADIO_TETHER);
 						Assign_Mission(MISSION_UNLOAD);
 						ScenarioInit--;
+						if (IsAutonomous && base->Is_Foot()) {
+							((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+						}
 						return(2);
 					}
 					ScenarioInit--;
@@ -2086,6 +2100,9 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 								Transmit_Message(RADIO_UNLOAD);
 							}
 							ScenarioInit--;
+							if (IsAutonomous && base->Is_Foot()) {
+								((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							}
 							return(2);
 						}
 						ScenarioInit--;
@@ -2113,6 +2130,9 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 								base->ArchiveTarget = ::As_Target(House->Where_To_Go((FootClass *)base));
 							}
 							ScenarioInit--;
+							if (IsAutonomous && base->Is_Foot()) {
+								((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							}
 							return(2);
 						}
 						ScenarioInit--;
@@ -2123,7 +2143,10 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 
 		case RTTI_BUILDING:
 
-			if (!House->IsHuman) {
+			/*
+			** Allow building placement for AI houses OR for autonomous construction yards
+			*/
+			if (!House->IsHuman || IsAutonomous) {
 
 				/*
 				**	Find the next available spot to place this newly created building. If the
@@ -2506,9 +2529,6 @@ TARGET BuildingClass::Greatest_Threat(ThreatType threat) const
 	}
 	if (Class->SecondaryWeapon != NULL) {
 		threat = threat | Class->SecondaryWeapon->Allowed_Threats();
-	}
-	if (House->IsHuman) {
-		threat = threat & ~THREAT_BUILDINGS;
 	}
 	threat = threat | THREAT_RANGE;
 
@@ -5605,7 +5625,31 @@ void BuildingClass::Factory_AI(void)
 	}
 
 	/*
-	**	Pick something to create for this factory.
+	**	Autonomous Factory Production: Handle player-owned autonomous factories.
+	**	These factories auto-produce combat units independently of the sidebar.
+	*/
+	if (IsAutonomous && House->IsPlayerControl && Class->ToBuild != RTTI_NONE &&
+	    Mission != MISSION_CONSTRUCTION && Mission != MISSION_DECONSTRUCTION) {
+
+		if (!Factory.Is_Valid() && House->Available_Money() > 100) {
+			TechnoTypeClass const * techno = Suggest_Autonomous_Production();
+
+			if (techno != NULL) {
+				Factory = new FactoryClass;
+				if (Factory.Is_Valid()) {
+					if (!Factory->Set(*techno, *House)) {
+						delete (FactoryClass *)Factory;
+						Factory = 0;
+					} else {
+						Factory->Start();
+					}
+				}
+			}
+		}
+	}
+
+	/*
+	**	Pick something to create for this factory (AI controlled).
 	*/
 	if (House->IsStarted && Mission != MISSION_CONSTRUCTION && Mission != MISSION_DECONSTRUCTION) {
 
@@ -6085,4 +6129,344 @@ unsigned BuildingClass::Spied_By() const
 	}
 
 	return spiedby;
+}
+
+
+/***********************************************************************************************
+ * BuildingClass::Suggest_Autonomous_Production -- Suggests what to produce for autonomous mode *
+ *                                                                                             *
+ *    This routine determines what type of object an autonomous factory should produce.        *
+ *    It delegates to the appropriate type-specific suggestion method based on what the        *
+ *    building can produce.                                                                    *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Pointer to the TechnoTypeClass to produce, or NULL if nothing available.          *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/26/2026 : Created for Autonomous Player Mod.                                           *
+ *=============================================================================================*/
+TechnoTypeClass const * BuildingClass::Suggest_Autonomous_Production(void)
+{
+	switch (Class->ToBuild) {
+		case RTTI_INFANTRYTYPE:
+			return Suggest_Autonomous_Infantry();
+
+		case RTTI_UNITTYPE:
+			return Suggest_Autonomous_Unit();
+
+		case RTTI_VESSELTYPE:
+			return Suggest_Autonomous_Vessel();
+
+		case RTTI_AIRCRAFTTYPE:
+			return Suggest_Autonomous_Aircraft();
+
+		case RTTI_BUILDINGTYPE:
+			return Suggest_Autonomous_Building();
+
+		default:
+			return NULL;
+	}
+}
+
+
+/***********************************************************************************************
+ * BuildingClass::Suggest_Autonomous_Infantry -- Suggests an infantry type to produce          *
+ *                                                                                             *
+ *    Returns a random combat infantry type that can be built by this house.                   *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Pointer to the infantry type class, or NULL if none available.                    *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/26/2026 : Created for Autonomous Player Mod.                                           *
+ *=============================================================================================*/
+TechnoTypeClass const * BuildingClass::Suggest_Autonomous_Infantry(void)
+{
+	InfantryType valid[INFANTRY_COUNT];
+	int count = 0;
+	bool is_kennel = (*this == STRUCT_KENNEL);
+
+	for (InfantryType i = INFANTRY_FIRST; i < INFANTRY_COUNT; i++) {
+		InfantryTypeClass const * itype = &InfantryTypeClass::As_Reference(i);
+
+		// Kennels can only produce dogs
+		if (is_kennel && i != INFANTRY_DOG) continue;
+		// Non-kennels cannot produce dogs
+		if (!is_kennel && i == INFANTRY_DOG) continue;
+
+		// Check if buildable and affordable
+		if (House->Can_Build(itype, House->ActLike) &&
+		    itype->Cost_Of() <= House->Available_Money() &&
+		    itype->PrimaryWeapon != NULL) {
+			valid[count++] = i;
+		}
+	}
+
+	if (count > 0) {
+		return &InfantryTypeClass::As_Reference(valid[Random_Pick(0, count-1)]);
+	}
+	return NULL;
+}
+
+
+/***********************************************************************************************
+ * BuildingClass::Suggest_Autonomous_Unit -- Suggests a unit type to produce                   *
+ *                                                                                             *
+ *    Returns a random combat vehicle type that can be built by this house.                   *
+ *    Excludes harvesters and MCVs as these are non-combat utility units.                     *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Pointer to the unit type class, or NULL if none available.                        *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/26/2026 : Created for Autonomous Player Mod.                                           *
+ *=============================================================================================*/
+TechnoTypeClass const * BuildingClass::Suggest_Autonomous_Unit(void)
+{
+	UnitType valid[UNIT_COUNT];
+	int count = 0;
+
+	for (UnitType u = UNIT_FIRST; u < UNIT_COUNT; u++) {
+		UnitTypeClass const * utype = &UnitTypeClass::As_Reference(u);
+
+		// Skip non-combat utility units
+		if (u == UNIT_HARVESTER || u == UNIT_MCV) continue;
+
+		// Check if buildable, affordable, and armed
+		if (House->Can_Build(utype, House->ActLike) &&
+		    utype->Cost_Of() <= House->Available_Money() &&
+		    utype->PrimaryWeapon != NULL) {
+			valid[count++] = u;
+		}
+	}
+
+	if (count > 0) {
+		return &UnitTypeClass::As_Reference(valid[Random_Pick(0, count-1)]);
+	}
+	return NULL;
+}
+
+
+/***********************************************************************************************
+ * BuildingClass::Suggest_Autonomous_Vessel -- Suggests a vessel type to produce               *
+ *                                                                                             *
+ *    Returns a random naval vessel type that can be built by this house.                     *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Pointer to the vessel type class, or NULL if none available.                      *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/26/2026 : Created for Autonomous Player Mod.                                           *
+ *=============================================================================================*/
+TechnoTypeClass const * BuildingClass::Suggest_Autonomous_Vessel(void)
+{
+	VesselType valid[VESSEL_COUNT];
+	int count = 0;
+
+	for (VesselType v = VESSEL_FIRST; v < VESSEL_COUNT; v++) {
+		VesselTypeClass const * vtype = &VesselTypeClass::As_Reference(v);
+
+		// Check if buildable and affordable
+		if (House->Can_Build(vtype, House->ActLike) &&
+		    vtype->Cost_Of() <= House->Available_Money()) {
+			valid[count++] = v;
+		}
+	}
+
+	if (count > 0) {
+		return &VesselTypeClass::As_Reference(valid[Random_Pick(0, count-1)]);
+	}
+	return NULL;
+}
+
+
+/***********************************************************************************************
+ * BuildingClass::Suggest_Autonomous_Aircraft -- Suggests an aircraft type to produce          *
+ *                                                                                             *
+ *    Returns a random aircraft type that can be built by this house.                         *
+ *    Excludes transport helicopters and badger bombers as these are non-combat.              *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Pointer to the aircraft type class, or NULL if none available.                    *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/26/2026 : Created for Autonomous Player Mod.                                           *
+ *=============================================================================================*/
+TechnoTypeClass const * BuildingClass::Suggest_Autonomous_Aircraft(void)
+{
+	AircraftType valid[AIRCRAFT_COUNT];
+	int count = 0;
+
+	for (AircraftType a = AIRCRAFT_FIRST; a < AIRCRAFT_COUNT; a++) {
+		AircraftTypeClass const * atype = &AircraftTypeClass::As_Reference(a);
+
+		// Skip transports and special aircraft
+		if (a == AIRCRAFT_TRANSPORT || a == AIRCRAFT_BADGER) continue;
+
+		// Check if buildable and affordable
+		if (House->Can_Build(atype, House->ActLike) &&
+		    atype->Cost_Of() <= House->Available_Money()) {
+			valid[count++] = a;
+		}
+	}
+
+	if (count > 0) {
+		return &AircraftTypeClass::As_Reference(valid[Random_Pick(0, count-1)]);
+	}
+	return NULL;
+}
+
+
+/***********************************************************************************************
+ * BuildingClass::Suggest_Autonomous_Building -- Suggests a building type to construct         *
+ *                                                                                             *
+ *    Returns a building type that can be built by this house. Uses AI-like logic to          *
+ *    prioritize power, refineries, defenses, and production buildings.                       *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  Pointer to the building type class, or NULL if none available.                    *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   01/26/2026 : Created for Autonomous Player Mod.                                           *
+ *=============================================================================================*/
+TechnoTypeClass const * BuildingClass::Suggest_Autonomous_Building(void)
+{
+	int money = House->Available_Money();
+
+	/*
+	** Priority 1: Power - only build if we're actually in power deficit
+	*/
+	if (House->Power < House->Drain) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+		btype = &BuildingTypeClass::As_Reference(STRUCT_POWER);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 2: Refinery - need income
+	*/
+	if (House->Get_Quantity(STRUCT_REFINERY) < 2) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_REFINERY);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 3: War Factory - need to build units
+	*/
+	if (House->Get_Quantity(STRUCT_WEAP) < 1) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_WEAP);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 4: Barracks - need infantry
+	*/
+	if (House->Get_Quantity(STRUCT_BARRACKS) < 1 && House->Get_Quantity(STRUCT_TENT) < 1) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_BARRACKS);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+		btype = &BuildingTypeClass::As_Reference(STRUCT_TENT);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 5: Radar - for map visibility
+	*/
+	if (House->Get_Quantity(STRUCT_RADAR) < 1) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_RADAR);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 6: Tech center for advanced units
+	*/
+	if (House->Get_Quantity(STRUCT_ADVANCED_TECH) < 1 && House->Get_Quantity(STRUCT_SOVIET_TECH) < 1) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_TECH);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+		btype = &BuildingTypeClass::As_Reference(STRUCT_SOVIET_TECH);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 7: Defenses - build some turrets/pillboxes
+	*/
+	StructType defenses[] = {STRUCT_TURRET, STRUCT_PILLBOX, STRUCT_CAMOPILLBOX, STRUCT_TESLA, STRUCT_FLAME_TURRET, STRUCT_AAGUN, STRUCT_SAM};
+	int total_defenses = 0;
+	for (int i = 0; i < sizeof(defenses)/sizeof(defenses[0]); i++) {
+		total_defenses += House->Get_Quantity(defenses[i]);
+	}
+	if (total_defenses < 4) {
+		for (int i = 0; i < sizeof(defenses)/sizeof(defenses[0]); i++) {
+			BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(defenses[i]);
+			if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+				return btype;
+			}
+		}
+	}
+
+	/*
+	** Priority 8: Additional production - more war factories/barracks
+	*/
+	if (House->Get_Quantity(STRUCT_WEAP) < 2) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_WEAP);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 9: Helipad for aircraft
+	*/
+	if (House->Get_Quantity(STRUCT_HELIPAD) < 2) {
+		BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_HELIPAD);
+		if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+			return btype;
+		}
+	}
+
+	/*
+	** Priority 10: More defenses
+	*/
+	if (total_defenses < 8) {
+		for (int i = 0; i < sizeof(defenses)/sizeof(defenses[0]); i++) {
+			BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(defenses[i]);
+			if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+				return btype;
+			}
+		}
+	}
+
+	/*
+	** Fallback: More power if we can afford it
+	*/
+	BuildingTypeClass const * btype = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
+	if (House->Can_Build(btype, House->ActLike) && btype->Cost_Of() <= money) {
+		return btype;
+	}
+
+	return NULL;
 }

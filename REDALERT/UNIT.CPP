@@ -1435,8 +1435,13 @@ void UnitClass::Enter_Idle_Mode(bool initial)
 			if (Team.Is_Valid()) {
 				order = MISSION_GUARD;
 			} else if (House->IsHuman || House->IQ >= Rule.IQGuardArea) {
-				if (House->IsHuman) 
-					this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+				if (House->IsHuman) {
+					// Only re-enable autonomous if it was previously enabled (respects player disabling it)
+					if (this->IsAutonomous && this->AutonomousMode == AUTOMODE_NONE)
+						this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+					else if (!this->IsAutonomous)
+						order = MISSION_GUARD_AREA;
+				}
 				else
 					order = MISSION_GUARD_AREA;
 			} else {

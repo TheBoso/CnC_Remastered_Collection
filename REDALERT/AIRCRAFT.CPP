@@ -92,6 +92,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"autoplay.h"
 
 
 /***********************************************************************************************
@@ -328,6 +329,14 @@ bool AircraftClass::Unlimbo(COORDINATE coord, DirType dir)
 			Set_Speed(0xFF);
 		} else {
 			Set_Speed(0);
+		}
+
+		/*
+		**	Autonomous Player Mod: Player aircraft start in autonomous attack mode.
+		**	This allows them to automatically seek and engage enemies.
+		*/
+		if (House && House->IsPlayerControl && !IsALoaner) {
+			Set_Autonomous_Mode(AUTOMODE_ATTACK);
 		}
 
 		return(true);

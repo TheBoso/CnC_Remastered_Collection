@@ -1667,10 +1667,10 @@ bool TechnoClass::Evaluate_Object(ThreatType method, int mask, int range, Techno
 
 	/*
 	**	SPECIAL CASE: Friendly units won't automatically fire on buildings
-	**	if the building is not aggressive. That is, unless it is part of a team. A team
-	**	is allowed to pick any target it so chooses.
+	**	if the building is not aggressive. That is, unless it is part of a team or
+	**	is in autonomous mode. A team or autonomous unit is allowed to pick any target it so chooses.
 	*/
-	if ((!Is_Foot() || !((FootClass *)this)->Team.Is_Valid()) &&
+	if ((!Is_Foot() || (!((FootClass *)this)->Team.Is_Valid() && !((FootClass *)this)->IsAutonomous)) &&
 			(House->IsHuman || (House->IsPlayerControl && Session.Type == GAME_NORMAL)) &&
 			otype == RTTI_BUILDING && tclass->PrimaryWeapon == NULL) {
 #ifdef OBSOLETE

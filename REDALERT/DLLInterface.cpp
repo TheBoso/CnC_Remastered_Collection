@@ -4985,6 +4985,13 @@ void DLLExportClass::Convert_Special_Weapon_Type(SpecialWeaponType weapon_type, 
 			strncpy(weapon_name, "SW_AutoAttack", 16);
 		}
 		break;
+	case SPC_DELEGATE:
+		dll_weapon_type = SW_DELEGATE;
+		if (weapon_name != NULL)
+		{
+			strncpy(weapon_name, "SW_Delegate", 16);
+		}
+		break;
 	default:
 		dll_weapon_type = SW_UNKNOWN;
 		if (weapon_name != NULL)
@@ -5014,6 +5021,7 @@ void DLLExportClass::Fill_Sidebar_Entry_From_Special_Weapon(CNCSidebarEntryStruc
 	case SPC_AUTO_SCOUT:
 	case SPC_AUTO_PATROL:
 	case SPC_AUTO_ATTACK:
+	case SPC_DELEGATE:
 		Convert_Special_Weapon_Type(weapon_type, sidebar_entry_out.SuperWeaponType, sidebar_entry_out.AssetName);
 		break;
 	default:

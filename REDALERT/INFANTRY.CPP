@@ -1831,8 +1831,13 @@ void InfantryClass::Enter_Idle_Mode(bool )
 				if (Team.Is_Valid()) {
 					order = MISSION_GUARD;
 				} else if (Is_Weapon_Equipped() && (House->IsHuman || House->IQ >= Rule.IQGuardArea)) {
-					if (House->IsHuman) 
-						this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+					if (House->IsHuman) {
+						// Only re-enable autonomous if it was previously enabled (respects player disabling it)
+						if (this->IsAutonomous && this->AutonomousMode == AUTOMODE_NONE)
+							this->Set_Autonomous_Mode(AUTOMODE_PATROL);
+						else if (!this->IsAutonomous)
+							order = MISSION_GUARD_AREA;
+					}
 					else
 						order = MISSION_GUARD_AREA;
 				} else {
@@ -2474,16 +2479,9 @@ TARGET InfantryClass::Greatest_Threat(ThreatType threat) const
 	}
 
 	/*
-	**	Human controlled infantry don't automatically fire upon buildings.
-	*/
-	if (Is_Weapon_Equipped() && House->IsHuman) {
-		threat = threat & ~THREAT_BUILDINGS;
-	}
-
-	/*
 	**	If this is a bomber type, then allow buildings to be considered a threat.
 	*/
-	if (Class->IsBomber && !House->IsHuman) {
+	if (Class->IsBomber) {
 		threat = threat | THREAT_BUILDINGS;
 	}
 
