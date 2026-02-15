@@ -36,6 +36,12 @@
 #include "autoplay.h"
 
 
+/*
+** Forward declarations
+*/
+static void Process_Factory_Teams(void);
+
+
 /***********************************************************************************************
  * Create_Attack_Team -- Create a temporary team from selected units for coordinated attack    *
  *                                                                                             *
@@ -226,16 +232,51 @@ int Create_Attack_Team(HouseClass * house, CELL gather_cell)
     }
 
     /*
-    ** Set up mission list: GATHER -> MOVE_NEAR_ENEMY -> ATTACK
-    ** Store the player-specified gather cell in the GATHER mission data
+    ** Check if we have a transport and infantry - if so, use load/unload missions
     */
-    team_type->MissionCount = 3;
-    team_type->MissionList[0].Mission = TMISSION_GATHER;
-    team_type->MissionList[0].Data.Value = gather_cell;  // Player-specified gather point
-    team_type->MissionList[1].Mission = TMISSION_MOVE_NEAR_ENEMY;
-    team_type->MissionList[1].Data.Value = 0;
-    team_type->MissionList[2].Mission = TMISSION_ATTACK;
-    team_type->MissionList[2].Data.Quarry = QUARRY_ANYTHING;
+    bool has_transport = false;
+    bool has_infantry = false;
+    for (int i = 0; i < type_count; i++) {
+        if (type_counts[i].Class->Max_Passengers() > 0) {
+            has_transport = true;
+        }
+        if (type_counts[i].Class->What_Am_I() == RTTI_INFANTRYTYPE) {
+            has_infantry = true;
+        }
+    }
+
+    /*
+    ** Set up mission list based on whether we have transport + infantry
+    */
+    if (has_transport && has_infantry) {
+        /*
+        ** LOAD -> GATHER -> MOVE_NEAR_ENEMY -> UNLOAD -> ATTACK
+        ** Infantry load onto transport, travel together, unload near enemy, then attack
+        */
+        GlyphX_Debug_Print("Create_Attack_Team: Transport + Infantry detected, using LOAD/UNLOAD missions");
+        team_type->MissionCount = 5;
+        team_type->MissionList[0].Mission = TMISSION_LOAD;
+        team_type->MissionList[0].Data.Value = 0;
+        team_type->MissionList[1].Mission = TMISSION_GATHER;
+        team_type->MissionList[1].Data.Value = gather_cell;  // Player-specified gather point
+        team_type->MissionList[2].Mission = TMISSION_MOVE_NEAR_ENEMY;
+        team_type->MissionList[2].Data.Value = 0;
+        team_type->MissionList[3].Mission = TMISSION_UNLOAD;
+        team_type->MissionList[3].Data.Value = 0;
+        team_type->MissionList[4].Mission = TMISSION_ATTACK;
+        team_type->MissionList[4].Data.Quarry = QUARRY_ANYTHING;
+    } else {
+        /*
+        ** Standard mission list: GATHER -> MOVE_NEAR_ENEMY -> ATTACK
+        */
+        team_type->MissionCount = 3;
+        team_type->MissionList[0].Mission = TMISSION_GATHER;
+        team_type->MissionList[0].Data.Value = gather_cell;  // Player-specified gather point
+        team_type->MissionList[1].Mission = TMISSION_MOVE_NEAR_ENEMY;
+        team_type->MissionList[1].Data.Value = 0;
+        team_type->MissionList[2].Mission = TMISSION_ATTACK;
+        team_type->MissionList[2].Data.Quarry = QUARRY_ANYTHING;
+    }
 
     /*
     ** Create the team from this type
@@ -889,7 +930,32 @@ void Autonomous_Player_AI(void)
                 */
 
                 /*
-                ** If aircraft is damaged, look for repair bay
+                ** PRIORITY 1: If out of ammo, stop attacking and return to helipad to rearm
+                ** This must be checked first to interrupt any ongoing attack
+                */
+                if (air->Is_Weapon_Equipped() && air->Ammo == 0) {
+                    /*
+                    ** Clear any attack target - can't attack without ammo
+                    */
+                    if (Target_Legal(air->TarCom)) {
+                        air->Assign_Target(TARGET_NONE);
+                    }
+
+                    /*
+                    ** Return to helipad if not already doing so
+                    */
+                    if (!air->In_Radio_Contact() && air->Mission != MISSION_ENTER) {
+                        BuildingClass * helipad = air->Find_Docking_Bay(STRUCT_HELIPAD, false);
+                        if (helipad != NULL) {
+                            air->Assign_Destination(helipad->As_Target());
+                            air->Assign_Mission(MISSION_ENTER);
+                        }
+                    }
+                    continue;  // Skip other logic until rearmed
+                }
+
+                /*
+                ** PRIORITY 2: If aircraft is damaged, look for repair bay
                 */
                 if (air->Health_Ratio() <= Rule.ConditionYellow && air->House->Available_Money() >= 100) {
                     if (!air->In_Radio_Contact() && air->Mission != MISSION_ENTER) {
@@ -903,21 +969,7 @@ void Autonomous_Player_AI(void)
                 }
 
                 /*
-                ** If out of ammo, look for helipad to rearm
-                */
-                if (air->Is_Weapon_Equipped() && air->Ammo == 0) {
-                    if (!air->In_Radio_Contact() && air->Mission != MISSION_ENTER) {
-                        BuildingClass * helipad = air->Find_Docking_Bay(STRUCT_HELIPAD, false);
-                        if (helipad != NULL) {
-                            air->Assign_Destination(helipad->As_Target());
-                            air->Assign_Mission(MISSION_ENTER);
-                            continue;
-                        }
-                    }
-                }
-
-                /*
-                ** If aircraft has weapon and ammo, scan for threats and attack
+                ** PRIORITY 3: If aircraft has weapon and ammo, scan for threats and attack
                 */
                 if (air->Is_Weapon_Equipped() && air->Ammo > 0) {
                     if (!Target_Legal(air->TarCom)) {
@@ -972,4 +1024,506 @@ void Autonomous_Player_AI(void)
     ** Process attack units
     */
     Process_Attack_Units();
+
+    /*
+    ** Process auto-team creation for units from autonomous factories
+    */
+    Process_Factory_Teams();
+}
+
+
+/***********************************************************************************************
+ * Process_Factory_Teams -- Automatically create attack teams from factory-produced units      *
+ *                                                                                             *
+ *    This routine collects units that were created by autonomous factories and automatically *
+ *    forms them into attack teams when enough units have gathered. Uses AI-like timing and   *
+ *    team composition rules.                                                                  *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ *                                                                                             *
+ * OUTPUT:  none                                                                               *
+ *                                                                                             *
+ * WARNINGS:   Called every frame from Autonomous_Player_AI                                    *
+ *                                                                                             *
+ * HISTORY:                                                                                    *
+ *   02/2026 - Created for Autonomous Player Mod                                               *
+ *=============================================================================================*/
+
+/*
+** Constants for automatic team creation
+** Team sizes are now calculated dynamically based on available units
+*/
+#define AUTO_TEAM_MIN_SIZE      3       // Absolute minimum units to form a team
+#define AUTO_TEAM_DELAY         (TICKS_PER_SECOND * 30)  // Check every 30 seconds for team formation
+#define AUTO_TEAM_FORCE_DELAY   (TICKS_PER_MINUTE * 1)   // Force team creation after 1 minute if minimum met
+
+static void Process_Factory_Teams(void)
+{
+    /*
+    ** Static timers for team creation
+    */
+    static int TeamCheckTimer = AUTO_TEAM_DELAY;
+    static int ForceTeamTimer = AUTO_TEAM_FORCE_DELAY;
+
+    /*
+    ** Only process for player house
+    */
+    if (!PlayerPtr) return;
+
+    /*
+    ** Decrement timers
+    */
+    if (TeamCheckTimer > 0) TeamCheckTimer--;
+    if (ForceTeamTimer > 0) ForceTeamTimer--;
+
+    /*
+    ** Debug: count all units to see what flags they have
+    */
+    static int debug_timer = 0;
+    debug_timer++;
+    bool show_debug = (debug_timer >= TICKS_PER_SECOND * 5);  // Every 5 seconds
+    if (show_debug) debug_timer = 0;
+
+    int total_player_units = 0;
+    int units_from_factory = 0;
+    int units_in_patrol = 0;
+    int units_not_in_team = 0;
+
+    for (int i = 0; i < Units.Count(); i++) {
+        UnitClass* unit = Units.Ptr(i);
+        if (unit && unit->IsActive && unit->House->IsPlayerControl) {
+            total_player_units++;
+            if (unit->IsFromAutonomousFactory) units_from_factory++;
+            if (unit->AutonomousMode == AUTOMODE_PATROL) units_in_patrol++;
+            if (!unit->Team.Is_Valid()) units_not_in_team++;
+        }
+    }
+
+    if (show_debug && total_player_units > 0) {
+        char dbg[256];
+        sprintf(dbg, "FactoryTeams DEBUG: %d player units, %d fromFactory, %d patrol, %d noTeam, timers=%d/%d",
+                total_player_units, units_from_factory, units_in_patrol, units_not_in_team,
+                TeamCheckTimer / TICKS_PER_SECOND, ForceTeamTimer / TICKS_PER_SECOND);
+        GlyphX_Debug_Print(dbg);
+    }
+
+    /*
+    ** Count available factory-produced units (not in teams, not currently attacking)
+    */
+    int available_count = 0;
+    bool has_transport = false;
+    bool has_infantry = false;
+    COORDINATE avg_coord = 0;
+    long total_x = 0, total_y = 0;
+    HouseClass * team_house = NULL;  // Store the house from first found unit
+
+    // Count units (exclude harvesters and MCVs)
+    for (int i = 0; i < Units.Count(); i++) {
+        UnitClass* unit = Units.Ptr(i);
+        if (unit && unit->IsActive && unit->House->IsPlayerControl) {
+            // Debug: show unit flags
+            if (show_debug && unit->IsFromAutonomousFactory) {
+                char dbg2[256];
+                sprintf(dbg2, "  Unit %s: fromFactory=%d mode=%d inTeam=%d",
+                        unit->Class->IniName,
+                        unit->IsFromAutonomousFactory ? 1 : 0,
+                        (int)unit->AutonomousMode,
+                        unit->Team.Is_Valid() ? 1 : 0);
+                GlyphX_Debug_Print(dbg2);
+            }
+            if (unit->IsFromAutonomousFactory && !unit->Team.Is_Valid() &&
+                unit->AutonomousMode == AUTOMODE_PATROL &&
+                *unit != UNIT_HARVESTER && *unit != UNIT_MCV) {
+                if (!team_house) team_house = unit->House;
+                available_count++;
+                total_x += Coord_X(unit->Coord);
+                total_y += Coord_Y(unit->Coord);
+                if (unit->Class->Max_Passengers() > 0) {
+                    has_transport = true;
+                }
+            }
+        }
+    }
+
+    // Count infantry
+    for (int i = 0; i < Infantry.Count(); i++) {
+        InfantryClass* inf = Infantry.Ptr(i);
+        if (inf && inf->IsActive && inf->House->IsPlayerControl &&
+            inf->IsFromAutonomousFactory && !inf->Team.Is_Valid() &&
+            inf->AutonomousMode == AUTOMODE_PATROL) {
+            if (!team_house) team_house = inf->House;
+            available_count++;
+            total_x += Coord_X(inf->Coord);
+            total_y += Coord_Y(inf->Coord);
+            has_infantry = true;
+        }
+    }
+
+    // Count vessels
+    for (int i = 0; i < Vessels.Count(); i++) {
+        VesselClass* ship = Vessels.Ptr(i);
+        if (ship && ship->IsActive && ship->House->IsPlayerControl &&
+            ship->IsFromAutonomousFactory && !ship->Team.Is_Valid() &&
+            ship->AutonomousMode == AUTOMODE_PATROL) {
+            if (!team_house) team_house = ship->House;
+            available_count++;
+            total_x += Coord_X(ship->Coord);
+            total_y += Coord_Y(ship->Coord);
+        }
+    }
+
+    // Count aircraft
+    for (int i = 0; i < Aircraft.Count(); i++) {
+        AircraftClass* air = Aircraft.Ptr(i);
+        if (air && air->IsActive && air->House->IsPlayerControl &&
+            air->IsFromAutonomousFactory && !air->Team.Is_Valid() &&
+            air->AutonomousMode == AUTOMODE_PATROL) {
+            if (!team_house) team_house = air->House;
+            available_count++;
+            total_x += Coord_X(air->Coord);
+            total_y += Coord_Y(air->Coord);
+        }
+    }
+
+    /*
+    ** Calculate dynamic team sizes based on available units
+    ** - Ideal: 40% of available, minimum 4
+    ** - Max: 60% of available, minimum 8
+    ** This scales team sizes with the player's army
+    */
+    int dynamic_ideal_size = (available_count * 40) / 100;
+    if (dynamic_ideal_size < 4) dynamic_ideal_size = 4;
+
+    int dynamic_max_size = (available_count * 60) / 100;
+    if (dynamic_max_size < 8) dynamic_max_size = 8;
+
+    /*
+    ** Debug output for available count
+    */
+    if (show_debug) {
+        char dbg[256];
+        sprintf(dbg, "FactoryTeams: available=%d (min=%d, ideal=%d, max=%d)",
+                available_count, AUTO_TEAM_MIN_SIZE, dynamic_ideal_size, dynamic_max_size);
+        GlyphX_Debug_Print(dbg);
+    }
+
+    /*
+    ** Check if we should create a team
+    */
+    bool should_create = false;
+    int team_size_to_use = 0;
+
+    if (available_count >= dynamic_max_size) {
+        // Max size reached, must create immediately
+        should_create = true;
+        team_size_to_use = dynamic_max_size;
+        GlyphX_Debug_Print("Process_Factory_Teams: Max team size reached");
+    } else if (available_count >= dynamic_ideal_size && TeamCheckTimer == 0) {
+        // Ideal size reached and timer expired
+        should_create = true;
+        team_size_to_use = dynamic_ideal_size;
+        GlyphX_Debug_Print("Process_Factory_Teams: Ideal team size reached");
+    } else if (available_count >= AUTO_TEAM_MIN_SIZE && ForceTeamTimer == 0) {
+        // Force creation after timeout with whatever we have
+        should_create = true;
+        team_size_to_use = available_count;
+        GlyphX_Debug_Print("Process_Factory_Teams: Force timer expired, creating team");
+    }
+
+    if (!should_create) return;
+    if (!team_house) return;  // Safety check
+
+    /*
+    ** Calculate gather point (average position of available units)
+    */
+    if (available_count > 0) {
+        avg_coord = XY_Coord(total_x / available_count, total_y / available_count);
+    }
+    CELL gather_cell = Coord_Cell(avg_coord);
+
+    /*
+    ** Create the attack team using similar logic to Create_Attack_Team
+    ** but for factory-produced units instead of selected units
+    */
+    char dbg[256];
+    sprintf(dbg, "Process_Factory_Teams: Creating team with %d units at cell %d", available_count, gather_cell);
+    GlyphX_Debug_Print(dbg);
+
+    /*
+    ** Count unit types for the team
+    */
+    struct UnitTypeCount {
+        TechnoTypeClass const * Class;
+        int Count;
+    };
+    UnitTypeCount type_counts[20];
+    int type_count = 0;
+    int total_units = 0;
+
+    // Process ground units (exclude harvesters and MCVs)
+    for (int index = 0; index < Units.Count(); index++) {
+        UnitClass * unit = Units.Ptr(index);
+        if (unit != NULL && unit->House->IsPlayerControl && unit->IsFromAutonomousFactory &&
+            !unit->Team.Is_Valid() && unit->AutonomousMode == AUTOMODE_PATROL &&
+            *unit != UNIT_HARVESTER && *unit != UNIT_MCV) {
+            TechnoTypeClass const * tclass = (TechnoTypeClass const *)&unit->Class_Of();
+            bool found = false;
+            for (int t = 0; t < type_count; t++) {
+                if (type_counts[t].Class == tclass) {
+                    type_counts[t].Count++;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && type_count < 20) {
+                type_counts[type_count].Class = tclass;
+                type_counts[type_count].Count = 1;
+                type_count++;
+            }
+            total_units++;
+            if (total_units >= team_size_to_use) break;
+        }
+    }
+
+    // Process infantry
+    if (total_units < team_size_to_use) {
+        for (int index = 0; index < Infantry.Count(); index++) {
+            InfantryClass * inf = Infantry.Ptr(index);
+            if (inf != NULL && inf->House->IsPlayerControl && inf->IsFromAutonomousFactory &&
+                !inf->Team.Is_Valid() && inf->AutonomousMode == AUTOMODE_PATROL) {
+                TechnoTypeClass const * tclass = (TechnoTypeClass const *)&inf->Class_Of();
+                bool found = false;
+                for (int t = 0; t < type_count; t++) {
+                    if (type_counts[t].Class == tclass) {
+                        type_counts[t].Count++;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && type_count < 20) {
+                    type_counts[type_count].Class = tclass;
+                    type_counts[type_count].Count = 1;
+                    type_count++;
+                }
+                total_units++;
+                if (total_units >= team_size_to_use) break;
+            }
+        }
+    }
+
+    // Process vessels
+    if (total_units < team_size_to_use) {
+        for (int index = 0; index < Vessels.Count(); index++) {
+            VesselClass * vessel = Vessels.Ptr(index);
+            if (vessel != NULL && vessel->House->IsPlayerControl && vessel->IsFromAutonomousFactory &&
+                !vessel->Team.Is_Valid() && vessel->AutonomousMode == AUTOMODE_PATROL) {
+                TechnoTypeClass const * tclass = (TechnoTypeClass const *)&vessel->Class_Of();
+                bool found = false;
+                for (int t = 0; t < type_count; t++) {
+                    if (type_counts[t].Class == tclass) {
+                        type_counts[t].Count++;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && type_count < 20) {
+                    type_counts[type_count].Class = tclass;
+                    type_counts[type_count].Count = 1;
+                    type_count++;
+                }
+                total_units++;
+                if (total_units >= team_size_to_use) break;
+            }
+        }
+    }
+
+    // Process aircraft
+    if (total_units < team_size_to_use) {
+        for (int index = 0; index < Aircraft.Count(); index++) {
+            AircraftClass * aircraft = Aircraft.Ptr(index);
+            if (aircraft != NULL && aircraft->House->IsPlayerControl && aircraft->IsFromAutonomousFactory &&
+                !aircraft->Team.Is_Valid() && aircraft->AutonomousMode == AUTOMODE_PATROL) {
+                TechnoTypeClass const * tclass = (TechnoTypeClass const *)&aircraft->Class_Of();
+                bool found = false;
+                for (int t = 0; t < type_count; t++) {
+                    if (type_counts[t].Class == tclass) {
+                        type_counts[t].Count++;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && type_count < 20) {
+                    type_counts[type_count].Class = tclass;
+                    type_counts[type_count].Count = 1;
+                    type_count++;
+                }
+                total_units++;
+                if (total_units >= team_size_to_use) break;
+            }
+        }
+    }
+
+    if (total_units == 0 || type_count == 0) {
+        return;
+    }
+
+    /*
+    ** Limit to MAX_TEAM_CLASSCOUNT (5) types
+    */
+    if (type_count > TeamTypeClass::MAX_TEAM_CLASSCOUNT) {
+        type_count = TeamTypeClass::MAX_TEAM_CLASSCOUNT;
+    }
+
+    /*
+    ** Create a new TeamTypeClass
+    */
+    TeamTypeClass * team_type = new TeamTypeClass();
+    if (!team_type) {
+        GlyphX_Debug_Print("Process_Factory_Teams: Failed to create TeamTypeClass");
+        return;
+    }
+
+    /*
+    ** Configure the team type
+    */
+    strcpy((char*)team_type->IniName, "AUTOFAC");
+    team_type->House = team_house->Class->House;
+    team_type->IsRoundAbout = false;
+    team_type->IsSuicide = false;
+    team_type->IsAutocreate = false;
+    team_type->IsPrebuilt = false;
+    team_type->IsReinforcable = false;
+    team_type->IsTransient = true;
+    team_type->RecruitPriority = 15;
+    team_type->InitNum = 0;
+    team_type->MaxAllowed = 1;
+    team_type->Fear = 0;
+
+    /*
+    ** Set up member types
+    */
+    team_type->ClassCount = type_count;
+    for (int i = 0; i < type_count; i++) {
+        team_type->Members[i].Class = type_counts[i].Class;
+        team_type->Members[i].Quantity = type_counts[i].Count;
+    }
+
+    /*
+    ** Check if we have transport + infantry for load/unload missions
+    */
+    bool team_has_transport = false;
+    bool team_has_infantry = false;
+    for (int i = 0; i < type_count; i++) {
+        if (type_counts[i].Class->Max_Passengers() > 0) {
+            team_has_transport = true;
+        }
+        if (type_counts[i].Class->What_Am_I() == RTTI_INFANTRYTYPE) {
+            team_has_infantry = true;
+        }
+    }
+
+    /*
+    ** Set up mission list based on team composition
+    */
+    if (team_has_transport && team_has_infantry) {
+        GlyphX_Debug_Print("Process_Factory_Teams: Transport + Infantry detected, using LOAD/UNLOAD");
+        team_type->MissionCount = 5;
+        team_type->MissionList[0].Mission = TMISSION_LOAD;
+        team_type->MissionList[0].Data.Value = 0;
+        team_type->MissionList[1].Mission = TMISSION_GATHER;
+        team_type->MissionList[1].Data.Value = gather_cell;
+        team_type->MissionList[2].Mission = TMISSION_MOVE_NEAR_ENEMY;
+        team_type->MissionList[2].Data.Value = 0;
+        team_type->MissionList[3].Mission = TMISSION_UNLOAD;
+        team_type->MissionList[3].Data.Value = 0;
+        team_type->MissionList[4].Mission = TMISSION_ATTACK;
+        team_type->MissionList[4].Data.Quarry = QUARRY_ANYTHING;
+    } else {
+        team_type->MissionCount = 3;
+        team_type->MissionList[0].Mission = TMISSION_GATHER;
+        team_type->MissionList[0].Data.Value = gather_cell;
+        team_type->MissionList[1].Mission = TMISSION_MOVE_NEAR_ENEMY;
+        team_type->MissionList[1].Data.Value = 0;
+        team_type->MissionList[2].Mission = TMISSION_ATTACK;
+        team_type->MissionList[2].Data.Quarry = QUARRY_ANYTHING;
+    }
+
+    /*
+    ** Create the team
+    */
+    TeamClass * team = team_type->Create_One_Of();
+    if (!team) {
+        GlyphX_Debug_Print("Process_Factory_Teams: Failed to create TeamClass");
+        delete team_type;
+        return;
+    }
+
+    team->Force_Active();
+
+    /*
+    ** Add factory-produced units to the team
+    */
+    int units_added = 0;
+
+    for (int index = 0; index < Units.Count() && units_added < team_size_to_use; index++) {
+        UnitClass * unit = Units.Ptr(index);
+        if (unit != NULL && unit->House->IsPlayerControl && unit->IsFromAutonomousFactory &&
+            !unit->Team.Is_Valid() && unit->AutonomousMode == AUTOMODE_PATROL &&
+            *unit != UNIT_HARVESTER && *unit != UNIT_MCV) {
+            unit->AutonomousMode = AUTOMODE_NONE;
+            unit->IsFromAutonomousFactory = false;  // Clear flag so they don't get re-recruited
+            unit->Assign_Mission(MISSION_GUARD);
+            if (team->Add(unit)) {
+                units_added++;
+            }
+        }
+    }
+
+    for (int index = 0; index < Infantry.Count() && units_added < team_size_to_use; index++) {
+        InfantryClass * inf = Infantry.Ptr(index);
+        if (inf != NULL && inf->House->IsPlayerControl && inf->IsFromAutonomousFactory &&
+            !inf->Team.Is_Valid() && inf->AutonomousMode == AUTOMODE_PATROL) {
+            inf->AutonomousMode = AUTOMODE_NONE;
+            inf->IsFromAutonomousFactory = false;
+            inf->Assign_Mission(MISSION_GUARD);
+            if (team->Add(inf)) {
+                units_added++;
+            }
+        }
+    }
+
+    for (int index = 0; index < Vessels.Count() && units_added < team_size_to_use; index++) {
+        VesselClass * vessel = Vessels.Ptr(index);
+        if (vessel != NULL && vessel->House->IsPlayerControl && vessel->IsFromAutonomousFactory &&
+            !vessel->Team.Is_Valid() && vessel->AutonomousMode == AUTOMODE_PATROL) {
+            vessel->AutonomousMode = AUTOMODE_NONE;
+            vessel->IsFromAutonomousFactory = false;
+            vessel->Assign_Mission(MISSION_GUARD);
+            if (team->Add(vessel)) {
+                units_added++;
+            }
+        }
+    }
+
+    for (int index = 0; index < Aircraft.Count() && units_added < team_size_to_use; index++) {
+        AircraftClass * aircraft = Aircraft.Ptr(index);
+        if (aircraft != NULL && aircraft->House->IsPlayerControl && aircraft->IsFromAutonomousFactory &&
+            !aircraft->Team.Is_Valid() && aircraft->AutonomousMode == AUTOMODE_PATROL) {
+            aircraft->AutonomousMode = AUTOMODE_NONE;
+            aircraft->IsFromAutonomousFactory = false;
+            aircraft->Assign_Mission(MISSION_GUARD);
+            if (team->Add(aircraft)) {
+                units_added++;
+            }
+        }
+    }
+
+    sprintf(dbg, "Process_Factory_Teams: Created auto-team with %d units", units_added);
+    GlyphX_Debug_Print(dbg);
+
+    /*
+    ** Reset timers
+    */
+    TeamCheckTimer = AUTO_TEAM_DELAY;
+    ForceTeamTimer = AUTO_TEAM_FORCE_DELAY;
 }

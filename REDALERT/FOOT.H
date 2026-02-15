@@ -187,6 +187,12 @@ class FootClass :	public TechnoClass
 		COORDINATE PatrolHome;
 
 		/*
+		**	Autonomous Player Mod: If true, this unit was created by an autonomous factory
+		**	and should be automatically grouped into attack teams by the autoplay system.
+		*/
+		unsigned IsFromAutonomousFactory:1;
+
+		/*
 		**	This is the "throttle setting" of the unit. It is a fractional value with 0 = stop
 		**	and 255 = full speed.
 		*/

@@ -79,6 +79,7 @@ class FactoryClass : private StageClass
 		char const * Name(void) {return("Factory");}
 		bool Is_Blocked(void) {return IsBlocked;}
 		void Set_Is_Blocked(bool set) {IsBlocked = set;}
+		void Set_Autonomous_Production(bool set) {IsAutonomousProduction = set;}
 
 		/*
 		** Added for debugging / testing. ST - 8/23/2019 3:52PM
@@ -122,6 +123,12 @@ class FactoryClass : private StageClass
 		** has completed. ST - 2/25/2020 11:29AM
 		*/
 		unsigned IsBlocked:1;
+
+		/*
+		**	Autonomous Player Mod: If true, this factory is producing for an autonomous
+		**	factory building, and the cost should be reduced.
+		*/
+		unsigned IsAutonomousProduction:1;
 
 		/*
 		**	This records the balance due on the current production item. This value will

@@ -1965,7 +1965,10 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 					Transmit_Message(RADIO_TETHER);
 					ScenarioInit--;
 					if (IsAutonomous) {
+						air->IsFromAutonomousFactory = true;
 						air->Set_Autonomous_Mode(AUTOMODE_ATTACK);
+					} else if (House->IsPlayerControl) {
+						air->Set_Autonomous_Mode(AUTOMODE_PATROL);
 					}
 					return(2);
 				}
@@ -1985,7 +1988,10 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 					air->Assign_Mission(MISSION_MOVE);
 					ScenarioInit--;
 					if (IsAutonomous) {
+						air->IsFromAutonomousFactory = true;
 						air->Set_Autonomous_Mode(AUTOMODE_ATTACK);
+					} else if (House->IsPlayerControl) {
+						air->Set_Autonomous_Mode(AUTOMODE_PATROL);
 					}
 					return(2);
 				}
@@ -2002,8 +2008,13 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 					if (cell != 0 && base->Unlimbo(Cell_Coord(cell), Direction(Cell_Coord(cell)))) {
 						base->Assign_Mission(MISSION_GUARD);
 						ScenarioInit--;
-						if (IsAutonomous && base->Is_Foot()) {
-							((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+						if (base->Is_Foot()) {
+							if (IsAutonomous) {
+								((FootClass*)base)->IsFromAutonomousFactory = true;
+							}
+							if (IsAutonomous || House->IsPlayerControl) {
+								((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							}
 						}
 						return(2);
 					}
@@ -2060,8 +2071,17 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 						Transmit_Message(RADIO_TETHER);
 						Assign_Mission(MISSION_UNLOAD);
 						ScenarioInit--;
-						if (IsAutonomous && base->Is_Foot()) {
-							((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+						if (base->Is_Foot()) {
+							char dbg[128];
+							sprintf(dbg, "WEAP Exit: IsAutonomous=%d IsPlayerControl=%d", IsAutonomous ? 1 : 0, House->IsPlayerControl ? 1 : 0);
+							GlyphX_Debug_Print(dbg);
+							if (IsAutonomous) {
+								((FootClass*)base)->IsFromAutonomousFactory = true;
+								GlyphX_Debug_Print("WEAP Exit: Set IsFromAutonomousFactory=true");
+							}
+							if (IsAutonomous || House->IsPlayerControl) {
+								((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							}
 						}
 						return(2);
 					}
@@ -2100,8 +2120,13 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 								Transmit_Message(RADIO_UNLOAD);
 							}
 							ScenarioInit--;
-							if (IsAutonomous && base->Is_Foot()) {
-								((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							if (base->Is_Foot()) {
+								if (IsAutonomous) {
+									((FootClass*)base)->IsFromAutonomousFactory = true;
+								}
+								if (IsAutonomous || House->IsPlayerControl) {
+									((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+								}
 							}
 							return(2);
 						}
@@ -2130,8 +2155,13 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 								base->ArchiveTarget = ::As_Target(House->Where_To_Go((FootClass *)base));
 							}
 							ScenarioInit--;
-							if (IsAutonomous && base->Is_Foot()) {
-								((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+							if (base->Is_Foot()) {
+								if (IsAutonomous) {
+									((FootClass*)base)->IsFromAutonomousFactory = true;
+								}
+								if (IsAutonomous || House->IsPlayerControl) {
+									((FootClass*)base)->Set_Autonomous_Mode(AUTOMODE_PATROL);
+								}
 							}
 							return(2);
 						}
@@ -5668,6 +5698,12 @@ void BuildingClass::Factory_AI(void)
 					if (techno != NULL) {
 						Factory = new FactoryClass;
 						if (Factory.Is_Valid()) {
+							/*
+							** Mark as autonomous production before Set() calculates cost
+							*/
+							if (IsAutonomous) {
+								Factory->Set_Autonomous_Production(true);
+							}
 							if (!Factory->Set(*techno, *House)) {
 								delete (FactoryClass *)Factory;
 								Factory = 0;

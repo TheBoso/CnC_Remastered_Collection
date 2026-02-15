@@ -117,6 +117,7 @@ FootClass::FootClass(RTTIType rtti, int id, HousesType house) :
 	PatrolPhase(PATROL_PHASE_GUARDING),
 	PatrolTimer(0),
 	PatrolHome(0),
+	IsFromAutonomousFactory(false),
 	Speed(0),
 	SpeedBias(1),
 	XFormOffset(0x80000000),
@@ -2686,6 +2687,17 @@ void FootClass::Set_Autonomous_Mode(AutoModeType mode)
 	GlyphX_Debug_Print(buf);
 
 	switch (mode) {
+		case AUTOMODE_NONE:
+			/*
+			** Returning to normal player control - clear all autonomous state
+			*/
+			PatrolHome = 0;
+			PatrolPhase = PATROL_PHASE_GUARDING;
+			PatrolTimer = 0;
+			AttackPhase = ATTACK_PHASE_GROUPING;
+			Assign_Mission(MISSION_GUARD);
+			break;
+
 		case AUTOMODE_SCOUT:
 			/*
 			** Scout mode: Hunt enemies aggressively
@@ -2696,15 +2708,49 @@ void FootClass::Set_Autonomous_Mode(AutoModeType mode)
 		case AUTOMODE_PATROL:
 			/*
 			** Patrol mode:
-			** Ground units: Patrol around home position
+			** Ground units: Immediately move to random patrol point, then patrol around home
 			** Aircraft: Stay on helipad, autonomous AI handles threat scanning
-			** Use MISSION_GUARD so units stay recruitable for teams
 			*/
 			PatrolHome = Coord;
-			PatrolPhase = PATROL_PHASE_GUARDING;
-			PatrolTimer = PATROL_GUARD_TIME;
-			ArchiveTarget = ::As_Target(Coord);
-			Assign_Mission(MISSION_GUARD);
+
+			/*
+			** Aircraft don't patrol like ground units - they stay on helipad
+			*/
+			if (What_Am_I() == RTTI_AIRCRAFT) {
+				PatrolPhase = PATROL_PHASE_GUARDING;
+				PatrolTimer = PATROL_GUARD_TIME;
+				ArchiveTarget = ::As_Target(Coord);
+				Assign_Mission(MISSION_GUARD);
+			} else {
+				/*
+				** Ground units immediately move to a random patrol point
+				*/
+				int home_x = Coord_X(Coord);
+				int home_y = Coord_Y(Coord);
+				int offset_x = (Random_Pick(0, PATROL_RADIUS * 2) - PATROL_RADIUS) * CELL_LEPTON_W;
+				int offset_y = (Random_Pick(0, PATROL_RADIUS * 2) - PATROL_RADIUS) * CELL_LEPTON_H;
+				int new_x = home_x + offset_x;
+				int new_y = home_y + offset_y;
+				if (new_x < 0) new_x = 0;
+				if (new_y < 0) new_y = 0;
+
+				COORDINATE new_coord = XY_Coord(new_x, new_y);
+				CELL new_cell = Coord_Cell(new_coord);
+
+				if (Map.In_Radar(new_cell)) {
+					PatrolPhase = PATROL_PHASE_MOVING;
+					Assign_Destination(::As_Target(new_coord));
+					Assign_Mission(MISSION_MOVE);
+				} else {
+					/*
+					** Fallback: guard briefly then move
+					*/
+					PatrolPhase = PATROL_PHASE_GUARDING;
+					PatrolTimer = TICKS_PER_SECOND * 2;  // Short delay before retrying
+					ArchiveTarget = ::As_Target(Coord);
+					Assign_Mission(MISSION_GUARD);
+				}
+			}
 			break;
 
 		case AUTOMODE_ATTACK:

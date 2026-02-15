@@ -73,6 +73,7 @@ FactoryClass::FactoryClass(void) :
 	IsSuspended(false),
 	IsDifferent(false),
 	IsBlocked(false),
+	IsAutonomousProduction(false),
 	Balance(0),
 	OriginalBalance(0),
 	Object(0),
@@ -348,6 +349,14 @@ bool FactoryClass::Set(TechnoTypeClass const & object, HouseClass & house)
 	if (Object) {
 		House  = Object->House;
 		Balance = object.Cost_Of() * house.CostBias;
+
+		/*
+		** Autonomous Player Mod: Reduce cost by half for autonomous factory production
+		*/
+		if (IsAutonomousProduction) {
+			Balance = Balance / 2;
+		}
+
 		Object->PurchasePrice = Balance;
 	}
 
