@@ -3009,11 +3009,17 @@ void DLLExportClass::On_Multiplayer_Game_Over(void)
 
 	/*
 	** BosoAI: save learning data before returning to the GlyphX engine.
-	** PlayerPtr->IsDefeated determines whether BosoAI won or lost.
+	** In FFA multi-house mode, PlayerPtr is redirected to the surviving house,
+	** so use PlayerPtr rather than BosoHouse to determine the winner.
 	** GameOverFired prevents double-calling if HOUSE.CPP also fired it.
 	*/
 	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::BosoHouse != NULL) {
-		bool boso_won = !BosoAIManagerClass::BosoHouse->IsDefeated;
+		bool boso_won;
+		if (BosoAIManagerClass::IsMultiHouseAI) {
+			boso_won = PlayerPtr && !PlayerPtr->IsDefeated;
+		} else {
+			boso_won = !BosoAIManagerClass::BosoHouse->IsDefeated;
+		}
 		BosoAIManagerClass::On_Game_Over(boso_won);
 	}
 
