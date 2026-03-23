@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BosoAI Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --orange: #f0883e;
+    --accent: #1f6feb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header span { color: var(--muted); font-size: 12px; }
+
+  .drop-zone {
+    margin: 32px auto; max-width: 680px; border: 2px dashed var(--border);
+    border-radius: 12px; padding: 48px 32px; text-align: center; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(31,111,235,.05); }
+  .drop-zone p { color: var(--muted); margin-top: 8px; font-size: 13px; }
+  .drop-zone label { cursor: pointer; color: var(--blue); text-decoration: underline; }
+  #file-input { display: none; }
+
+  .paste-area { margin: 0 auto 32px; max-width: 680px; }
+  .paste-area textarea {
+    width: 100%; height: 160px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-family: monospace; font-size: 12px;
+    padding: 12px; resize: vertical; outline: none;
+  }
+  .paste-area textarea:focus { border-color: var(--accent); }
+  .btn {
+    margin-top: 8px; padding: 8px 20px; background: var(--accent); color: #fff;
+    border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .btn:hover { background: #388bfd; }
+  .btn-sm { padding: 4px 12px; font-size: 12px; }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 0 24px 48px; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab {
+    padding: 10px 20px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent;
+    font-weight: 500; transition: color .2s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Limits Table */
+  .controls { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .controls label { color: var(--muted); font-size: 12px; }
+  .controls select, .controls input {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none;
+  }
+  .controls select:focus, .controls input:focus { border-color: var(--accent); }
+
+  .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    background: var(--surface2); padding: 10px 12px; text-align: left; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap;
+    cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 1;
+  }
+  thead th:hover { color: var(--text); }
+  thead th.sort-asc::after { content: ' ↑'; color: var(--blue); }
+  thead th.sort-desc::after { content: ' ↓'; color: var(--blue); }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  tbody td { padding: 10px 12px; white-space: nowrap; }
+
+  .rank-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 50%; font-size: 11px; font-weight: 700;
+  }
+  .rank-1 { background: #f0b429; color: #000; }
+  .rank-2 { background: #a8a9ad; color: #000; }
+  .rank-3 { background: #cd7f32; color: #fff; }
+  .rank-n { background: var(--surface2); color: var(--muted); }
+
+  .score-bar-wrap { display: flex; align-items: center; gap: 8px; min-width: 160px; }
+  .score-bar-track { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+  .score-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .score-val { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 48px; text-align: right; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .neu { color: var(--muted); }
+
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  }
+  .pill-soviet { background: rgba(248,81,73,.15); color: #f85149; border: 1px solid rgba(248,81,73,.3); }
+  .pill-allied { background: rgba(88,166,255,.15); color: #58a6ff; border: 1px solid rgba(88,166,255,.3); }
+  .pill-other  { background: rgba(139,148,158,.15); color: #8b949e; border: 1px solid rgba(139,148,158,.3); }
+
+  /* Sparkline-style confidence */
+  .conf-dots { display: flex; gap: 2px; }
+  .conf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+  .conf-dot.filled { background: var(--blue); }
+
+  /* Cards for build/combat orders */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; }
+  .card-title { font-weight: 600; font-size: 14px; }
+  .card-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .card-score { font-size: 13px; font-weight: 600; }
+  .sequence { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seq-item {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+    padding: 3px 8px; font-family: monospace; font-size: 12px; display: flex;
+    align-items: center; gap: 4px;
+  }
+  .seq-num { color: var(--muted); font-size: 10px; min-width: 14px; }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex; gap: 24px; flex-wrap: wrap; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px; padding: 16px 24px; margin-bottom: 24px;
+  }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat-val { font-size: 22px; font-weight: 700; }
+  .stat-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+  .empty { color: var(--muted); text-align: center; padding: 48px; font-size: 14px; }
+
+  .tooltip-wrap { position: relative; }
+  .tooltip-wrap:hover .tooltip { display: block; }
+  .tooltip {
+    display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; font-size: 12px; white-space: nowrap; z-index: 10;
+    color: var(--text); pointer-events: none;
+  }
+
+  .live-bar {
+    display: flex; align-items: center; gap: 12px; padding: 8px 24px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--muted);
+    display: inline-block; flex-shrink: 0;
+  }
+  .live-dot.on { background: var(--green); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .toggle-btn {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  .toggle-btn.on { border-color: var(--green); color: var(--green); }
+  .toggle-btn:hover { border-color: var(--accent); }
+  .toggle-btn:disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>BosoAI Dashboard</h1>
+  </div>
+  <span id="file-label" style="color:var(--muted)">No file loaded</span>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <button class="btn btn-sm" id="pick-btn" onclick="pickFile()">Open BOSOAI.INI</button>
+    <label class="btn btn-sm" for="file-input" title="Fallback file picker">Browse</label>
+    <input type="file" id="file-input" accept=".ini,.txt">
+  </div>
+</header>
+
+<div id="live-bar" class="live-bar" style="display:none">
+  <span class="live-dot" id="live-dot"></span>
+  <span id="live-status">Loaded</span>
+  <button class="toggle-btn" id="live-btn" onclick="toggleLive()">Live OFF</button>
+  <select id="live-interval" onchange="setLiveInterval()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px;font-size:12px">
+    <option value="3">Every 3s</option>
+    <option value="5" selected>Every 5s</option>
+    <option value="10">Every 10s</option>
+    <option value="30">Every 30s</option>
+  </select>
+  <button class="toggle-btn" onclick="reloadFile()" title="Reload now">Reload</button>
+  <span style="margin-left:auto;font-size:11px" id="last-updated"></span>
+</div>
+
+<div id="landing">
+  <div class="drop-zone" id="drop-zone">
+    <div style="font-size:36px">&#128202;</div>
+    <p style="font-size:16px;color:var(--text);margin-top:12px">Drop <strong>BOSOAI.INI</strong> here</p>
+    <p>or click <strong>Open BOSOAI.INI</strong> above &mdash; pick the file once and enable Live mode to auto-refresh</p>
+    <p style="margin-top:8px;font-size:11px">Typically at: <code style="background:var(--surface2);padding:2px 6px;border-radius:4px">bin\Win32\BOSOAI.INI</code></p>
+  </div>
+  <div class="paste-area">
+    <p style="color:var(--muted);font-size:12px;margin-bottom:6px">Or paste INI contents:</p>
+    <textarea id="paste-area" placeholder="Paste BOSOAI.INI contents here..."></textarea>
+    <br><button class="btn" onclick="parsePasted()">Parse</button>
+  </div>
+</div>
+
+<main id="dashboard" style="display:none">
+  <div class="stats-bar" id="stats-bar"></div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="limits">Limits Records</div>
+    <div class="tab" data-tab="build">Build Orders</div>
+    <div class="tab" data-tab="combat">Combat Orders</div>
+  </div>
+
+  <div class="tab-content active" id="tab-limits">
+    <div class="controls">
+      <label>Faction:</label>
+      <select id="filter-faction"><option value="">All</option></select>
+      <label>Sort:</label>
+      <select id="sort-col">
+        <option value="norm" selected>Normalised Score</option>
+        <option value="WinScore">Raw Score</option>
+        <option value="GamesPlayed">Games Played</option>
+        <option value="MaxUnit">Max Unit</option>
+        <option value="AttackSecs">Attack Secs</option>
+        <option value="BaseSizeAdd">Base Size</option>
+        <option value="BaseSpacing">Base Spacing</option>
+      </select>
+      <select id="sort-dir">
+        <option value="desc">Highest first</option>
+        <option value="asc">Lowest first</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table id="limits-table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-build">
+    <div class="controls">
+      <label>Faction:</label>
+      <select id="filter-build-faction"><option value="">All</option></select>
+      <label>Sort:</label>
+      <select id="sort-build">
+        <option value="norm">Normalised Score</option>
+        <option value="WinScore">Raw Score</option>
+        <option value="GamesPlayed">Games Played</option>
+      </select>
+    </div>
+    <div class="cards" id="build-cards"></div>
+  </div>
+
+  <div class="tab-content" id="tab-combat">
+    <div class="controls">
+      <label>Faction:</label>
+      <select id="filter-combat-faction"><option value="">All</option></select>
+      <label>Sort:</label>
+      <select id="sort-combat">
+        <option value="norm">Normalised Score</option>
+        <option value="WinScore">Raw Score</option>
+        <option value="GamesPlayed">Games Played</option>
+      </select>
+    </div>
+    <div class="cards" id="combat-cards"></div>
+  </div>
+</main>
+
+<script>
+// ── INI Parser ────────────────────────────────────────────────────────────────
+function parseINI(text) {
+  const lines = text.split(/\r?\n/);
+  let section = '';
+  const data = {};
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith(';')) continue;
+    const secMatch = line.match(/^\[(.+)\]$/);
+    if (secMatch) { section = secMatch[1]; data[section] = data[section] || {}; continue; }
+    const eqIdx = line.indexOf('=');
+    if (eqIdx < 0) continue;
+    const key = line.slice(0, eqIdx).trim();
+    const val = line.slice(eqIdx + 1).trim();
+    if (section) data[section][key] = val;
+  }
+  return data;
+}
+
+function int(v, def = 0) { const n = parseInt(v, 10); return isNaN(n) ? def : n; }
+
+// Bayesian prior: adds N phantom neutral games so low-sample records are
+// penalised. Chosen to match roughly one full win+loss cycle (win=5, loss=3).
+const CONFIDENCE_PRIOR = 5;
+
+// ── Record extraction ─────────────────────────────────────────────────────────
+function extractLimits(sec) {
+  if (!sec) return [];
+  const count = int(sec['Count']);
+  const records = [];
+  for (let i = 0; i < count; i++) {
+    const p = `Limits_${i}_`;
+    const r = {
+      idx: i,
+      Faction:     sec[p + 'Faction']    || '?',
+      WinScore:    int(sec[p + 'Score']),
+      GamesPlayed: int(sec[p + 'Games']),
+      MaxUnit:     int(sec[p + 'Unit']),
+      MaxBuilding: int(sec[p + 'Building']),
+      MaxInfantry: int(sec[p + 'Infantry']),
+      MaxVessel:   int(sec[p + 'Vessel']),
+      MaxAircraft: int(sec[p + 'Aircraft']),
+      MaxRefinery: int(sec[p + 'Refinery']),
+      MaxBarracks: int(sec[p + 'Barracks']),
+      MaxWarFactory: int(sec[p + 'WarFactory']),
+      MaxDefense:  int(sec[p + 'Defense']),
+      MaxAA:       int(sec[p + 'AA']),
+      MaxTesla:    int(sec[p + 'Tesla']),
+      MaxHelipad:  int(sec[p + 'Helipad']),
+      MaxAirstrip: int(sec[p + 'Airstrip']),
+      AttackSecs:  int(sec[p + 'AttackSecs']),
+      BaseSizeAdd: int(sec[p + 'BaseSizeAdd']),
+      BaseSpacing: int(sec[p + 'BaseSpacing']),
+    };
+    r.norm = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
+    records.push(r);
+  }
+  return records;
+}
+
+function extractOrders(sec, prefix, stepKey) {
+  if (!sec) return [];
+  const count = int(sec['Count']);
+  const records = [];
+  for (let i = 0; i < count; i++) {
+    const p = `${prefix}${i}_`;
+    const stepCount = int(sec[p + 'Steps']);
+    const steps = [];
+    for (let s = 0; s < stepCount; s++) steps.push(sec[p + `Step_${s}`] || '?');
+    const r = {
+      idx: i,
+      Faction:     sec[p + 'Faction'] || '?',
+      WinScore:    int(sec[p + 'Score']),
+      GamesPlayed: int(sec[p + 'Games'], 0),
+      steps,
+    };
+    r.norm = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
+    records.push(r);
+  }
+  return records;
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let state = { limits: [], build: [], combat: [] };
+
+// ── Render helpers ────────────────────────────────────────────────────────────
+const SOVIET_FACTIONS = ['ussr','ukraine','bad'];
+const ALLIED_FACTIONS = ['greece','spain','england','germany','france','turkey','good'];
+
+function factionPill(f) {
+  const fl = f.toLowerCase();
+  const cls = SOVIET_FACTIONS.includes(fl) ? 'pill-soviet' : ALLIED_FACTIONS.includes(fl) ? 'pill-allied' : 'pill-other';
+  return `<span class="pill ${cls}">${f}</span>`;
+}
+
+function scoreColor(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : 'neu'; }
+
+function scoreBar(norm, maxAbs) {
+  const pct = Math.min(100, Math.abs(norm) / maxAbs * 100);
+  const color = norm > 0 ? 'var(--green)' : norm < 0 ? 'var(--red)' : 'var(--muted)';
+  const sign = norm >= 0 ? '+' : '';
+  return `<div class="score-bar-wrap">
+    <div class="score-bar-track"><div class="score-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+    <span class="score-val ${scoreColor(norm)}">${sign}${norm.toFixed(2)}</span>
+  </div>`;
+}
+
+function confDots(games, maxGames) {
+  const filled = Math.round(games / Math.max(1, maxGames) * 5);
+  let html = '<div class="conf-dots tooltip-wrap">';
+  for (let i = 0; i < 5; i++) html += `<div class="conf-dot${i < filled ? ' filled' : ''}"></div>`;
+  html += `<div class="tooltip">${games} game${games !== 1 ? 's' : ''}</div></div>`;
+  return html;
+}
+
+function rankBadge(rank) {
+  if (rank === 1) return `<span class="rank-badge rank-1">1</span>`;
+  if (rank === 2) return `<span class="rank-badge rank-2">2</span>`;
+  if (rank === 3) return `<span class="rank-badge rank-3">3</span>`;
+  return `<span class="rank-badge rank-n">${rank}</span>`;
+}
+
+// ── Limits table ──────────────────────────────────────────────────────────────
+const LIMITS_COLS = [
+  { key: 'rank',        label: '#',           sortKey: null },
+  { key: 'Faction',     label: 'Faction',      sortKey: 'Faction' },
+  { key: 'norm',        label: 'Conf. Score',  sortKey: 'norm' },
+  { key: 'WinScore',    label: 'Raw Score',    sortKey: 'WinScore' },
+  { key: 'GamesPlayed', label: 'Games',        sortKey: 'GamesPlayed' },
+  { key: 'MaxUnit',     label: 'Units',        sortKey: 'MaxUnit' },
+  { key: 'MaxBuilding', label: 'Buildings',    sortKey: 'MaxBuilding' },
+  { key: 'MaxInfantry', label: 'Infantry',     sortKey: 'MaxInfantry' },
+  { key: 'MaxVessel',   label: 'Vessels',      sortKey: 'MaxVessel' },
+  { key: 'MaxAircraft', label: 'Aircraft',     sortKey: 'MaxAircraft' },
+  { key: 'MaxRefinery', label: 'Refineries',   sortKey: 'MaxRefinery' },
+  { key: 'MaxBarracks', label: 'Barracks',     sortKey: 'MaxBarracks' },
+  { key: 'MaxWarFactory',label:'War Fac.',     sortKey: 'MaxWarFactory' },
+  { key: 'MaxDefense',  label: 'Defense',      sortKey: 'MaxDefense' },
+  { key: 'MaxAA',       label: 'AA',           sortKey: 'MaxAA' },
+  { key: 'MaxTesla',    label: 'Tesla',        sortKey: 'MaxTesla' },
+  { key: 'MaxHelipad',  label: 'Helipad',      sortKey: 'MaxHelipad' },
+  { key: 'MaxAirstrip', label: 'Airstrip',     sortKey: 'MaxAirstrip' },
+  { key: 'AttackSecs',  label: 'Atk (s)',      sortKey: 'AttackSecs' },
+  { key: 'BaseSizeAdd', label: 'Base Size',    sortKey: 'BaseSizeAdd' },
+  { key: 'BaseSpacing', label: 'Spacing',      sortKey: 'BaseSpacing' },
+];
+
+let sortKey = 'norm', sortDir = 'desc';
+
+function renderLimits() {
+  const faction = document.getElementById('filter-faction').value;
+  let rows = state.limits.filter(r => !faction || r.Faction === faction);
+  const col = document.getElementById('sort-col').value;
+  const dir = document.getElementById('sort-dir').value;
+  sortKey = col; sortDir = dir;
+
+  rows.sort((a, b) => {
+    const av = typeof a[col] === 'string' ? a[col].toLowerCase() : (a[col] ?? 0);
+    const bv = typeof b[col] === 'string' ? b[col].toLowerCase() : (b[col] ?? 0);
+    return dir === 'desc' ? (bv > av ? 1 : -1) : (av > bv ? 1 : -1);
+  });
+
+  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.norm)));
+  const maxGames = Math.max(1, ...rows.map(r => r.GamesPlayed));
+
+  const thead = document.querySelector('#limits-table thead');
+  const tbody = document.querySelector('#limits-table tbody');
+
+  thead.innerHTML = '<tr>' + LIMITS_COLS.map(c =>
+    `<th data-key="${c.sortKey || ''}" class="${c.sortKey === col ? 'sort-' + dir : ''}">${c.label}</th>`
+  ).join('') + '</tr>';
+
+  tbody.innerHTML = rows.map((r, i) => {
+    const rank = i + 1;
+    return `<tr>
+      <td>${rankBadge(rank)}</td>
+      <td>${factionPill(r.Faction)}</td>
+      <td>${scoreBar(r.norm, maxAbs)}</td>
+      <td class="${scoreColor(r.WinScore)}">${r.WinScore >= 0 ? '+' : ''}${r.WinScore}</td>
+      <td>${confDots(r.GamesPlayed, maxGames)} <span style="color:var(--muted);font-size:11px;margin-left:4px">${r.GamesPlayed}</span></td>
+      <td>${r.MaxUnit}</td><td>${r.MaxBuilding}</td><td>${r.MaxInfantry}</td>
+      <td>${r.MaxVessel}</td><td>${r.MaxAircraft}</td><td>${r.MaxRefinery}</td>
+      <td>${r.MaxBarracks}</td><td>${r.MaxWarFactory}</td><td>${r.MaxDefense}</td>
+      <td>${r.MaxAA}</td><td>${r.MaxTesla}</td><td>${r.MaxHelipad}</td><td>${r.MaxAirstrip}</td>
+      <td>${r.AttackSecs}s</td><td>${r.BaseSizeAdd}</td><td>${r.BaseSpacing}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="${LIMITS_COLS.length}" class="empty">No records</td></tr>`;
+
+  // Sortable headers
+  thead.querySelectorAll('th[data-key]').forEach(th => {
+    if (!th.dataset.key) return;
+    th.onclick = () => {
+      const k = th.dataset.key;
+      if (sortKey === k) sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+      else { sortKey = k; sortDir = 'desc'; }
+      document.getElementById('sort-col').value = k;
+      document.getElementById('sort-dir').value = sortDir;
+      renderLimits();
+    };
+  });
+}
+
+// ── Order cards ───────────────────────────────────────────────────────────────
+// Map of unit/building codes to friendly names
+const NAMES = {
+  POWR:'Power Plant', APWR:'Adv. Power', PROC:'Ore Refinery', FACT:'Constr. Yard',
+  BARR:'Allied Barracks', TENT:'Soviet Barracks', WEAP:'War Factory', AFLD:'Airfield',
+  HPAD:'Helipad', PTEK:'Tech Centre', DOME:'Radar Dome', TSLA:'Tesla Coil',
+  FTUR:'Flame Tower', GGUN:'Gap Generator', IRON:'Iron Curtain', MSLO:'Missile Silo',
+  SAM:'SAM Site', AGUN:'AA Gun', STEK:'Sub Pen', SYRD:'Shipyard',
+  FIX:'Service Depot', PDOX:'Chronosphere',
+  MTNK:'Medium Tank', HTNK:'Heavy Tank', LTNK:'Light Tank', TTNK:'Tesla Tank',
+  V2RL:'V2 Rocket', APC:'APC', MRJ:'Radar Jammer', MGG:'Mobile Gap Gen.',
+  MNLY:'Minelayer', HARV:'Harvester', MCV:'MCV', ANT:'Ant',
+  E1:'Rifle Infantry', E2:'Grenadier', E3:'Rocket Soldier', E4:'Flamethrower',
+  E6:'Engineer', E7:'Spy', SHOK:'Shock Trooper', DOG:'Attack Dog',
+  MEDI:'Medic', MECH:'Mechanic', THIF:'Thief', DMITR:'Commando',
+  SS:'Submarine', DD:'Destroyer', CA:'Cruiser', LST:'Transport',
+  PT:'Gunboat', CARR:'Carrier',
+  HELI:'Longbow', TRAN:'Chinook', MIG:'MiG', YAK:'Yak', HIND:'Hind',
+};
+function friendly(code) { return NAMES[code] ? `${code} <span style="color:var(--muted)">${NAMES[code]}</span>` : code; }
+
+function renderOrderCards(records, containerId, sortSel, factionSel) {
+  const faction = document.getElementById(factionSel).value;
+  const sortBy  = document.getElementById(sortSel).value;
+  let rows = records.filter(r => !faction || r.Faction === faction);
+  rows.sort((a, b) => b[sortBy] - a[sortBy]);
+
+  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.norm)));
+  const maxGames = Math.max(1, ...rows.map(r => r.GamesPlayed));
+
+  document.getElementById(containerId).innerHTML = rows.length ? rows.map((r, i) => {
+    const sign = r.norm >= 0 ? '+' : '';
+    const scoreStr = `${sign}${r.norm.toFixed(2)} norm (${r.WinScore >= 0 ? '+' : ''}${r.WinScore} raw)`;
+    const seqHtml = r.steps.map((s, idx) =>
+      `<span class="seq-item"><span class="seq-num">${idx + 1}</span><span style="font-family:monospace">${friendly(s)}</span></span>`
+    ).join('');
+    return `<div class="card">
+      <div class="card-header">
+        <div>
+          ${rankBadge(i + 1)}
+          <span class="card-title" style="margin-left:8px">${factionPill(r.Faction)}</span>
+        </div>
+        ${confDots(r.GamesPlayed, maxGames)}
+      </div>
+      <div class="card-meta">
+        <span class="card-score ${scoreColor(r.norm)}">${scoreStr}</span>
+        <span style="color:var(--muted);font-size:11px">${r.GamesPlayed} game${r.GamesPlayed !== 1 ? 's' : ''} · ${r.steps.length} steps</span>
+      </div>
+      <div class="sequence">${seqHtml}</div>
+    </div>`;
+  }).join('') : `<div class="empty" style="width:100%">No records</div>`;
+}
+
+// ── Stats bar ─────────────────────────────────────────────────────────────────
+function renderStats() {
+  const limGames    = state.limits.reduce((s, r) => s + r.GamesPlayed, 0);
+  const buildGames  = state.build.reduce((s, r) => s + r.GamesPlayed, 0);
+  const combatGames = state.combat.reduce((s, r) => s + r.GamesPlayed, 0);
+  const bestLimit  = state.limits.slice().sort((a, b) => b.norm - a.norm)[0];
+  const bestBuild  = state.build.slice().sort((a, b) => b.norm - a.norm)[0];
+  const bestCombat = state.combat.slice().sort((a, b) => b.norm - a.norm)[0];
+  const factions   = [...new Set([...state.limits, ...state.build, ...state.combat].map(r => r.Faction))];
+
+  function bestStat(rec, label) {
+    if (!rec) return '';
+    const sign = rec.norm >= 0 ? '+' : '';
+    return `<div class="stat">
+      <span class="stat-val ${scoreColor(rec.norm)}">${sign}${rec.norm.toFixed(2)}</span>
+      <span class="stat-lbl">${label} (${rec.Faction}, ${rec.GamesPlayed}g)</span>
+    </div>`;
+  }
+
+  document.getElementById('stats-bar').innerHTML = `
+    <div class="stat"><span class="stat-val">${state.limits.length}</span><span class="stat-lbl">Limit Records</span></div>
+    <div class="stat"><span class="stat-val">${state.build.length}</span><span class="stat-lbl">Build Orders</span></div>
+    <div class="stat"><span class="stat-val">${state.combat.length}</span><span class="stat-lbl">Combat Orders</span></div>
+    <div class="stat"><span class="stat-val">${limGames}</span><span class="stat-lbl">Limit Games</span></div>
+    <div class="stat"><span class="stat-val">${buildGames}</span><span class="stat-lbl">Build Games</span></div>
+    <div class="stat"><span class="stat-val">${combatGames}</span><span class="stat-lbl">Combat Games</span></div>
+    <div class="stat"><span class="stat-val">${factions.join(', ') || '—'}</span><span class="stat-lbl">Factions</span></div>
+    ${bestStat(bestLimit,  'Best Limits')}
+    ${bestStat(bestBuild,  'Best Build')}
+    ${bestStat(bestCombat, 'Best Combat')}
+  `;
+}
+
+// ── Population selects ────────────────────────────────────────────────────────
+function populateFactionSelects() {
+  const limitFactions  = [...new Set(state.limits.map(r => r.Faction))].sort();
+  const buildFactions  = [...new Set(state.build.map(r => r.Faction))].sort();
+  const combatFactions = [...new Set(state.combat.map(r => r.Faction))].sort();
+
+  function setOpts(id, factions) {
+    const el = document.getElementById(id);
+    const cur = el.value;
+    el.innerHTML = '<option value="">All</option>' + factions.map(f => `<option value="${f}">${f}</option>`).join('');
+    if (factions.includes(cur)) el.value = cur;
+  }
+  setOpts('filter-faction', limitFactions);
+  setOpts('filter-build-faction', buildFactions);
+  setOpts('filter-combat-faction', combatFactions);
+}
+
+// ── Main render ───────────────────────────────────────────────────────────────
+function renderAll() {
+  renderStats();
+  populateFactionSelects();
+  renderLimits();
+  renderOrderCards(state.build,   'build-cards',  'sort-build',  'filter-build-faction');
+  renderOrderCards(state.combat,  'combat-cards', 'sort-combat', 'filter-combat-faction');
+}
+
+function loadData(text, filename) {
+  const ini = parseINI(text);
+  state.limits = extractLimits(ini['BosoLimits']);
+  state.build   = extractOrders(ini['BosoBuildOrders'],  'Order_',  'Step');
+  state.combat  = extractOrders(ini['BosoCombatOrders'], 'COrder_', 'Step');
+
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  renderAll();
+}
+
+// ── Live / auto-refresh ───────────────────────────────────────────────────────
+let fileHandle = null;   // FileSystemFileHandle (File System Access API)
+let liveTimer  = null;
+let liveOn     = false;
+let lastLoaded = null;
+
+function setLiveStatus(msg) {
+  document.getElementById('live-status').textContent = msg;
+}
+
+function setLastUpdated() {
+  lastLoaded = Date.now();
+  document.getElementById('last-updated').textContent = 'Updated: just now';
+}
+
+setInterval(() => {
+  if (!lastLoaded) return;
+  const s = Math.round((Date.now() - lastLoaded) / 1000);
+  document.getElementById('last-updated').textContent =
+    s < 5 ? 'Updated: just now' : `Updated: ${s}s ago`;
+}, 2000);
+
+async function reloadFile() {
+  if (!fileHandle) return;
+  try {
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    loadData(text, file.name);
+    setLastUpdated();
+    setLiveStatus('Reloaded');
+  } catch(e) {
+    setLiveStatus('Read error');
+  }
+}
+
+function toggleLive() {
+  liveOn = !liveOn;
+  const btn = document.getElementById('live-btn');
+  const dot = document.getElementById('live-dot');
+  if (liveOn) {
+    btn.textContent = 'Live ON';
+    btn.classList.add('on');
+    dot.classList.add('on');
+    startLiveTimer();
+    setLiveStatus('Live');
+  } else {
+    btn.textContent = 'Live OFF';
+    btn.classList.remove('on');
+    dot.classList.remove('on');
+    stopLiveTimer();
+    setLiveStatus('Paused');
+  }
+}
+
+function setLiveInterval() {
+  if (liveOn) { stopLiveTimer(); startLiveTimer(); }
+}
+
+function startLiveTimer() {
+  stopLiveTimer();
+  const secs = parseInt(document.getElementById('live-interval').value, 10) * 1000;
+  liveTimer = setInterval(reloadFile, secs);
+}
+
+function stopLiveTimer() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+}
+
+function showLiveBar(filename) {
+  document.getElementById('file-label').textContent = filename;
+  document.getElementById('live-bar').style.display = 'flex';
+  setLastUpdated();
+
+  const canLive = fileHandle !== null;
+  const liveBtn = document.getElementById('live-btn');
+  const reloadBtn = document.querySelector('.toggle-btn[onclick="reloadFile()"]');
+  liveBtn.disabled = !canLive;
+  liveBtn.title = canLive ? '' : 'Use "Open BOSOAI.INI" button to enable live mode';
+  if (reloadBtn) { reloadBtn.disabled = !canLive; reloadBtn.title = liveBtn.title; }
+
+  if (!canLive && liveOn) toggleLive(); // turn off live if it was on
+  setLiveStatus(canLive ? 'Loaded' : 'Loaded (use Open for live mode)');
+}
+
+// ── File System Access API picker (Chrome/Edge) ───────────────────────────────
+async function pickFile() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'INI files', accept: { 'text/plain': ['.ini', '.txt'] } }],
+        multiple: false,
+      });
+      fileHandle = handle;
+      await reloadFile();
+      showLiveBar(handle.name);
+    } catch(e) { /* user cancelled */ }
+  } else {
+    // Fallback: trigger classic file input
+    document.getElementById('file-input').click();
+  }
+}
+
+// ── Classic file input (fallback / drag-drop) ─────────────────────────────────
+function readClassicFile(file) {
+  fileHandle = null; // can't re-read a classic File object after close
+  const reader = new FileReader();
+  reader.onload = ev => {
+    loadData(ev.target.result, file.name);
+    showLiveBar(file.name);
+    setLiveStatus('Loaded (no live refresh — use Open for live mode)');
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) readClassicFile(file);
+  e.target.value = ''; // reset so re-selecting the same file fires change again
+});
+
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) readClassicFile(file);
+});
+
+function parsePasted() {
+  const text = document.getElementById('paste-area').value.trim();
+  if (text) { loadData(text, 'pasted data'); showLiveBar('pasted data'); }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Filter/sort listeners ─────────────────────────────────────────────────────
+['filter-faction','sort-col','sort-dir'].forEach(id =>
+  document.getElementById(id).addEventListener('change', renderLimits));
+['filter-build-faction','sort-build'].forEach(id =>
+  document.getElementById(id).addEventListener('change', () =>
+    renderOrderCards(state.build, 'build-cards', 'sort-build', 'filter-build-faction')));
+['filter-combat-faction','sort-combat'].forEach(id =>
+  document.getElementById(id).addEventListener('change', () =>
+    renderOrderCards(state.combat, 'combat-cards', 'sort-combat', 'filter-combat-faction')));
+</script>
+</body>
+</html>

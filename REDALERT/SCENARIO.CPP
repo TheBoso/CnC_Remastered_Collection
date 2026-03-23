@@ -60,6 +60,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"bosoai.h"
 #ifdef WIN32
 #include "tcpip.h"
 #include "ccdde.h"
@@ -2385,6 +2386,18 @@ bool Read_Scenario_INI(char * fname, bool )
 	Call_Back();
 
 	/*
+	**	BosoAI: initialise flags, then check global config (BOSOAI.INI [Config])
+	**	followed by per-map [Basic] overrides. Global config lets the user enable
+	**	BosoAI for all games without editing every map file.
+	*/
+	BosoAIManagerClass::Init();
+	BosoAIManagerClass::Load_Config();
+	if (!BosoAIManagerClass::IsBosoActive && ini.Get_Bool("Basic", "BosoAI", false)) {
+		BosoAIManagerClass::IsBosoActive    = true;
+		BosoAIManagerClass::IsSpectatorMode = ini.Get_Bool("Basic", "BosoAISpectator", true);
+	}
+
+	/*
 	**	Assign PlayerPtr by reading the player's house from the INI;
 	**	Must be done before any TechnoClass objects are created.
 	*/
@@ -2406,6 +2419,15 @@ bool Read_Scenario_INI(char * fname, bool )
 	}
 	PlayerPtr->IsHuman = true;
 	PlayerPtr->IsPlayerControl = true;
+
+	/*
+	**	BosoAI: take over the player's house and optionally enable spectator mode.
+	**	Must be called after IsHuman/IsPlayerControl are set so On_Scenario_Load
+	**	can cleanly override them.
+	*/
+	if (BosoAIManagerClass::IsBosoActive) {
+		BosoAIManagerClass::On_Scenario_Load();
+	}
 
 //	if (NewINIFormat < 2 || !ini.Is_Present("MapPack")) {
 //		Map.Read_Binary(root, &ScenarioCRC);

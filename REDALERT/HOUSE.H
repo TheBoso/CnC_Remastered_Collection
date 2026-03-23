@@ -106,7 +106,10 @@ class HouseStaticClass {
 **	Player control structure. Each player (computer or human) has one of
 **	these structures associated. These are located in a global array.
 */
+class BosoAIManagerClass;   // forward declaration for friend access
+
 class HouseClass {
+	friend class BosoAIManagerClass;
 	public:
 		RTTIType RTTI;
 		int ID;

@@ -131,6 +131,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"bosoai.h"
 
 
 /***************************************************************************
@@ -159,7 +160,7 @@ const char* NewName[] = {
 	"Scout Ant",	  			"Kundschafter-Ameise",
 	"Warrior Ant",    		"Krieger-Ameise",
 	"Fire Ant",	  				"Feuer-Ameise",
-	"Queen Ant",	  			"Ameisenk”nigin",
+	"Queen Ant",	  			"Ameisenkï¿½nigin",
 	"ATS",						"Angriffs-U-Boot",
 	"Tesla Tank",	  			"Telsapanzer",
 	"Volkov",  					"Modell Volkov",
@@ -175,7 +176,7 @@ const char* NewName[] = {
 #ifdef FRENCH
 const char* NewName[] = {
 	"Scout Ant",	  			"Fourmi de Reconnaissance",
-	"Warrior Ant",    		"Fourmi GuerriŠre",
+	"Warrior Ant",    		"Fourmi Guerriï¿½re",
 	"Fire Ant",	  				"Fourmi Lance-Flammes",
 	"Queen Ant",	  			"Reine des Fourmis",
 	"ATS", 						"SMTA",
@@ -183,9 +184,9 @@ const char* NewName[] = {
 	"Volkov",  					"Volkov",
 	"Chitzkoi", 				"Cyber-Chien",
 	"Stavros",					"Stavros",
-	"F-A Longbow",				"HAA (H‚licoptŠre d'Assaut Avanc‚)",
-	"Civilian Specialist",	"Sp‚cialiste Civil",
-	"Alloy Facility",			"Usine M‚tallurgique",
+	"F-A Longbow",				"HAA (Hï¿½licoptï¿½re d'Assaut Avancï¿½)",
+	"Civilian Specialist",	"Spï¿½cialiste Civil",
+	"Alloy Facility",			"Usine Mï¿½tallurgique",
 	NULL,
 	};
 
@@ -4197,6 +4198,15 @@ void TechnoClass::Record_The_Kill(TechnoClass * source)
 
 			House->UnitsLost++;
 			if (source != NULL) source->House->UnitsKilled[Owner()]++;
+
+			/*
+			** BosoAI: track when aircraft kill BosoAI units for anti-air priority.
+			*/
+			if (BosoAIManagerClass::IsBosoActive &&
+			    source != NULL && source->What_Am_I() == RTTI_AIRCRAFT &&
+			    BosoAIManagerClass::Is_Boso_House(HouseClass::As_Pointer(Owner()))) {
+				BosoAIManagerClass::On_Unit_Killed_By_Aircraft();
+			}
 
 			/*
 			** If the map is displaying the multiplayer player names & their

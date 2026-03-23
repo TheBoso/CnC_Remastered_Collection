@@ -38,6 +38,7 @@
 #include "Gadget.h"
 #include "defines.h" // VOC_COUNT, VOX_COUNT
 #include "SidebarGlyphx.h"
+#include "bosoai.h"
 
 #include <chrono>
 
@@ -152,6 +153,7 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Player_Switch_To_AI(uin
 extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Human_Team_Wins(uint64 player_id);
 extern "C" __declspec(dllexport) void __cdecl CNC_Start_Mission_Timer(int time);
 extern "C" __declspec(dllexport) bool __cdecl CNC_Get_Start_Game_Info(uint64 player_id, int &start_location_waypoint_index);
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_Fast_Forward(int multiplier);
 
 
 
@@ -390,6 +392,8 @@ bool ShareAllyVisibility = true;
 bool UseGlyphXStartLocations = true;
 
 SpecialClass* SpecialBackup = NULL;
+
+int FastForwardMultiplier = 1;
 
 
 int GetRandSeed()
@@ -1677,6 +1681,31 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 	}
 
 	/*
+	** BosoAI deferred auto-restart: On_Game_Over set PlayerRestarts = true last tick.
+	** Restart inline (GlyphX-compatible: skip WWMessageBox, call Start_Scenario directly).
+	*/
+	if (PlayerRestarts && BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::IsAutoRestart) {
+		GlyphX_Debug_Print("BosoAI: restart step 1 - clearing flags");
+		PlayerWins = false;
+		PlayerLoses = false;
+		PlayerRestarts = false;
+		Map.Help_Text(TXT_NONE);
+		GlyphX_Debug_Print("BosoAI: restart step 2 - clearing keyboard");
+		Keyboard->Clear();
+		GlyphX_Debug_Print("BosoAI: restart step 3 - calling Start_Scenario");
+		PlayerPtr = NULL;	// Prevent dangling access in Reload_LogoShapes during Clear_Scenario
+		Start_Scenario(Scen.ScenarioName, false);
+		GlyphX_Debug_Print("BosoAI: restart step 4 - resetting sidebars");
+		DLLExportClass::Reset_Sidebars();
+		GlyphX_Debug_Print("BosoAI: restart step 5 - resetting player context");
+		DLLExportClass::Reset_Player_Context();
+		GlyphX_Debug_Print("BosoAI: restart step 6 - calculating positions");
+		DLLExportClass::Calculate_Start_Positions();
+		GlyphX_Debug_Print("BosoAI: restart step 7 - complete");
+		return true;
+	}
+
+	/*
 	** Shouldn't really need to do this, but I like the idea of always running the main loop in the context of the same player.
 	** Might make tbe bugs more repeatable and consistent. ST - 3/15/2019 11:58AM
 	*/
@@ -1750,133 +1779,176 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 	//}
 
 	/*
-	** Sort the map's ground layer by y-coordinate value.  This is done
-	** outside the IsToRedraw check, for the purposes of game sync'ing
-	** between machines; this way, all machines will sort the Map's
-	** layer in the same way, and any processing done that's based on
-	** the order of this layer will sync on different machines.
+	** Run the game logic FastForwardMultiplier times per engine call.
+	** Setup (player context, input) runs once above; only the inner logic loops.
 	*/
-	Map.Layer[LAYER_GROUND].Sort();
+	static bool FirstUpdate = GAME_TO_PLAY != GAME_GLYPHX_MULTIPLAYER;
+	bool game_result = true;
 
-	/*
-	**	AI logic operations are performed here.
-	*/
-	//Skip this block of code on first update of single-player games. This helps prevents trigger generated messages on the first update from being lost during loading screen or movie. - LLL
-	static bool FirstUpdate = GAME_TO_PLAY != GAME_GLYPHX_MULTIPLAYER;;
-	if (!FirstUpdate) {
-		HouseClass *old_player_ptr = PlayerPtr;
-		Logic.Clear_Recently_Created_Bits();
-		Logic.AI();
-		DLLExportClass::Logic_Switch_Player_Context(old_player_ptr);
-	}
-	FirstUpdate = false;
+	for (int ff = 0; ff < FastForwardMultiplier; ff++) {
 
-	TimeQuake = false;
+		/*
+		** Sort the map's ground layer by y-coordinate value.  This is done
+		** outside the IsToRedraw check, for the purposes of game sync'ing
+		** between machines; this way, all machines will sort the Map's
+		** layer in the same way, and any processing done that's based on
+		** the order of this layer will sync on different machines.
+		*/
+		Map.Layer[LAYER_GROUND].Sort();
+
+		/*
+		**	AI logic operations are performed here.
+		*/
+		//Skip this block of code on first update of single-player games. This helps prevents trigger generated messages on the first update from being lost during loading screen or movie. - LLL
+		if (!FirstUpdate) {
+			HouseClass *old_player_ptr = PlayerPtr;
+			Logic.Clear_Recently_Created_Bits();
+			Logic.AI();
+			DLLExportClass::Logic_Switch_Player_Context(old_player_ptr);
+		}
+		FirstUpdate = false;
+
+		TimeQuake = false;
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98
-	if (!PendingTimeQuake) {
-		TimeQuakeCenter = 0;
-	}
+		if (!PendingTimeQuake) {
+			TimeQuakeCenter = 0;
+		}
 #endif
 
-	/*
-	**	Manage the inter-player message list.  If Manage() returns true, it means
-	**	a message has expired & been removed, and the entire map must be updated.
-	*/
-	if (Session.Messages.Manage()) {
+		/*
+		**	Manage the inter-player message list.  If Manage() returns true, it means
+		**	a message has expired & been removed, and the entire map must be updated.
+		*/
+		if (Session.Messages.Manage()) {
 #ifdef WIN32
-		HiddenPage.Clear();
+			HiddenPage.Clear();
 #else	//WIN32
-		HidPage.Clear();
+			HidPage.Clear();
 #endif	//WIN32
-		Map.Flag_To_Redraw(true);
-	}
+			Map.Flag_To_Redraw(true);
+		}
 
-	/*
-	**	Process all commands that are ready to be processed.
-	*/
-	if (GAME_TO_PLAY == GAME_NORMAL) {
-		Queue_AI();
-	} else {
-		if (GAME_TO_PLAY == GAME_GLYPHX_MULTIPLAYER) {
-			DLLExportClass::Glyphx_Queue_AI();
+		/*
+		**	Process all commands that are ready to be processed.
+		*/
+		if (GAME_TO_PLAY == GAME_NORMAL) {
+			Queue_AI();
+		} else {
+			if (GAME_TO_PLAY == GAME_GLYPHX_MULTIPLAYER) {
+				DLLExportClass::Glyphx_Queue_AI();
 
-			/*
-			** Process the sidebar. ST - 3/22/2019 2:07PM
-			*/
-			for (int i=0 ; i<MULTIPLAYER_COUNT ; i++) {
-				HouseClass *player_ptr = HouseClass::As_Pointer(Session.Players[i]->Player.ID);
-				Sidebar_Glyphx_Recalc(player_ptr);
+				/*
+				** Process the sidebar. ST - 3/22/2019 2:07PM
+				*/
+				for (int i=0 ; i<MULTIPLAYER_COUNT ; i++) {
+					HouseClass *player_ptr = HouseClass::As_Pointer(Session.Players[i]->Player.ID);
+					Sidebar_Glyphx_Recalc(player_ptr);
+				}
 			}
 		}
-	}
 
-	/*
-	**	Keep track of elapsed time in the game.
-	*/
-	//Score.ElapsedTime += TIMER_SECOND / TICKS_PER_SECOND;
+		/*
+		**	Keep track of elapsed time in the game.
+		*/
+		//Score.ElapsedTime += TIMER_SECOND / TICKS_PER_SECOND;
 
-	/*
-	**	Perform any win/lose code as indicated by the global control flags.
-	*/
-	/*
-	**	Check for player wins or loses according to global event flag.
-	*/
-	if (PlayerWins) {
+		/*
+		**	Perform any win/lose code as indicated by the global control flags.
+		*/
+		/*
+		**	Check for player wins or loses according to global event flag.
+		*/
+		if (PlayerWins) {
 
-		//WWMouse->Erase_Mouse(&HidPage, TRUE);
-		PlayerLoses = false;
-		PlayerWins = false;
-		PlayerRestarts = false;
-		Map.Help_Text(TXT_NONE);
-		GlyphX_Debug_Print("PlayerWins = true");
+			//WWMouse->Erase_Mouse(&HidPage, TRUE);
+			PlayerLoses = false;
+			PlayerWins = false;
+			Map.Help_Text(TXT_NONE);
+			GlyphX_Debug_Print("PlayerWins = true");
 
-		if (GAME_TO_PLAY == GAME_GLYPHX_MULTIPLAYER) {
-			DLLExportClass::On_Multiplayer_Game_Over();
-		} else {
-			DLLExportClass::On_Game_Over(player_id, true);
+			/*
+			** BosoAI auto-restart: save learning data this tick and set PlayerRestarts
+			** so the GlyphX-compatible restart fires at the top of the next tick.
+			** Explicitly set PlayerRestarts=true here because HOUSE.CPP may have already
+			** called On_Game_Over (setting GameOverFired=true), which causes the
+			** On_Game_Over call below to early-return without setting PlayerRestarts.
+			*/
+			if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::IsAutoRestart) {
+				bool boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
+				BosoAIManagerClass::On_Game_Over(boso_won);
+				PlayerRestarts = true;
+				GlyphX_Debug_Print("BosoAI: queued auto-restart");
+				return true;
+			}
+
+			PlayerRestarts = false;
+
+			if (GAME_TO_PLAY == GAME_GLYPHX_MULTIPLAYER) {
+				DLLExportClass::On_Multiplayer_Game_Over();
+			} else {
+				DLLExportClass::On_Game_Over(player_id, true);
+			}
+
+			//DLLExportClass::Set_Event_Callback(NULL);
+			return false;
+		}
+		if (PlayerLoses) {
+
+			//WWMouse->Erase_Mouse(&HidPage, TRUE);
+			PlayerWins = false;
+			PlayerLoses = false;
+			Map.Help_Text(TXT_NONE);
+			GlyphX_Debug_Print("PlayerLoses = true");
+
+			/*
+			** BosoAI auto-restart: same deferred path as PlayerWins above.
+			*/
+			if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::IsAutoRestart) {
+				bool boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
+				BosoAIManagerClass::On_Game_Over(boso_won);
+				PlayerRestarts = true;
+				GlyphX_Debug_Print("BosoAI: queued auto-restart");
+				return true;
+			}
+
+			PlayerRestarts = false;
+
+			if (GAME_TO_PLAY == GAME_GLYPHX_MULTIPLAYER) {
+				DLLExportClass::On_Multiplayer_Game_Over();
+			} else {
+				DLLExportClass::On_Game_Over(player_id, false);
+			}
+
+			//DLLExportClass::Set_Event_Callback(NULL);
+			return false;
 		}
 
-		//DLLExportClass::Set_Event_Callback(NULL);
-		return false;
-	}
-	if (PlayerLoses) {
+		/*
+		**	The frame logic has been completed. Increment the frame
+		**	counter.
+		*/
+		Frame++;
 
-		//WWMouse->Erase_Mouse(&HidPage, TRUE);
-		PlayerWins = false;
-		PlayerLoses = false;
-		PlayerRestarts = false;
-		Map.Help_Text(TXT_NONE);
-		GlyphX_Debug_Print("PlayerLoses = true");
-
-		if (GAME_TO_PLAY == GAME_GLYPHX_MULTIPLAYER) {
-			DLLExportClass::On_Multiplayer_Game_Over();
-		} else {
-			DLLExportClass::On_Game_Over(player_id, false);
+		/*
+		** Very rarely, the human players will get a message from the computer.
+		**
+		** This was disabled in the RA source code, so copying over the functionality from TD
+		*/
+		if (GAME_TO_PLAY != GAME_NORMAL && Session.Options.Ghosts && IRandom(0,10000) == 1) {
+			DLLExportClass::Computer_Message(false);
 		}
 
-		//DLLExportClass::Set_Event_Callback(NULL);
-		return false;
-	}
+		if (ProgEndCalled) {
+			GlyphX_Debug_Print("ProgEndCalled - GameActive = false");
+			GameActive = false;
+		}
 
-	/*
-	**	The frame logic has been completed. Increment the frame
-	**	counter.
-	*/
-	Frame++;
+		if (!GameActive) {
+			game_result = false;
+			break;
+		}
 
-	/*
-	** Very rarely, the human players will get a message from the computer.
-	**
-	** This was disabled in the RA source code, so copying over the functionality from TD
-	*/
-	if (GAME_TO_PLAY != GAME_NORMAL && Session.Options.Ghosts && IRandom(0,10000) == 1) {
-		DLLExportClass::Computer_Message(false);
-	}
-
-	if (ProgEndCalled) {
-		GlyphX_Debug_Print("ProgEndCalled - GameActive = false");
-		GameActive = false;
-	}
+	} // end fast-forward loop
 
 	if (DLLExportClass::Legacy_Render_Enabled()) {
 		Map.Render();
@@ -1885,8 +1957,8 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 	//Sync_Delay();
 	//DLLExportClass::Set_Event_Callback(NULL);
 	Color_Cycle();
-	
-	
+
+
 	/*
 	** Don't respect GameActive. Game will end in multiplayer on win/loss
 	*/
@@ -1894,7 +1966,26 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 		return true;
 	}
 
-	return(GameActive);
+	return game_result;
+}
+
+
+/**************************************************************************************************
+* CNC_Set_Fast_Forward -- Set how many game logic frames to run per CNC_Advance_Instance call
+*
+* In:   multiplier - number of game frames per advance call (1 = normal, 10 = 10x speed, etc.)
+*
+* Out:
+*
+* History: Added for AI training to allow faster-than-realtime game simulation
+**************************************************************************************************/
+extern "C" __declspec(dllexport) void __cdecl CNC_Set_Fast_Forward(int multiplier)
+{
+	if (multiplier < 1) multiplier = 1;
+	FastForwardMultiplier = multiplier;
+	char debug_buf[64];
+	sprintf(debug_buf, "CNC_Set_Fast_Forward: multiplier=%d", multiplier);
+	GlyphX_Debug_Print(debug_buf);
 }
 
 
@@ -2889,6 +2980,16 @@ void DLLExportClass::On_Multiplayer_Game_Over(void)
 		return;
 	}
 
+	/*
+	** BosoAI: save learning data before returning to the GlyphX engine.
+	** PlayerPtr->IsDefeated determines whether BosoAI won or lost.
+	** GameOverFired prevents double-calling if HOUSE.CPP also fired it.
+	*/
+	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::BosoHouse != NULL) {
+		bool boso_won = !BosoAIManagerClass::BosoHouse->IsDefeated;
+		BosoAIManagerClass::On_Game_Over(boso_won);
+	}
+
 	GameOver = true;
 
 	EventCallbackStruct event;
@@ -3104,15 +3205,47 @@ void DLLExportClass::Force_Human_Team_Wins(uint64 quitting_player_id)
 {
 	int winning_team = -1;
 
-	//Find the first human's multiplayer team.
-	for (int i = 0; i < Session.Players.Count(); i++)
-	{
-		if (GlyphxPlayerIDs[i] != quitting_player_id) {
-			HousesType house_type = Session.Players[i]->Player.ID;
-			HouseClass* house_class = HouseClass::As_Pointer(house_type);
-			if (house_class && house_class->IsHuman && !house_class->IsDefeated) {
-				winning_team = MPlayerTeamIDs[i];
-				break;
+	/*
+	** BosoAI: when the BosoAI player is quitting, treat the BosoAI house as the
+	** "human" reference when searching for a winner.  BosoAI sets IsHuman=false on
+	** PlayerPtr, so the normal IsHuman check would find nobody and mark every house
+	** (including all AI opponents) as defeated, corrupting the final standings.
+	** We save learning data here rather than in On_Multiplayer_Game_Over because
+	** the GlyphX engine may not call CNC_Advance_Instance again after this point.
+	*/
+	bool boso_player_quit = false;
+	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::BosoHouse != NULL) {
+		for (int i = 0; i < Session.Players.Count(); i++) {
+			if (GlyphxPlayerIDs[i] == quitting_player_id) {
+				HousesType house_type = Session.Players[i]->Player.ID;
+				HouseClass* house_class = HouseClass::As_Pointer(house_type);
+				if (house_class == BosoAIManagerClass::BosoHouse) {
+					boso_player_quit = true;
+					break;
+				}
+			}
+		}
+	}
+
+	if (boso_player_quit) {
+		/*
+		** BosoAI is the one quitting.  Save as a loss (we didn't finish the game).
+		** Also mark BosoAI's house as defeated so the stats loop below sets the
+		** AI opponents as the winners (winning_team remains -1 → everyone loses, but
+		** that's the same as before; the important thing is saving the INI).
+		*/
+		BosoAIManagerClass::On_Game_Over(false);
+	} else {
+		//Find the first human's multiplayer team.
+		for (int i = 0; i < Session.Players.Count(); i++)
+		{
+			if (GlyphxPlayerIDs[i] != quitting_player_id) {
+				HousesType house_type = Session.Players[i]->Player.ID;
+				HouseClass* house_class = HouseClass::As_Pointer(house_type);
+				if (house_class && house_class->IsHuman && !house_class->IsDefeated) {
+					winning_team = MPlayerTeamIDs[i];
+					break;
+				}
 			}
 		}
 	}
@@ -3946,6 +4079,17 @@ extern "C" __declspec(dllexport) void __cdecl CNC_Handle_Input(InputRequestEnum 
 	
 	if (!DLLExportClass::Set_Player_Context(player_id)) {
 		return;
+	}
+
+	/*
+	** BosoAI spectator mode: allow camera/mouse-move input through but
+	** swallow all order/action inputs so the AI plays uninterrupted.
+	*/
+	if (BosoAIManagerClass::Is_Spectator_Input_Blocked()) {
+		if (input_event != INPUT_REQUEST_MOUSE_MOVE &&
+		    input_event != INPUT_REQUEST_SPECIAL_KEYS) {
+			return;
+		}
 	}
 
 	switch (input_event) {
