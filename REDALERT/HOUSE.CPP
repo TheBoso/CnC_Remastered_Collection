@@ -1240,7 +1240,7 @@ void HouseClass::AI(void)
 		!IsDefeated && Frame > 0 && (Frame % 1800 == 0)) {
 		char _diag[256];
 		sprintf(_diag,
-			"BosoAI house[%s] f%ld alive: BScan=%d AScan=%d UScan=%d IScan=%d VScan=%d",
+			"alive[%s] f%ld BScan=%d AScan=%d UScan=%d IScan=%d VScan=%d",
 			IniName, Frame,
 			ActiveBScan   ? 1 : 0,
 			ActiveAScan   ? 1 : 0,
@@ -1248,19 +1248,25 @@ void HouseClass::AI(void)
 			ActiveIScan   ? 1 : 0,
 			ActiveVScan   ? 1 : 0);
 		GlyphX_Debug_Print(_diag);
+		BosoAIManagerClass::Log(_diag);
 	}
 
 	/*
-	** BosoAI: any house that has lost all buildings, land units, infantry,
-	** and aircraft but still has vessels can never be defeated by the standard
-	** check (ActiveVScan keeps it alive). Since it can't build replacements
-	** without buildings, treat it as defeated so the match can end.
+	** BosoAI: a house with no buildings, no infantry, and no ground units cannot
+	** rebuild or win the game, regardless of whether it still has aircraft or vessels.
+	** The standard defeat check requires ALL scans to be zero, so an aircraft-only
+	** or vessel-only house would stall the match indefinitely.
+	** Treat any such "baseless" house as defeated so the match can end.
 	** Applies to ALL multiplayer houses when BosoAI is active.
 	*/
 	if (Session.Type != GAME_NORMAL && !IsDefeated && Frame > 0 &&
 		BosoAIManagerClass::IsBosoActive &&
-		!ActiveBScan && !ActiveAScan && !UScan && !ActiveIScan && ActiveVScan) {
-		GlyphX_Debug_Print("BosoAI: vessel-only house defeated (no base/land units left)");
+		!ActiveBScan && !UScan && !ActiveIScan) {
+		char _bl_dbg[128];
+		sprintf(_bl_dbg, "BosoAI: baseless house[%s] defeated (BScan=0 UScan=0 IScan=0 AScan=%d VScan=%d)",
+			IniName, ActiveAScan ? 1 : 0, ActiveVScan ? 1 : 0);
+		GlyphX_Debug_Print(_bl_dbg);
+		BosoAIManagerClass::Log(_bl_dbg);
 		MPlayer_Defeated();
 	}
 
@@ -4000,16 +4006,21 @@ void HouseClass::MPlayer_Defeated(void)
 
 	{
 		char _boso_dbg[128];
-		sprintf(_boso_dbg, "BosoAI MPlayer_Defeated: num_alive=%d num_humans=%d game_over=%s",
-			num_alive, num_humans, boso_game_over ? "YES" : "no");
+		sprintf(_boso_dbg, "MPlayer_Defeated: num_alive=%d num_humans=%d game_over=%s house=%s",
+			num_alive, num_humans, boso_game_over ? "YES" : "no", IniName);
 		GlyphX_Debug_Print(_boso_dbg);
+		BosoAIManagerClass::Log(_boso_dbg);
 	}
 
 	if (boso_game_over) {
 		if (PlayerPtr->IsDefeated) {
 			PlayerLoses = true;
+			GlyphX_Debug_Print("BosoAI: MPlayer_Defeated -> PlayerLoses set");
+			BosoAIManagerClass::Log("MPlayer_Defeated -> PlayerLoses set");
 		} else {
 			PlayerWins = true;
+			GlyphX_Debug_Print("BosoAI: MPlayer_Defeated -> PlayerWins set");
+			BosoAIManagerClass::Log("MPlayer_Defeated -> PlayerWins set");
 		}
 
 		/*
@@ -5517,7 +5528,13 @@ bool HouseClass::AI_Attack(UrgencyType )
 		}
 	}
 
-	Attack = Rule.AttackInterval * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2);
+	/*-- BosoAI: use per-house attack interval if available --*/
+	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this)) {
+		const BosoLimitsRecord & _bl_atk = BosoAIManagerClass::Get_House_Limits(this);
+		Attack = (long)_bl_atk.AttackSecs * TICKS_PER_SECOND;
+	} else {
+		Attack = Rule.AttackInterval * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2);
+	}
 	return(true);
 }
 
@@ -5885,18 +5902,13 @@ int HouseClass::AI_Building(void)
 				quant = hptr->CurBuildings;
 			}
 		}
-		quant += Rule.BaseSizeAdd;
-
-		/*
-		** BosoAI: BaseSizeAdd caps the build ORDER (how many planned buildings are built),
-		** but should NOT block defenses — defenses need to be built regardless of base size.
-		** The cap is enforced below inside the build order injection, not here.
-		** Vanilla AI cap remains commented out as before.
-		*/
-		if (!BosoAIManagerClass::IsBosoActive || !BosoAIManagerClass::Is_Boso_House(this)) {
-// TCTC -- Should multiply largest player base by some rational number.
-//			if (CurBuildings >= quant) return(TICKS_PER_SECOND);
+		{
+			bool _bsa_boso = (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this));
+			quant += _bsa_boso ? BosoAIManagerClass::Get_House_Limits(this).BaseSizeAdd : Rule.BaseSizeAdd;
 		}
+
+// TCTC -- Should multiply largest player base by some rational number.
+//		if (CurBuildings >= quant) return(TICKS_PER_SECOND);
 
 		BuildChoice.Free_All();
 		BuildChoiceClass * choiceptr;
@@ -5911,19 +5923,34 @@ int HouseClass::AI_Building(void)
 		}
 
 		/*
-		** BosoAI: ignore rules.ini building count limits for the BosoAI house so it
-		** can experiment with higher building counts and find what's optimal.
+		** BosoAI: use per-house evolved AI parameters instead of global Rule.* values.
+		** Ratio values are stored as int*256 in BosoLimitsRecord; convert to fixed via fixed(val,256).
 		*/
 		bool boso_house = (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this));
 		const BosoLimitsRecord & _bl = BosoAIManagerClass::Get_House_Limits(this);
-		unsigned boso_refinery_limit = boso_house ? (unsigned)_bl.MaxRefinery  : (unsigned)Rule.RefineryLimit;
-		unsigned boso_barracks_limit = boso_house ? (unsigned)_bl.MaxBarracks  : (unsigned)Rule.BarracksLimit;
-		unsigned boso_war_limit      = boso_house ? (unsigned)_bl.MaxWarFactory: (unsigned)Rule.WarLimit;
-		unsigned boso_defense_limit  = boso_house ? (unsigned)_bl.MaxDefense   : (unsigned)Rule.DefenseLimit;
-		unsigned boso_aa_limit       = boso_house ? (unsigned)_bl.MaxAA        : (unsigned)Rule.AALimit;
-		unsigned boso_tesla_limit    = boso_house ? (unsigned)_bl.MaxTesla     : (unsigned)Rule.TeslaLimit;
-		unsigned boso_helipad_limit  = boso_house ? (unsigned)_bl.MaxHelipad   : (unsigned)Rule.HelipadLimit;
-		unsigned boso_airstrip_limit = boso_house ? (unsigned)_bl.MaxAirstrip  : (unsigned)Rule.AirstripLimit;
+
+		/* Per-house ratio targets (converted from int*256 to fixed) */
+		fixed boso_defense_ratio  = boso_house ? fixed(_bl.DefenseRatio,  256) : Rule.DefenseRatio;
+		fixed boso_aa_ratio       = boso_house ? fixed(_bl.AARatio,        256) : Rule.AARatio;
+		fixed boso_tesla_ratio    = boso_house ? fixed(_bl.TeslaRatio,     256) : Rule.TeslaRatio;
+		fixed boso_barracks_ratio = boso_house ? fixed(_bl.BarracksRatio,  256) : Rule.BarracksRatio;
+		fixed boso_war_ratio      = boso_house ? fixed(_bl.WarRatio,       256) : Rule.WarRatio;
+		fixed boso_helipad_ratio  = boso_house ? fixed(_bl.HelipadRatio,   256) : Rule.HelipadRatio;
+		fixed boso_airstrip_ratio = boso_house ? fixed(_bl.AirstripRatio,  256) : Rule.AirstripRatio;
+		fixed boso_refinery_ratio = boso_house ? fixed(_bl.RefineryRatio,  256) : Rule.RefineryRatio;
+
+		/* Per-house building count limits */
+		unsigned boso_refinery_limit = boso_house ? (unsigned)_bl.RefineryLimit : (unsigned)Rule.RefineryLimit;
+		unsigned boso_barracks_limit = boso_house ? (unsigned)_bl.BarracksLimit : (unsigned)Rule.BarracksLimit;
+		unsigned boso_war_limit      = boso_house ? (unsigned)_bl.WarLimit      : (unsigned)Rule.WarLimit;
+		unsigned boso_defense_limit  = boso_house ? (unsigned)_bl.DefenseLimit  : (unsigned)Rule.DefenseLimit;
+		unsigned boso_aa_limit       = boso_house ? (unsigned)_bl.AALimit       : (unsigned)Rule.AALimit;
+		unsigned boso_tesla_limit    = boso_house ? (unsigned)_bl.TeslaLimit    : (unsigned)Rule.TeslaLimit;
+		unsigned boso_helipad_limit  = boso_house ? (unsigned)_bl.HelipadLimit  : (unsigned)Rule.HelipadLimit;
+		unsigned boso_airstrip_limit = boso_house ? (unsigned)_bl.AirstripLimit : (unsigned)Rule.AirstripLimit;
+
+		/* Per-house economy parameters */
+		int boso_power_surplus   = boso_house ? _bl.PowerSurplus    : Rule.PowerSurplus;
 
 		level = Control.TechLevel;
 
@@ -5932,14 +5959,14 @@ int HouseClass::AI_Building(void)
 		**	money available.
 		*/
 		b = &BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER);
-		if (Can_Build(b, ActLike) && Power <= Drain+Rule.PowerSurplus && b->Cost_Of() < money) {
+		if (Can_Build(b, ActLike) && Power <= Drain+boso_power_surplus && b->Cost_Of() < money) {
 			choiceptr = BuildChoice.Alloc();
 			if (choiceptr != NULL) {
 				*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
 			}
 		} else {
 			b = &BuildingTypeClass::As_Reference(STRUCT_POWER);
-			if (Can_Build(b, ActLike) && Power <= Drain+Rule.PowerSurplus && b->Cost_Of() < money) {
+			if (Can_Build(b, ActLike) && Power <= Drain+boso_power_surplus && b->Cost_Of() < money) {
 				choiceptr = BuildChoice.Alloc();
 				if (choiceptr != NULL) {
 					*choiceptr = BuildChoiceClass(BQuantity[STRUCT_REFINERY] == 0 ? URGENCY_LOW : URGENCY_MEDIUM, b->Type);
@@ -5951,7 +5978,7 @@ int HouseClass::AI_Building(void)
 		**	Build a refinery if there isn't one already available.
 		*/
 		unsigned int current = BQuantity[STRUCT_REFINERY];
-		if (!IsTiberiumShort && current < Round_Up(Rule.RefineryRatio*fixed(CurBuildings)) && current < boso_refinery_limit) {
+		if (!IsTiberiumShort && current < Round_Up(boso_refinery_ratio*fixed(CurBuildings)) && current < boso_refinery_limit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_REFINERY);
 			if (Can_Build(b, ActLike) && (money > b->Cost_Of() || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
@@ -5966,7 +5993,7 @@ int HouseClass::AI_Building(void)
 		**	will be sufficient money to train troopers.
 		*/
 		current = BQuantity[STRUCT_BARRACKS] + BQuantity[STRUCT_TENT];
-		if (current < Round_Up(Rule.BarracksRatio*fixed(CurBuildings)) && current < boso_barracks_limit && (money > 300 || hasincome)) {
+		if (current < Round_Up(boso_barracks_ratio*fixed(CurBuildings)) && current < boso_barracks_limit && (money > 300 || hasincome)) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_BARRACKS);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
@@ -6017,7 +6044,7 @@ int HouseClass::AI_Building(void)
 		**	be sufficient money to build vehicles.
 		*/
 		current = BQuantity[STRUCT_WEAP];
-		if (current < Round_Up(Rule.WarRatio*fixed(CurBuildings)) && current < boso_war_limit && (money > 2000 || hasincome)) {
+		if (current < Round_Up(boso_war_ratio*fixed(CurBuildings)) && current < boso_war_limit && (money > 2000 || hasincome)) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_WEAP);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
@@ -6077,7 +6104,7 @@ int HouseClass::AI_Building(void)
 		**	Always build up some base defense.
 		*/
 		current = BQuantity[STRUCT_PILLBOX] + BQuantity[STRUCT_CAMOPILLBOX] + BQuantity[STRUCT_TURRET] + BQuantity[STRUCT_FLAME_TURRET];
-		if (current < Round_Up(Rule.DefenseRatio*fixed(CurBuildings)) && current < boso_defense_limit) {
+		if (current < Round_Up(boso_defense_ratio*fixed(CurBuildings)) && current < boso_defense_limit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_FLAME_TURRET);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
@@ -6109,7 +6136,7 @@ int HouseClass::AI_Building(void)
 		**	Build some air defense.
 		*/
 		current = BQuantity[STRUCT_SAM] + BQuantity[STRUCT_AAGUN];
-		if (current < Round_Up(Rule.AARatio*fixed(CurBuildings)) && current < boso_aa_limit) {
+		if (current < Round_Up(boso_aa_ratio*fixed(CurBuildings)) && current < boso_aa_limit) {
 
 			/*
 			**	Track how many enemy aircraft are visible so we can set urgency
@@ -6150,7 +6177,7 @@ int HouseClass::AI_Building(void)
 		**	Advanced base defense would be good.
 		*/
 		current = BQuantity[STRUCT_TESLA];
-		if (current < Round_Up(Rule.TeslaRatio*fixed(CurBuildings)) && current < boso_tesla_limit) {
+		if (current < Round_Up(boso_tesla_ratio*fixed(CurBuildings)) && current < boso_tesla_limit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_TESLA);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome) && Power_Fraction() >= 1) {
 				choiceptr = BuildChoice.Alloc();
@@ -6186,7 +6213,7 @@ int HouseClass::AI_Building(void)
 		**	A helipad would be good.
 		*/
 		current = BQuantity[STRUCT_HELIPAD];
-		if (current < Round_Up(Rule.HelipadRatio*fixed(CurBuildings)) && current < boso_helipad_limit) {
+		if (current < Round_Up(boso_helipad_ratio*fixed(CurBuildings)) && current < boso_helipad_limit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_HELIPAD);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
@@ -6205,7 +6232,7 @@ int HouseClass::AI_Building(void)
 		**	An airstrip would be good.
 		*/
 		current = BQuantity[STRUCT_AIRSTRIP];
-		if (current < Round_Up(Rule.AirstripRatio*fixed(CurBuildings)) && current < boso_airstrip_limit) {
+		if (current < Round_Up(boso_airstrip_ratio*fixed(CurBuildings)) && current < boso_airstrip_limit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_AIRSTRIP);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
 				choiceptr = BuildChoice.Alloc();
@@ -6239,27 +6266,6 @@ int HouseClass::AI_Building(void)
 		
 
 		/*
-		** BosoAI: if following a saved build order, inject the next step at the highest
-		** urgency so the AI prioritises it over everything else.
-		** BaseSizeAdd gates this injection — once the planned base is full, the build
-		** order stops but vanilla defense/AA/tesla suggestions still run below.
-		*/
-		if (boso_house) {
-			if (CurBuildings < (unsigned int)_bl.BaseSizeAdd) {
-				StructType boso_next = BosoAIManagerClass::Get_Next_Build_Order_Step(this);
-				if (boso_next != STRUCT_NONE) {
-					b = &BuildingTypeClass::As_Reference(boso_next);
-					if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
-						choiceptr = BuildChoice.Alloc();
-						if (choiceptr != NULL) {
-							*choiceptr = BuildChoiceClass(URGENCY_CRITICAL, boso_next);
-						}
-					}
-				}
-			}
-		}
-
-		/*
 		**	Pick the choice that is the most urgent.
 		*/
 		UrgencyType best = URGENCY_NONE;
@@ -6272,12 +6278,6 @@ int HouseClass::AI_Building(void)
 		}
 		if (best != URGENCY_NONE) {
 			BuildStructure = BuildChoice.Ptr(bestindex)->Structure;
-			/*
-			** BosoAI: record this building decision in the session build sequence.
-			*/
-			if (boso_house) {
-				BosoAIManagerClass::On_Building_Queued(this, BuildStructure);
-			}
 		}
 	}
 
@@ -6410,21 +6410,6 @@ int HouseClass::AI_Unit(void)
 
 	if (IsBaseBuilding) {
 
-		/*-- BosoAI: try combat order hint before falling back to random selection --*/
-		if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this)) {
-			const char * hint = BosoAIManagerClass::Get_Next_Combat_Step(this);
-			if (hint != NULL) {
-				for (UnitType ut = UNIT_FIRST; ut < UNIT_COUNT; ut++) {
-					const UnitTypeClass & uref = UnitTypeClass::As_Reference(ut);
-					if (stricmp(uref.IniName, hint) == 0 && ut != UNIT_HARVESTER &&
-						Can_Build(&uref, ActLike) && uref.Cost_Of() <= Available_Money()) {
-						BuildUnit = ut;
-						break;
-					}
-				}
-			}
-		}
-
 		if (BuildUnit == UNIT_NONE) {
 			int counter[UNIT_COUNT];
 			int total = 0;
@@ -6454,12 +6439,6 @@ int HouseClass::AI_Unit(void)
 				}
 			}
 		}
-	}
-
-	/*-- BosoAI: record unit queued for combat order training --*/
-	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this) &&
-		BuildUnit != UNIT_NONE && BuildUnit != UNIT_HARVESTER) {
-		BosoAIManagerClass::On_Unit_Queued(this, UnitTypeClass::As_Reference(BuildUnit).IniName);
 	}
 
 	return(TICKS_PER_SECOND);
@@ -6567,21 +6546,6 @@ int HouseClass::AI_Vessel(void)
 	}
 
 	if (IsBaseBuilding) {
-		/*-- BosoAI: try combat order hint before falling back to random naval selection --*/
-		if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this)) {
-			const char * hint = BosoAIManagerClass::Get_Next_Combat_Step(this);
-			if (hint != NULL) {
-				for (VesselType vt = VESSEL_FIRST; vt < VESSEL_COUNT; vt++) {
-					const VesselTypeClass & vref = VesselTypeClass::As_Reference(vt);
-					if (stricmp(vref.IniName, hint) == 0 &&
-						Can_Build(&vref, ActLike) && vref.Cost_Of() <= Available_Money()) {
-						BuildVessel = vt;
-						break;
-					}
-				}
-			}
-		}
-
 		/*
 		** Naval production for base-building AI.  Vanilla suppressed this entirely;
 		** we now produce faction-appropriate vessels when a naval facility exists.
@@ -6623,12 +6587,6 @@ int HouseClass::AI_Vessel(void)
 				}
 			}
 		}
-	}
-
-	/*-- BosoAI: record vessel queued for combat order training --*/
-	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this) &&
-		BuildVessel != VESSEL_NONE) {
-		BosoAIManagerClass::On_Unit_Queued(this, VesselTypeClass::As_Reference(BuildVessel).IniName);
 	}
 
 	return(TICKS_PER_SECOND);
@@ -6746,20 +6704,12 @@ int HouseClass::AI_Infantry(void)
 	}
 
 	if (IsBaseBuilding) {
-		/*-- BosoAI: try combat order hint before falling back to weighted random selection --*/
-		if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this)) {
-			const char * hint = BosoAIManagerClass::Get_Next_Combat_Step(this);
-			if (hint != NULL) {
-				for (InfantryType it = INFANTRY_FIRST; it < INFANTRY_COUNT; it++) {
-					const InfantryTypeClass & iref = InfantryTypeClass::As_Reference(it);
-					if (stricmp(iref.IniName, hint) == 0 &&
-						Can_Build(&iref, ActLike) && iref.Cost_Of() <= Available_Money()) {
-						BuildInfantry = it;
-						break;
-					}
-				}
-			}
-		}
+
+		/* Per-house economy parameters for infantry production decisions */
+		bool boso_inf = (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this));
+		const BosoLimitsRecord & _bl_inf = BosoAIManagerClass::Get_House_Limits(this);
+		int boso_inf_reserve = boso_inf ? _bl_inf.InfantryReserve : Rule.InfantryReserve;
+		int boso_inf_mult    = boso_inf ? _bl_inf.InfantryBaseMult : Rule.InfantryBaseMult;
 
 		if (BuildInfantry == INFANTRY_NONE) {
 		HouseClass const * enemy = NULL;
@@ -6783,9 +6733,9 @@ int HouseClass::AI_Infantry(void)
 #ifdef FIXIT_CSII	//	checked - ajw 9/28/98 This looks like a potential bug. It is prob. for save game format compatibility.
 				int clipindex = index;
 				if (clipindex >= INFANTRY_RA_COUNT) clipindex -= INFANTRY_RA_COUNT;
-				if ((enemy != NULL && enemy->IQuantity[clipindex] > IQuantity[clipindex]) || Available_Money() > Rule.InfantryReserve || CurInfantry < CurBuildings * Rule.InfantryBaseMult) {
+				if ((enemy != NULL && enemy->IQuantity[clipindex] > IQuantity[clipindex]) || Available_Money() > boso_inf_reserve || CurInfantry < CurBuildings * boso_inf_mult) {
 #else
-				if ((enemy != NULL && enemy->IQuantity[index] > IQuantity[index]) || Available_Money() > Rule.InfantryReserve || CurInfantry < CurBuildings * Rule.InfantryBaseMult) {
+				if ((enemy != NULL && enemy->IQuantity[index] > IQuantity[index]) || Available_Money() > boso_inf_reserve || CurInfantry < CurBuildings * boso_inf_mult) {
 #endif
 
 					switch (index) {
@@ -6846,12 +6796,6 @@ int HouseClass::AI_Infantry(void)
 			}
 		}
 		} // end if (BuildInfantry == INFANTRY_NONE)
-	}
-
-	/*-- BosoAI: record infantry queued for combat order training --*/
-	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this) &&
-		BuildInfantry != INFANTRY_NONE) {
-		BosoAIManagerClass::On_Unit_Queued(this, InfantryTypeClass::As_Reference(BuildInfantry).IniName);
 	}
 
 	return(TICKS_PER_SECOND);
@@ -8355,8 +8299,11 @@ CELL HouseClass::Find_Cell_In_Zone(TechnoClass const * techno, ZoneType zone) co
 					return false;
 				};
 
-				const BosoLimitsRecord & _bsp = BosoAIManagerClass::Get_House_Limits(this);
-				int spacing_threshold = _bsp.BaseSpacing;
+			const BosoLimitsRecord & _bsp = BosoAIManagerClass::Get_House_Limits(this);
+			int spacing_threshold = (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this))
+				? _bsp.BaseSpacing : 3;
+
+
 
 				int clear_sides = 0;
 				if (celly > 0)

@@ -236,8 +236,13 @@
         <option value="norm" selected>Normalised Score</option>
         <option value="WinScore">Raw Score</option>
         <option value="GamesPlayed">Games Played</option>
-        <option value="MaxUnit">Max Unit</option>
+        <option value="DefenseRatio">Defense Ratio</option>
+        <option value="DefenseLimit">Defense Limit</option>
         <option value="AttackSecs">Attack Secs</option>
+        <option value="AttackDelaySecs">Attack Delay</option>
+        <option value="AutocreateSecs">Autocreate Secs</option>
+        <option value="PowerSurplus">Power Surplus</option>
+        <option value="FirepowerBias">FP Bias</option>
         <option value="BaseSizeAdd">Base Size</option>
         <option value="BaseSpacing">Base Spacing</option>
       </select>
@@ -343,27 +348,45 @@ function extractLimits(sec) {
     const p = `Limits_${i}_`;
     const r = {
       idx: i,
-      Faction:     sec[p + 'Faction']    || '?',
-      WinScore:    int(sec[p + 'Score']),
-      GamesPlayed: int(sec[p + 'Games']),
-      MaxUnit:     int(sec[p + 'Unit']),
-      MaxBuilding: int(sec[p + 'Building']),
-      MaxInfantry: int(sec[p + 'Infantry']),
-      MaxVessel:   int(sec[p + 'Vessel']),
-      MaxAircraft: int(sec[p + 'Aircraft']),
-      MaxRefinery: int(sec[p + 'Refinery']),
-      MaxBarracks: int(sec[p + 'Barracks']),
-      MaxWarFactory: int(sec[p + 'WarFactory']),
-      MaxDefense:  int(sec[p + 'Defense']),
-      MaxAA:       int(sec[p + 'AA']),
-      MaxTesla:    int(sec[p + 'Tesla']),
-      MaxHelipad:  int(sec[p + 'Helipad']),
-      MaxAirstrip: int(sec[p + 'Airstrip']),
-      AttackSecs:  int(sec[p + 'AttackSecs']),
-      BaseSizeAdd: int(sec[p + 'BaseSizeAdd']),
-      BaseSpacing: int(sec[p + 'BaseSpacing']),
-      LastGameUID: sec[p + 'LastUID']  || '',
+      Faction:      sec[p + 'Faction']    || '?',
+      WinScore:     int(sec[p + 'Score']),
+      GamesPlayed:  int(sec[p + 'Games']),
+      LastGameUID:  sec[p + 'LastUID']  || '',
       LastGameSecs: int(sec[p + 'LastSecs']),
+      /* Ratios (int*256; 256 = 1.0) */
+      DefenseRatio:  int(sec[p + 'DefenseRatio']),
+      AARatio:       int(sec[p + 'AARatio']),
+      TeslaRatio:    int(sec[p + 'TeslaRatio']),
+      BarracksRatio: int(sec[p + 'BarracksRatio']),
+      WarRatio:      int(sec[p + 'WarRatio']),
+      HelipadRatio:  int(sec[p + 'HelipadRatio']),
+      AirstripRatio: int(sec[p + 'AirstripRatio']),
+      RefineryRatio: int(sec[p + 'RefineryRatio']),
+      /* Limits */
+      DefenseLimit:  int(sec[p + 'DefenseLimit']),
+      AALimit:       int(sec[p + 'AALimit']),
+      TeslaLimit:    int(sec[p + 'TeslaLimit']),
+      BarracksLimit: int(sec[p + 'BarracksLimit']),
+      WarLimit:      int(sec[p + 'WarLimit']),
+      HelipadLimit:  int(sec[p + 'HelipadLimit']),
+      AirstripLimit: int(sec[p + 'AirstripLimit']),
+      RefineryLimit: int(sec[p + 'RefineryLimit']),
+      /* Economy */
+      PowerSurplus:    int(sec[p + 'PowerSurplus']),
+      InfantryReserve: int(sec[p + 'InfantryReserve']),
+      InfantryBaseMult:int(sec[p + 'InfantryBaseMult']),
+      BaseSizeAdd:     int(sec[p + 'BaseSizeAdd']),
+      /* Timing */
+      AttackSecs:      int(sec[p + 'AttackSecs']),
+      AttackDelaySecs: int(sec[p + 'AttackDelaySecs']),
+      AutocreateSecs:  int(sec[p + 'AutocreateSecs']),
+      BaseSpacing:     int(sec[p + 'BaseSpacing']),
+      /* Bias (int*256; 256 = 1.0) */
+      FirepowerBias:    int(sec[p + 'FirepowerBias']),
+      GroundspeedBias:  int(sec[p + 'GroundspeedBias']),
+      ArmorBias:        int(sec[p + 'ArmorBias']),
+      CostBias:         int(sec[p + 'CostBias']),
+      BuildSpeedBias:   int(sec[p + 'BuildSpeedBias']),
     };
     r.norm = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
     records.push(r);
@@ -455,27 +478,41 @@ function rankBadge(rank) {
 
 // ── Limits table ──────────────────────────────────────────────────────────────
 const LIMITS_COLS = [
-  { key: 'rank',        label: '#',           sortKey: null },
-  { key: 'Faction',     label: 'Faction',      sortKey: 'Faction' },
-  { key: 'norm',        label: 'Conf. Score',  sortKey: 'norm' },
-  { key: 'WinScore',    label: 'Raw Score',    sortKey: 'WinScore' },
-  { key: 'GamesPlayed', label: 'Games',        sortKey: 'GamesPlayed' },
-  { key: 'MaxUnit',     label: 'Units',        sortKey: 'MaxUnit' },
-  { key: 'MaxBuilding', label: 'Buildings',    sortKey: 'MaxBuilding' },
-  { key: 'MaxInfantry', label: 'Infantry',     sortKey: 'MaxInfantry' },
-  { key: 'MaxVessel',   label: 'Vessels',      sortKey: 'MaxVessel' },
-  { key: 'MaxAircraft', label: 'Aircraft',     sortKey: 'MaxAircraft' },
-  { key: 'MaxRefinery', label: 'Refineries',   sortKey: 'MaxRefinery' },
-  { key: 'MaxBarracks', label: 'Barracks',     sortKey: 'MaxBarracks' },
-  { key: 'MaxWarFactory',label:'War Fac.',     sortKey: 'MaxWarFactory' },
-  { key: 'MaxDefense',  label: 'Defense',      sortKey: 'MaxDefense' },
-  { key: 'MaxAA',       label: 'AA',           sortKey: 'MaxAA' },
-  { key: 'MaxTesla',    label: 'Tesla',        sortKey: 'MaxTesla' },
-  { key: 'MaxHelipad',  label: 'Helipad',      sortKey: 'MaxHelipad' },
-  { key: 'MaxAirstrip', label: 'Airstrip',     sortKey: 'MaxAirstrip' },
-  { key: 'AttackSecs',  label: 'Atk (s)',      sortKey: 'AttackSecs' },
-  { key: 'BaseSizeAdd', label: 'Base Size',    sortKey: 'BaseSizeAdd' },
-  { key: 'BaseSpacing', label: 'Spacing',      sortKey: 'BaseSpacing' },
+  { key: 'rank',            label: '#',            sortKey: null },
+  { key: 'Faction',         label: 'Faction',       sortKey: 'Faction' },
+  { key: 'norm',            label: 'Conf. Score',   sortKey: 'norm' },
+  { key: 'WinScore',        label: 'Raw Score',     sortKey: 'WinScore' },
+  { key: 'GamesPlayed',     label: 'Games',         sortKey: 'GamesPlayed' },
+  /* Ratios */
+  { key: 'DefenseRatio',    label: 'Def%',          sortKey: 'DefenseRatio' },
+  { key: 'AARatio',         label: 'AA%',           sortKey: 'AARatio' },
+  { key: 'TeslaRatio',      label: 'Tesla%',        sortKey: 'TeslaRatio' },
+  { key: 'BarracksRatio',   label: 'Bar%',          sortKey: 'BarracksRatio' },
+  { key: 'WarRatio',        label: 'War%',          sortKey: 'WarRatio' },
+  { key: 'HelipadRatio',    label: 'Hlp%',          sortKey: 'HelipadRatio' },
+  { key: 'AirstripRatio',   label: 'Air%',          sortKey: 'AirstripRatio' },
+  { key: 'RefineryRatio',   label: 'Ref%',          sortKey: 'RefineryRatio' },
+  /* Limits */
+  { key: 'DefenseLimit',    label: 'DefLim',        sortKey: 'DefenseLimit' },
+  { key: 'AALimit',         label: 'AALim',         sortKey: 'AALimit' },
+  { key: 'TeslaLimit',      label: 'TesLim',        sortKey: 'TeslaLimit' },
+  { key: 'BarracksLimit',   label: 'BarLim',        sortKey: 'BarracksLimit' },
+  { key: 'WarLimit',        label: 'WarLim',        sortKey: 'WarLimit' },
+  { key: 'HelipadLimit',    label: 'HlpLim',        sortKey: 'HelipadLimit' },
+  { key: 'AirstripLimit',   label: 'AirLim',        sortKey: 'AirstripLimit' },
+  { key: 'RefineryLimit',   label: 'RefLim',        sortKey: 'RefineryLimit' },
+  /* Economy */
+  { key: 'PowerSurplus',    label: 'Power+',        sortKey: 'PowerSurplus' },
+  { key: 'InfantryReserve', label: 'InfRes',        sortKey: 'InfantryReserve' },
+  { key: 'InfantryBaseMult',label: 'InfMult',       sortKey: 'InfantryBaseMult' },
+  { key: 'BaseSizeAdd',     label: 'BaseSz',        sortKey: 'BaseSizeAdd' },
+  /* Timing */
+  { key: 'AttackSecs',      label: 'Atk(s)',        sortKey: 'AttackSecs' },
+  { key: 'AttackDelaySecs', label: 'AtkDly(s)',     sortKey: 'AttackDelaySecs' },
+  { key: 'AutocreateSecs',  label: 'Auto(s)',       sortKey: 'AutocreateSecs' },
+  { key: 'BaseSpacing',     label: 'Spacing',       sortKey: 'BaseSpacing' },
+  /* Firepower bias (256 = 1.0); other biases are fixed at 1.0 and not shown */
+  { key: 'FirepowerBias',   label: 'FP Bias',       sortKey: 'FirepowerBias' },
 ];
 
 let sortKey = 'norm', sortDir = 'desc';
@@ -503,6 +540,8 @@ function renderLimits() {
     `<th data-key="${c.sortKey || ''}" class="${c.sortKey === col ? 'sort-' + dir : ''}">${c.label}</th>`
   ).join('') + '</tr>';
 
+  const fmtRatio = v => (v / 256).toFixed(2);
+
   tbody.innerHTML = rows.map((r, i) => {
     const rank = i + 1;
     return `<tr>
@@ -511,11 +550,15 @@ function renderLimits() {
       <td>${scoreBar(r.norm, maxAbs)}</td>
       <td class="${scoreColor(r.WinScore)}">${r.WinScore >= 0 ? '+' : ''}${r.WinScore}</td>
       <td>${confDots(r.GamesPlayed, maxGames)} <span style="color:var(--muted);font-size:11px;margin-left:4px">${r.GamesPlayed}</span></td>
-      <td>${r.MaxUnit}</td><td>${r.MaxBuilding}</td><td>${r.MaxInfantry}</td>
-      <td>${r.MaxVessel}</td><td>${r.MaxAircraft}</td><td>${r.MaxRefinery}</td>
-      <td>${r.MaxBarracks}</td><td>${r.MaxWarFactory}</td><td>${r.MaxDefense}</td>
-      <td>${r.MaxAA}</td><td>${r.MaxTesla}</td><td>${r.MaxHelipad}</td><td>${r.MaxAirstrip}</td>
-      <td>${r.AttackSecs}s</td><td>${r.BaseSizeAdd}</td><td>${r.BaseSpacing}</td>
+      <td>${fmtRatio(r.DefenseRatio)}</td><td>${fmtRatio(r.AARatio)}</td><td>${fmtRatio(r.TeslaRatio)}</td>
+      <td>${fmtRatio(r.BarracksRatio)}</td><td>${fmtRatio(r.WarRatio)}</td><td>${fmtRatio(r.HelipadRatio)}</td>
+      <td>${fmtRatio(r.AirstripRatio)}</td><td>${fmtRatio(r.RefineryRatio)}</td>
+      <td>${r.DefenseLimit}</td><td>${r.AALimit}</td><td>${r.TeslaLimit}</td>
+      <td>${r.BarracksLimit}</td><td>${r.WarLimit}</td><td>${r.HelipadLimit}</td>
+      <td>${r.AirstripLimit}</td><td>${r.RefineryLimit}</td>
+      <td>${r.PowerSurplus}</td><td>${r.InfantryReserve}</td><td>${r.InfantryBaseMult}</td><td>${r.BaseSizeAdd}</td>
+      <td>${r.AttackSecs}s</td><td>${r.AttackDelaySecs}s</td><td>${r.AutocreateSecs}s</td><td>${r.BaseSpacing}</td>
+      <td>${fmtRatio(r.FirepowerBias)}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="${LIMITS_COLS.length}" class="empty">No records</td></tr>`;
 
@@ -630,11 +673,12 @@ function renderGameHistory() {
 
   thead.innerHTML = `<tr>
     <th>#</th><th>UID</th><th>Outcome</th><th>Faction</th><th>Map</th><th>Length</th>
-    <th>Build Order Used</th><th>Combat Order Used</th>
+    <th>Limits Used</th><th>Build Order Used</th><th>Combat Order Used</th>
   </tr>`;
 
   tbody.innerHTML = rows.length ? rows.map((r, i) => {
-    // Cross-reference: find build/combat records that share this UID
+    // Cross-reference: find limits/build/combat records that share this UID
+    const matchLimits = state.limits.filter(l => l.LastGameUID === r.UID);
     const matchBuild  = state.build.filter(b => b.LastGameUID === r.UID);
     const matchCombat = state.combat.filter(c => c.LastGameUID === r.UID);
 
@@ -647,6 +691,20 @@ function renderGameHistory() {
       }).join('<br>');
     }
 
+    function limitsSummary(recs, gameOutcome, winFaction) {
+      if (!recs.length) return '<span style="color:var(--muted)">—</span>';
+      return recs.map(l => {
+        // Infer whether this limits record won: faction matches AND game was a win
+        const likelyWon = gameOutcome === 'W' && l.Faction.toLowerCase() === (winFaction || '').toLowerCase();
+        const badge = likelyWon
+          ? `<span style="color:var(--green);font-weight:600">W</span>`
+          : `<span style="color:var(--muted)">L</span>`;
+        const sign = l.WinScore >= 0 ? '+' : '';
+        const caps = `U:${l.MaxUnit} B:${l.MaxBuilding} I:${l.MaxInfantry}`;
+        return `<span style="font-size:11px">${badge} ${factionPill(l.Faction)} <code style="font-size:11px">${caps}</code> <span class="${scoreColor(l.WinScore)}" title="running total">(${sign}${l.WinScore})</span></span>`;
+      }).join('<br>');
+    }
+
     return `<tr>
       <td style="color:var(--muted)">${i + 1}</td>
       <td><code style="font-size:11px">${r.UID}</code></td>
@@ -654,10 +712,11 @@ function renderGameHistory() {
       <td>${factionPill(r.Faction)}</td>
       <td style="font-size:12px;color:var(--muted)">${r.Map}</td>
       <td>${fmtSecs(r.GameSecs)}</td>
+      <td>${limitsSummary(matchLimits, r.Outcome, r.Faction)}</td>
       <td>${orderSummary(matchBuild)}</td>
       <td>${orderSummary(matchCombat)}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="8" class="empty">No game history recorded yet</td></tr>`;
+  }).join('') : `<tr><td colspan="9" class="empty">No game history recorded yet</td></tr>`;
 }
 
 // ── Stats bar ─────────────────────────────────────────────────────────────────

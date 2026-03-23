@@ -1684,7 +1684,15 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 	** BosoAI deferred auto-restart: On_Game_Over set PlayerRestarts = true last tick.
 	** Restart inline (GlyphX-compatible: skip WWMessageBox, call Start_Scenario directly).
 	*/
+	if (PlayerRestarts) {
+		char _pr_dbg[128];
+		sprintf(_pr_dbg, "DLL: PlayerRestarts=true, IsBosoActive=%d IsAutoRestart=%d",
+			(int)BosoAIManagerClass::IsBosoActive, (int)BosoAIManagerClass::IsAutoRestart);
+		GlyphX_Debug_Print(_pr_dbg);
+		BosoAIManagerClass::Log(_pr_dbg);
+	}
 	if (PlayerRestarts && BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::IsAutoRestart) {
+		BosoAIManagerClass::Log("DLL: restart block firing");
 		GlyphX_Debug_Print("BosoAI: restart step 1 - clearing flags");
 		PlayerWins = false;
 		PlayerLoses = false;
@@ -1876,6 +1884,7 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 			PlayerWins = false;
 			Map.Help_Text(TXT_NONE);
 			GlyphX_Debug_Print("PlayerWins = true");
+			BosoAIManagerClass::Log("DLL: PlayerWins block entered");
 
 			/*
 			** BosoAI auto-restart: save learning data this tick and set PlayerRestarts
@@ -1888,6 +1897,7 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 				bool boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
 				BosoAIManagerClass::On_Game_Over(boso_won);
 				PlayerRestarts = true;
+				BosoAIManagerClass::Log("DLL: PlayerWins -> queued restart");
 				GlyphX_Debug_Print("BosoAI: queued auto-restart");
 				return true;
 			}
@@ -1910,6 +1920,7 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 			PlayerLoses = false;
 			Map.Help_Text(TXT_NONE);
 			GlyphX_Debug_Print("PlayerLoses = true");
+			BosoAIManagerClass::Log("DLL: PlayerLoses block entered");
 
 			/*
 			** BosoAI auto-restart: same deferred path as PlayerWins above.
@@ -1918,6 +1929,7 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 				bool boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
 				BosoAIManagerClass::On_Game_Over(boso_won);
 				PlayerRestarts = true;
+				BosoAIManagerClass::Log("DLL: PlayerLoses -> queued restart");
 				GlyphX_Debug_Print("BosoAI: queued auto-restart");
 				return true;
 			}
