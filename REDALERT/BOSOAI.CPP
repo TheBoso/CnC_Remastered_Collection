@@ -1306,9 +1306,20 @@ void BosoAIManagerClass::On_Game_Over(bool player_won)
         GlyphX_Debug_Print(_tdbg);
     }
 
+    /*-- In FFA multi-house mode, record the winning house's faction rather than the
+    **   primary house's faction, since the primary is often eliminated first. --*/
+    const char * hist_faction = CurrentFaction;
+    if (IsMultiHouseAI && player_won) {
+        for (int i = 0; i < BosoHouseCount; i++) {
+            if (BosoHouses[i] && !BosoHouses[i]->IsDefeated) {
+                hist_faction = Get_Faction_Name(BosoHouses[i]);
+                break;
+            }
+        }
+    }
     Record_Game_History(CurrentGameUID, CurrentGameSecs,
                         player_won ? "W" : "L",
-                        CurrentFaction, CurrentMap);
+                        hist_faction, CurrentMap);
 
     Score_Session_Build_Order(player_won);
     Score_Session_Combat_Order(player_won);

@@ -1885,7 +1885,15 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 			** On_Game_Over call below to early-return without setting PlayerRestarts.
 			*/
 			if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::IsAutoRestart) {
-				bool boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
+				/*-- In FFA multi-house mode PlayerPtr is redirected to the surviving house,
+				**   so use PlayerPtr to determine the winner rather than BosoHouse (index 0)
+				**   which is often eliminated before the game ends. --*/
+				bool boso_won;
+				if (BosoAIManagerClass::IsMultiHouseAI) {
+					boso_won = PlayerPtr && !PlayerPtr->IsDefeated;
+				} else {
+					boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
+				}
 				BosoAIManagerClass::On_Game_Over(boso_won);
 				PlayerRestarts = true;
 				GlyphX_Debug_Print("BosoAI: queued auto-restart");
@@ -1915,7 +1923,15 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 			** BosoAI auto-restart: same deferred path as PlayerWins above.
 			*/
 			if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::IsAutoRestart) {
-				bool boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
+				/*-- In FFA multi-house mode PlayerPtr is redirected to the surviving house,
+				**   so use PlayerPtr to determine the winner rather than BosoHouse (index 0)
+				**   which is often eliminated before the game ends. --*/
+				bool boso_won;
+				if (BosoAIManagerClass::IsMultiHouseAI) {
+					boso_won = PlayerPtr && !PlayerPtr->IsDefeated;
+				} else {
+					boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
+				}
 				BosoAIManagerClass::On_Game_Over(boso_won);
 				PlayerRestarts = true;
 				GlyphX_Debug_Print("BosoAI: queued auto-restart");
