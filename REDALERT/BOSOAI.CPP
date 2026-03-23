@@ -1721,6 +1721,27 @@ void BosoAIManagerClass::Try_Register_House(HouseClass * house)
 }
 
 /*===========================================================================
+** PlayerPtr redirect for multi-house FFA
+** Called from DLLInterface.cpp after Set_Player_Context() each tick.
+** Returns the next alive BosoAI house so the GlyphX engine always sees
+** a living "player", allowing the simulation to run to true completion.
+** Returns NULL when the primary house is still alive or BosoAI is inactive.
+===========================================================================*/
+
+HouseClass * BosoAIManagerClass::Get_Next_Active_House(void)
+{
+    if (!IsBosoActive || !IsMultiHouseAI) return NULL;
+    if (!BosoHouse || !BosoHouse->IsDefeated) return NULL;
+
+    /*-- Primary house is gone — find first non-defeated registered house --*/
+    for (int i = 1; i < BosoHouseCount; i++) {
+        HouseClass * h = BosoHouses[i];
+        if (h && !h->IsDefeated) return h;
+    }
+    return NULL;
+}
+
+/*===========================================================================
 ** Anti-air tracking
 ===========================================================================*/
 

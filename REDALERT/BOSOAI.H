@@ -281,6 +281,10 @@ public:
     /*-- Late registration for MultiHouseAI (called from HOUSE.CPP AI_Building) --*/
     static void Try_Register_House(HouseClass * house);
 
+    /*-- PlayerPtr redirect: returns next alive BosoAI house when primary is defeated,
+    **   or NULL if none. Called from DLLInterface.cpp after Set_Player_Context. --*/
+    static HouseClass * Get_Next_Active_House(void);
+
     /*-- Anti-air threat tracking (called from TECHNO.CPP Record_The_Kill) --*/
     static void On_Unit_Killed_By_Aircraft(void);
     static int  AircraftLossCount;

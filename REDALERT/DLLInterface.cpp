@@ -1716,6 +1716,17 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 	}
 
 	/*
+	** BosoAI multi-house FFA: if the registered primary house has been defeated
+	** but other BosoAI houses are still alive, redirect PlayerPtr to the next
+	** living house so the GlyphX engine continues to advance the simulation.
+	** Set_Player_Context above resets PlayerPtr each tick, so we override here.
+	*/
+	{
+		HouseClass * redirect = BosoAIManagerClass::Get_Next_Active_House();
+		if (redirect) PlayerPtr = redirect;
+	}
+
+	/*
 	** Restore special from backup
 	*/
 	if (SpecialBackup != NULL) {
