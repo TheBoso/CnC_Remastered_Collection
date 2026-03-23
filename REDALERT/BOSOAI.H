@@ -353,6 +353,7 @@ private:
     static long GameStartFrame;     // Frame at scenario load (for elapsed time calc)
     static int  GameTimeBonusScore; // Computed at game-over; added to winner scores
     static int  StalemateTicks;     // Consecutive seconds all houses have been deadlocked
+    static long StaleCheckFrame;    // Frame of last stalemate check (throttle: once per second)
 
     /*-- Current game UID and length (set at game start / game over) --*/
     static char CurrentGameUID[BOSO_UID_LEN];

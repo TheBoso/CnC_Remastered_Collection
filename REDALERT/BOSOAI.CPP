@@ -120,6 +120,7 @@ bool BosoAIManagerClass::GameOverFired                          = false;
 long BosoAIManagerClass::GameStartFrame                         = 0;
 int  BosoAIManagerClass::GameTimeBonusScore                     = 0;
 int  BosoAIManagerClass::StalemateTicks                         = 0;
+long BosoAIManagerClass::StaleCheckFrame                        = 0;
 
 /*-- Global spectator flag --*/
 bool BosoSpectatorActive = false;
@@ -1018,6 +1019,7 @@ void BosoAIManagerClass::Init(void)
     CurrentGameUID[0]   = '\0';
     GameOverFired       = false;
     StalemateTicks      = 0;
+    StaleCheckFrame     = 0;
     AircraftLossCount   = 0;
     memset(NavalViable, 0, sizeof(NavalViable));
     BosoHouseCount  = 0;
@@ -1568,6 +1570,12 @@ void BosoAIManagerClass::Check_Stalemate(void)
 {
     if (!IsBosoActive || GameOverFired) return;
     if (BosoHouseCount == 0) return;
+
+    /*-- Throttle: only run once per second regardless of how many houses call this.
+    **   This prevents StalemateTicks from accumulating faster than 1/sec when the
+    **   primary house is defeated and secondary houses take over the call. --*/
+    if (Frame - StaleCheckFrame < TICKS_PER_SECOND) return;
+    StaleCheckFrame = Frame;
 
     /*-- Check whether every active house is economically dead --*/
     bool all_deadlocked = true;

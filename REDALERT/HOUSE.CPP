@@ -6299,8 +6299,10 @@ int HouseClass::AI_Unit(void)
 {
 	assert(Houses.ID(this) == ID);
 
-	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this) &&
-		this == BosoAIManagerClass::BosoHouse) {
+	/*-- Check_Stalemate is allowed from any BosoAI house so it still runs
+	**   after the primary house is eliminated in multi-house FFA mode.
+	**   An internal frame throttle ensures it only processes once per second. --*/
+	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this)) {
 		BosoAIManagerClass::Check_Stalemate();
 	}
 
