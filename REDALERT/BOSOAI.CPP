@@ -457,10 +457,13 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
     /*-- Save/score the actual steps recorded this session.
     **   skip_follow_idx: if the recorded steps exactly match that followed order,
     **   skip creating a duplicate — it was already scored above. --*/
+    /*-- Save_Steps: score a house's recorded session steps with the given per-house result.
+    **   'house_won' may differ from primary 'won' in multi-house FFA games. --*/
     auto Save_Steps = [&](const char * faction,
                           char (*steps)[BOSO_BUILD_STEP_LEN],
                           int step_count,
-                          int skip_follow_idx)
+                          int skip_follow_idx,
+                          bool house_won)
     {
         if (step_count < 3) return;
 
@@ -474,8 +477,8 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
                 if (stricmp(ord.Steps[s], steps[s]) != 0) { match = false; break; }
             }
             if (match) {
-                if (won) ord.WinScore += BOSO_BUILD_ORDER_WIN + GameTimeBonusScore;
-                else     ord.WinScore -= BOSO_BUILD_ORDER_LOSS;
+                if (house_won) ord.WinScore += BOSO_BUILD_ORDER_WIN + GameTimeBonusScore;
+                else           ord.WinScore -= BOSO_BUILD_ORDER_LOSS;
                 ord.GamesPlayed++;
                 strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
                 ord.LastGameSecs = CurrentGameSecs;
@@ -503,20 +506,23 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
             rec->Steps[s][BOSO_BUILD_STEP_LEN - 1] = '\0';
         }
         strncpy(rec->Faction, faction, BOSO_FACTION_LEN - 1);
-        rec->WinScore    = won ? (BOSO_BUILD_ORDER_WIN + GameTimeBonusScore) : -BOSO_BUILD_ORDER_LOSS;
+        rec->WinScore    = house_won ? (BOSO_BUILD_ORDER_WIN + GameTimeBonusScore) : -BOSO_BUILD_ORDER_LOSS;
         rec->GamesPlayed = 1;
         strncpy(rec->LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
         rec->LastGameSecs = CurrentGameSecs;
         rec->Active      = true;
     };
 
-    Save_Steps(CurrentFaction, SessionBuildSteps, SessionBuildStepCount, FollowBuildOrderIdx);
+    Save_Steps(CurrentFaction, SessionBuildSteps, SessionBuildStepCount, FollowBuildOrderIdx, won);
 
     for (int hi = 0; hi < 7; hi++) {
         int boso_idx = hi + 1;
         if (boso_idx >= BosoHouseCount) break;
         const char * hf = Get_Faction_Name(BosoHouses[boso_idx]);
-        Save_Steps(hf, ExtraHouseBuildSteps[hi], ExtraHouseBuildStepCount[hi], ExtraHouseFollowBuildOrderIdx[hi]);
+        HouseClass * hptr = BosoHouses[boso_idx];
+        bool extra_won = hptr && !hptr->IsDefeated;
+        Save_Steps(hf, ExtraHouseBuildSteps[hi], ExtraHouseBuildStepCount[hi],
+                   ExtraHouseFollowBuildOrderIdx[hi], extra_won);
     }
 }
 
@@ -748,7 +754,8 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
     auto Save_Combat_Steps = [&](const char * faction,
                                  char (*steps)[BOSO_COMBAT_STEP_LEN],
                                  int step_count,
-                                 int skip_follow_idx)
+                                 int skip_follow_idx,
+                                 bool house_won)
     {
         if (step_count < 3) return;
 
@@ -761,8 +768,8 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
                 if (stricmp(ord.Steps[s], steps[s]) != 0) { match = false; break; }
             }
             if (match) {
-                if (won) ord.WinScore += BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore;
-                else     ord.WinScore -= BOSO_COMBAT_ORDER_LOSS;
+                if (house_won) ord.WinScore += BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore;
+                else           ord.WinScore -= BOSO_COMBAT_ORDER_LOSS;
                 ord.GamesPlayed++;
                 strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
                 ord.LastGameSecs = CurrentGameSecs;
@@ -790,20 +797,23 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
             rec->Steps[s][BOSO_COMBAT_STEP_LEN - 1] = '\0';
         }
         strncpy(rec->Faction, faction, BOSO_FACTION_LEN - 1);
-        rec->WinScore    = won ? (BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore) : -BOSO_COMBAT_ORDER_LOSS;
+        rec->WinScore    = house_won ? (BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore) : -BOSO_COMBAT_ORDER_LOSS;
         rec->GamesPlayed = 1;
         strncpy(rec->LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
         rec->LastGameSecs = CurrentGameSecs;
         rec->Active      = true;
     };
 
-    Save_Combat_Steps(CurrentFaction, SessionCombatSteps, SessionCombatStepCount, FollowCombatOrderIdx);
+    Save_Combat_Steps(CurrentFaction, SessionCombatSteps, SessionCombatStepCount, FollowCombatOrderIdx, won);
 
     for (int hi = 0; hi < 7; hi++) {
         int boso_idx = hi + 1;
         if (boso_idx >= BosoHouseCount) break;
         const char * hf = Get_Faction_Name(BosoHouses[boso_idx]);
-        Save_Combat_Steps(hf, ExtraHouseCombatSteps[hi], ExtraHouseCombatStepCount[hi], ExtraHouseFollowCombatOrderIdx[hi]);
+        HouseClass * hptr = BosoHouses[boso_idx];
+        bool extra_won = hptr && !hptr->IsDefeated;
+        Save_Combat_Steps(hf, ExtraHouseCombatSteps[hi], ExtraHouseCombatStepCount[hi],
+                          ExtraHouseFollowCombatOrderIdx[hi], extra_won);
     }
 }
 

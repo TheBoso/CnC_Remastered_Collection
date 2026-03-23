@@ -3985,7 +3985,15 @@ void HouseClass::MPlayer_Defeated(void)
 	bool boso_game_over;
 	if (BosoAIManagerClass::IsBosoActive) {
 		if (BosoAIManagerClass::IsMultiHouseAI) {
-			boso_game_over = (num_alive == 1);
+			/*-- In FFA multi-house mode, end the game whenever the PRIMARY house
+			**   (PlayerPtr) is eliminated, OR when only one house remains.
+			**   Reason: the GlyphX engine stops advancing when it sees PlayerPtr
+			**   is defeated, so waiting for num_alive==1 only works if the primary
+			**   house is the last one standing. Ending early on primary defeat gives
+			**   clean per-elimination training data: eliminated house scores a loss,
+			**   all surviving houses score a win. With N players this yields N-1
+			**   results per full match cycle rather than just 1. --*/
+			boso_game_over = (num_alive == 1) || (this == PlayerPtr);
 		} else {
 			bool boso_house_just_died = BosoAIManagerClass::Is_Boso_House(this);
 			boso_game_over = boso_house_just_died || (num_alive == 1);
