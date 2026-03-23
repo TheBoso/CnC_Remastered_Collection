@@ -1752,6 +1752,14 @@ HouseClass * BosoAIManagerClass::Get_Next_Active_House(void)
     return NULL;
 }
 
+bool BosoAIManagerClass::Any_Boso_House_Alive(void)
+{
+    for (int i = 0; i < BosoHouseCount; i++) {
+        if (BosoHouses[i] && !BosoHouses[i]->IsDefeated) return true;
+    }
+    return false;
+}
+
 /*===========================================================================
 ** Anti-air tracking
 ===========================================================================*/

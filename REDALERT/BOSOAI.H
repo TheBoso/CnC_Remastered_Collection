@@ -285,6 +285,10 @@ public:
     **   or NULL if none. Called from DLLInterface.cpp after Set_Player_Context. --*/
     static HouseClass * Get_Next_Active_House(void);
 
+    /*-- Returns true if at least one BosoAI house is still alive (not defeated).
+    **   Used to determine the winner in FFA multi-house mode. --*/
+    static bool Any_Boso_House_Alive(void);
+
     /*-- Anti-air threat tracking (called from TECHNO.CPP Record_The_Kill) --*/
     static void On_Unit_Killed_By_Aircraft(void);
     static int  AircraftLossCount;

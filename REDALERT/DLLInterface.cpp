@@ -1888,12 +1888,11 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 				/*-- In FFA multi-house mode PlayerPtr is redirected to the surviving house,
 				**   so use PlayerPtr to determine the winner rather than BosoHouse (index 0)
 				**   which is often eliminated before the game ends. --*/
-				bool boso_won;
-				if (BosoAIManagerClass::IsMultiHouseAI) {
-					boso_won = PlayerPtr && !PlayerPtr->IsDefeated;
-				} else {
-					boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
-				}
+				/*-- In FFA multi-house mode, check if any BosoAI house survived.
+				**   PlayerPtr is unreliable here ÔÇö it may be the just-defeated house. --*/
+				bool boso_won = BosoAIManagerClass::IsMultiHouseAI
+					? BosoAIManagerClass::Any_Boso_House_Alive()
+					: (BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated);
 				BosoAIManagerClass::On_Game_Over(boso_won);
 				PlayerRestarts = true;
 				GlyphX_Debug_Print("BosoAI: queued auto-restart");
@@ -1926,12 +1925,11 @@ extern "C" __declspec(dllexport) bool __cdecl CNC_Advance_Instance(uint64 player
 				/*-- In FFA multi-house mode PlayerPtr is redirected to the surviving house,
 				**   so use PlayerPtr to determine the winner rather than BosoHouse (index 0)
 				**   which is often eliminated before the game ends. --*/
-				bool boso_won;
-				if (BosoAIManagerClass::IsMultiHouseAI) {
-					boso_won = PlayerPtr && !PlayerPtr->IsDefeated;
-				} else {
-					boso_won = BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated;
-				}
+				/*-- In FFA multi-house mode, check if any BosoAI house survived.
+				**   PlayerPtr is unreliable here ÔÇö it may be the just-defeated house. --*/
+				bool boso_won = BosoAIManagerClass::IsMultiHouseAI
+					? BosoAIManagerClass::Any_Boso_House_Alive()
+					: (BosoAIManagerClass::BosoHouse && !BosoAIManagerClass::BosoHouse->IsDefeated);
 				BosoAIManagerClass::On_Game_Over(boso_won);
 				PlayerRestarts = true;
 				GlyphX_Debug_Print("BosoAI: queued auto-restart");
@@ -3014,12 +3012,9 @@ void DLLExportClass::On_Multiplayer_Game_Over(void)
 	** GameOverFired prevents double-calling if HOUSE.CPP also fired it.
 	*/
 	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::BosoHouse != NULL) {
-		bool boso_won;
-		if (BosoAIManagerClass::IsMultiHouseAI) {
-			boso_won = PlayerPtr && !PlayerPtr->IsDefeated;
-		} else {
-			boso_won = !BosoAIManagerClass::BosoHouse->IsDefeated;
-		}
+		bool boso_won = BosoAIManagerClass::IsMultiHouseAI
+			? BosoAIManagerClass::Any_Boso_House_Alive()
+			: !BosoAIManagerClass::BosoHouse->IsDefeated;
 		BosoAIManagerClass::On_Game_Over(boso_won);
 	}
 
