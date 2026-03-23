@@ -224,6 +224,7 @@
     <div class="tab active" data-tab="limits">Limits Records</div>
     <div class="tab" data-tab="build">Build Orders</div>
     <div class="tab" data-tab="combat">Combat Orders</div>
+    <div class="tab" data-tab="history">Game History</div>
   </div>
 
   <div class="tab-content active" id="tab-limits">
@@ -279,6 +280,31 @@
       </select>
     </div>
     <div class="cards" id="combat-cards"></div>
+  </div>
+
+  <div class="tab-content" id="tab-history">
+    <div class="controls">
+      <label>Faction:</label>
+      <select id="filter-history-faction"><option value="">All</option></select>
+      <label>Outcome:</label>
+      <select id="filter-history-outcome">
+        <option value="">All</option>
+        <option value="W">Win</option>
+        <option value="L">Loss</option>
+        <option value="S">Stalemate</option>
+      </select>
+      <label>Sort:</label>
+      <select id="sort-history">
+        <option value="idx" selected>Newest first</option>
+        <option value="GameSecs">Game Length</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table id="history-table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 </main>
 
@@ -336,6 +362,8 @@ function extractLimits(sec) {
       AttackSecs:  int(sec[p + 'AttackSecs']),
       BaseSizeAdd: int(sec[p + 'BaseSizeAdd']),
       BaseSpacing: int(sec[p + 'BaseSpacing']),
+      LastGameUID: sec[p + 'LastUID']  || '',
+      LastGameSecs: int(sec[p + 'LastSecs']),
     };
     r.norm = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
     records.push(r);
@@ -354,9 +382,11 @@ function extractOrders(sec, prefix, stepKey) {
     for (let s = 0; s < stepCount; s++) steps.push(sec[p + `Step_${s}`] || '?');
     const r = {
       idx: i,
-      Faction:     sec[p + 'Faction'] || '?',
-      WinScore:    int(sec[p + 'Score']),
-      GamesPlayed: int(sec[p + 'Games'], 0),
+      Faction:      sec[p + 'Faction'] || '?',
+      WinScore:     int(sec[p + 'Score']),
+      GamesPlayed:  int(sec[p + 'Games'], 0),
+      LastGameUID:  sec[p + 'LastUID']  || '',
+      LastGameSecs: int(sec[p + 'LastSecs']),
       steps,
     };
     r.norm = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
@@ -365,8 +395,26 @@ function extractOrders(sec, prefix, stepKey) {
   return records;
 }
 
+function extractGameHistory(sec) {
+  if (!sec) return [];
+  const count = int(sec['Count']);
+  const records = [];
+  for (let i = 0; i < count; i++) {
+    const p = `Game_${i}_`;
+    records.push({
+      idx: i,
+      UID:      sec[p + 'UID']     || '',
+      GameSecs: int(sec[p + 'Secs']),
+      Outcome:  sec[p + 'Outcome'] || '?',
+      Faction:  sec[p + 'Faction'] || '?',
+      Map:      sec[p + 'Map']     || '?',
+    });
+  }
+  return records;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
-let state = { limits: [], build: [], combat: [] };
+let state = { limits: [], build: [], combat: [], history: [] };
 
 // ── Render helpers ────────────────────────────────────────────────────────────
 const SOVIET_FACTIONS = ['ussr','ukraine','bad'];
@@ -506,6 +554,19 @@ const NAMES = {
 };
 function friendly(code) { return NAMES[code] ? `${code} <span style="color:var(--muted)">${NAMES[code]}</span>` : code; }
 
+function fmtSecs(s) {
+  if (!s) return '—';
+  const m = Math.floor(s / 60), sec = s % 60;
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+function outcomeBadge(o) {
+  if (o === 'W') return `<span class="pill" style="background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3)">Win</span>`;
+  if (o === 'L') return `<span class="pill" style="background:rgba(248,81,73,.15);color:var(--red);border:1px solid rgba(248,81,73,.3)">Loss</span>`;
+  if (o === 'S') return `<span class="pill" style="background:rgba(210,153,34,.15);color:var(--yellow);border:1px solid rgba(210,153,34,.3)">Stalemate</span>`;
+  return `<span class="pill pill-other">${o}</span>`;
+}
+
 function renderOrderCards(records, containerId, sortSel, factionSel) {
   const faction = document.getElementById(factionSel).value;
   const sortBy  = document.getElementById(sortSel).value;
@@ -521,6 +582,13 @@ function renderOrderCards(records, containerId, sortSel, factionSel) {
     const seqHtml = r.steps.map((s, idx) =>
       `<span class="seq-item"><span class="seq-num">${idx + 1}</span><span style="font-family:monospace">${friendly(s)}</span></span>`
     ).join('');
+    // Look up last game outcome from history
+    let lastGameHtml = '';
+    if (r.LastGameUID) {
+      const hEntry = state.history.find(h => h.UID === r.LastGameUID);
+      const outcome = hEntry ? outcomeBadge(hEntry.Outcome) : '';
+      lastGameHtml = `<span style="color:var(--muted);font-size:11px">Last game: <code style="font-size:11px">${r.LastGameUID}</code> ${outcome} ${fmtSecs(r.LastGameSecs)}</span>`;
+    }
     return `<div class="card">
       <div class="card-header">
         <div>
@@ -533,9 +601,63 @@ function renderOrderCards(records, containerId, sortSel, factionSel) {
         <span class="card-score ${scoreColor(r.norm)}">${scoreStr}</span>
         <span style="color:var(--muted);font-size:11px">${r.GamesPlayed} game${r.GamesPlayed !== 1 ? 's' : ''} · ${r.steps.length} steps</span>
       </div>
+      ${lastGameHtml ? `<div>${lastGameHtml}</div>` : ''}
       <div class="sequence">${seqHtml}</div>
     </div>`;
   }).join('') : `<div class="empty" style="width:100%">No records</div>`;
+}
+
+// ── Game History table ─────────────────────────────────────────────────────────
+function renderGameHistory() {
+  const faction = document.getElementById('filter-history-faction').value;
+  const outcome = document.getElementById('filter-history-outcome').value;
+  const sortBy  = document.getElementById('sort-history').value;
+
+  let rows = state.history.filter(r =>
+    (!faction || r.Faction === faction) &&
+    (!outcome || r.Outcome === outcome)
+  );
+
+  // Default: newest first (highest idx)
+  if (sortBy === 'GameSecs') {
+    rows.sort((a, b) => b.GameSecs - a.GameSecs);
+  } else {
+    rows = rows.slice().reverse(); // newest last in array → reverse for newest first
+  }
+
+  const thead = document.querySelector('#history-table thead');
+  const tbody = document.querySelector('#history-table tbody');
+
+  thead.innerHTML = `<tr>
+    <th>#</th><th>UID</th><th>Outcome</th><th>Faction</th><th>Map</th><th>Length</th>
+    <th>Build Order Used</th><th>Combat Order Used</th>
+  </tr>`;
+
+  tbody.innerHTML = rows.length ? rows.map((r, i) => {
+    // Cross-reference: find build/combat records that share this UID
+    const matchBuild  = state.build.filter(b => b.LastGameUID === r.UID);
+    const matchCombat = state.combat.filter(c => c.LastGameUID === r.UID);
+
+    function orderSummary(recs) {
+      if (!recs.length) return '<span style="color:var(--muted)">—</span>';
+      return recs.map(b => {
+        const sign = b.WinScore >= 0 ? '+' : '';
+        const preview = b.steps.slice(0, 4).map(s => `<code style="font-size:11px">${s}</code>`).join(' → ');
+        return `<span style="font-size:12px">${preview}${b.steps.length > 4 ? '…' : ''} <span class="${scoreColor(b.WinScore)}">(${sign}${b.WinScore})</span></span>`;
+      }).join('<br>');
+    }
+
+    return `<tr>
+      <td style="color:var(--muted)">${i + 1}</td>
+      <td><code style="font-size:11px">${r.UID}</code></td>
+      <td>${outcomeBadge(r.Outcome)}</td>
+      <td>${factionPill(r.Faction)}</td>
+      <td style="font-size:12px;color:var(--muted)">${r.Map}</td>
+      <td>${fmtSecs(r.GameSecs)}</td>
+      <td>${orderSummary(matchBuild)}</td>
+      <td>${orderSummary(matchCombat)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="8" class="empty">No game history recorded yet</td></tr>`;
 }
 
 // ── Stats bar ─────────────────────────────────────────────────────────────────
@@ -557,13 +679,21 @@ function renderStats() {
     </div>`;
   }
 
+  const wins      = state.history.filter(h => h.Outcome === 'W').length;
+  const losses    = state.history.filter(h => h.Outcome === 'L').length;
+  const stalemates= state.history.filter(h => h.Outcome === 'S').length;
+  const avgSecs   = state.history.length
+    ? Math.round(state.history.reduce((s, h) => s + h.GameSecs, 0) / state.history.length) : 0;
+
   document.getElementById('stats-bar').innerHTML = `
+    <div class="stat"><span class="stat-val">${state.history.length}</span><span class="stat-lbl">Total Games</span></div>
+    <div class="stat"><span class="stat-val pos">${wins}</span><span class="stat-lbl">Wins</span></div>
+    <div class="stat"><span class="stat-val neg">${losses}</span><span class="stat-lbl">Losses</span></div>
+    <div class="stat"><span class="stat-val neu">${stalemates}</span><span class="stat-lbl">Stalemates</span></div>
+    <div class="stat"><span class="stat-val">${fmtSecs(avgSecs)}</span><span class="stat-lbl">Avg Game Length</span></div>
     <div class="stat"><span class="stat-val">${state.limits.length}</span><span class="stat-lbl">Limit Records</span></div>
     <div class="stat"><span class="stat-val">${state.build.length}</span><span class="stat-lbl">Build Orders</span></div>
     <div class="stat"><span class="stat-val">${state.combat.length}</span><span class="stat-lbl">Combat Orders</span></div>
-    <div class="stat"><span class="stat-val">${limGames}</span><span class="stat-lbl">Limit Games</span></div>
-    <div class="stat"><span class="stat-val">${buildGames}</span><span class="stat-lbl">Build Games</span></div>
-    <div class="stat"><span class="stat-val">${combatGames}</span><span class="stat-lbl">Combat Games</span></div>
     <div class="stat"><span class="stat-val">${factions.join(', ') || '—'}</span><span class="stat-lbl">Factions</span></div>
     ${bestStat(bestLimit,  'Best Limits')}
     ${bestStat(bestBuild,  'Best Build')}
@@ -577,6 +707,8 @@ function populateFactionSelects() {
   const buildFactions  = [...new Set(state.build.map(r => r.Faction))].sort();
   const combatFactions = [...new Set(state.combat.map(r => r.Faction))].sort();
 
+  const histFactions = [...new Set(state.history.map(r => r.Faction))].sort();
+
   function setOpts(id, factions) {
     const el = document.getElementById(id);
     const cur = el.value;
@@ -586,6 +718,7 @@ function populateFactionSelects() {
   setOpts('filter-faction', limitFactions);
   setOpts('filter-build-faction', buildFactions);
   setOpts('filter-combat-faction', combatFactions);
+  setOpts('filter-history-faction', histFactions);
 }
 
 // ── Main render ───────────────────────────────────────────────────────────────
@@ -595,13 +728,15 @@ function renderAll() {
   renderLimits();
   renderOrderCards(state.build,   'build-cards',  'sort-build',  'filter-build-faction');
   renderOrderCards(state.combat,  'combat-cards', 'sort-combat', 'filter-combat-faction');
+  renderGameHistory();
 }
 
 function loadData(text, filename) {
   const ini = parseINI(text);
-  state.limits = extractLimits(ini['BosoLimits']);
+  state.limits  = extractLimits(ini['BosoLimits']);
   state.build   = extractOrders(ini['BosoBuildOrders'],  'Order_',  'Step');
   state.combat  = extractOrders(ini['BosoCombatOrders'], 'COrder_', 'Step');
+  state.history = extractGameHistory(ini['BosoGameHistory']);
 
   document.getElementById('landing').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
@@ -761,6 +896,8 @@ document.querySelectorAll('.tab').forEach(tab => {
 ['filter-combat-faction','sort-combat'].forEach(id =>
   document.getElementById(id).addEventListener('change', () =>
     renderOrderCards(state.combat, 'combat-cards', 'sort-combat', 'filter-combat-faction')));
+['filter-history-faction','filter-history-outcome','sort-history'].forEach(id =>
+  document.getElementById(id).addEventListener('change', renderGameHistory));
 </script>
 </body>
 </html>

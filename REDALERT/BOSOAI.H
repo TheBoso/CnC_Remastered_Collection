@@ -32,6 +32,12 @@ enum StructType : char; // underlying type matches DEFINES.H typedef
 ---------------------------------------------------------------------------*/
 #define BOSO_MAP_LEN            32
 #define BOSO_FACTION_LEN        16
+#define BOSO_UID_LEN            13   // 12 hex chars + null terminator
+
+/*---------------------------------------------------------------------------
+** Game history log
+---------------------------------------------------------------------------*/
+#define BOSO_MAX_GAME_HISTORY   128  // Max game entries stored in [BosoGameHistory]
 
 /*---------------------------------------------------------------------------
 ** INI file names
@@ -190,7 +196,21 @@ struct BosoLimitsRecord {
     char Faction[BOSO_FACTION_LEN];
     int  WinScore;
     int  GamesPlayed;
+    char LastGameUID[BOSO_UID_LEN]; // UID of the most recent game this record was scored in
+    int  LastGameSecs;              // length of the most recent scored game (seconds)
     bool Active;
+};
+
+/*---------------------------------------------------------------------------
+** BosoGameHistoryEntry - one entry per completed game.
+** Stored in [BosoGameHistory] section of BOSOAI.INI.
+---------------------------------------------------------------------------*/
+struct BosoGameHistoryEntry {
+    char UID[BOSO_UID_LEN];       // Unique game identifier (12 hex chars)
+    int  GameSecs;                 // Game length in seconds
+    char Outcome[4];               // "W" = win, "L" = loss, "S" = stalemate
+    char Faction[BOSO_FACTION_LEN];
+    char Map[BOSO_MAP_LEN];
 };
 
 /*---------------------------------------------------------------------------
@@ -204,6 +224,8 @@ struct BosoBuildOrderRecord {
     char Faction[BOSO_FACTION_LEN];
     int  WinScore;      // positive = net wins, negative = net losses
     int  GamesPlayed;   // total games this order has been scored (for normalisation)
+    char LastGameUID[BOSO_UID_LEN]; // UID of the most recent game this order was scored in
+    int  LastGameSecs;              // length of the most recent scored game (seconds)
     bool Active;
 };
 
@@ -219,6 +241,8 @@ struct BosoCombatOrderRecord {
     char Faction[BOSO_FACTION_LEN];
     int  WinScore;
     int  GamesPlayed;   // total games this order has been scored (for normalisation)
+    char LastGameUID[BOSO_UID_LEN]; // UID of the most recent game this order was scored in
+    int  LastGameSecs;              // length of the most recent scored game (seconds)
     bool Active;
 };
 
@@ -330,8 +354,20 @@ private:
     static int  GameTimeBonusScore; // Computed at game-over; added to winner scores
     static int  StalemateTicks;     // Consecutive seconds all houses have been deadlocked
 
+    /*-- Current game UID and length (set at game start / game over) --*/
+    static char CurrentGameUID[BOSO_UID_LEN];
+    static int  CurrentGameSecs;
+
+    /*-- Game history log --*/
+    static BosoGameHistoryEntry GameHistory[BOSO_MAX_GAME_HISTORY];
+    static int                  GameHistoryCount;
+
     /*-- Internal: context detection --*/
     static void Detect_Context(HouseClass * house);
+
+    /*-- Internal: game history --*/
+    static void Record_Game_History(const char * uid, int secs, const char * outcome,
+                                     const char * faction, const char * map);
 
     /*-- Internal: limits evolution --*/
     static void Score_Session_Limits(int slot, bool won);

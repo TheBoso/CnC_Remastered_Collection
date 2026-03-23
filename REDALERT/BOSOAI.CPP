@@ -18,15 +18,45 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 extern int FastForwardMultiplier;
 
-/*-- Forward declaration --*/
+/*-- Forward declarations --*/
 static bool Water_Near_House_Base(HouseClass * house, int radius);
+
+void BosoAIManagerClass::Record_Game_History(const char * uid, int secs, const char * outcome,
+                                              const char * faction, const char * map)
+{
+    int idx;
+    if (GameHistoryCount < BOSO_MAX_GAME_HISTORY) {
+        idx = GameHistoryCount++;
+    } else {
+        /*-- Ring-buffer: evict the oldest entry (index 0), shift down --*/
+        memmove(&GameHistory[0], &GameHistory[1],
+                sizeof(BosoGameHistoryEntry) * (BOSO_MAX_GAME_HISTORY - 1));
+        idx = BOSO_MAX_GAME_HISTORY - 1;
+    }
+    BosoGameHistoryEntry & e = GameHistory[idx];
+    memset(&e, 0, sizeof(e));
+    strncpy(e.UID,     uid,     BOSO_UID_LEN - 1);
+    strncpy(e.Outcome, outcome, sizeof(e.Outcome) - 1);
+    strncpy(e.Faction, faction, BOSO_FACTION_LEN - 1);
+    strncpy(e.Map,     map,     BOSO_MAP_LEN - 1);
+    e.GameSecs = secs;
+}
 
 /*===========================================================================
 ** Static member definitions
 ===========================================================================*/
+
+/*-- Current game UID and length --*/
+char BosoAIManagerClass::CurrentGameUID[BOSO_UID_LEN]               = {0};
+int  BosoAIManagerClass::CurrentGameSecs                             = 0;
+
+/*-- Game history log --*/
+BosoGameHistoryEntry BosoAIManagerClass::GameHistory[BOSO_MAX_GAME_HISTORY];
+int                  BosoAIManagerClass::GameHistoryCount            = 0;
 
 bool        BosoAIManagerClass::IsBosoActive        = false;
 bool        BosoAIManagerClass::IsSpectatorMode      = false;
@@ -402,6 +432,8 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
         if (won) ord.WinScore += BOSO_BUILD_ORDER_WIN + GameTimeBonusScore;
         else     ord.WinScore -= BOSO_BUILD_ORDER_LOSS;
         ord.GamesPlayed++;
+        strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+        ord.LastGameSecs = CurrentGameSecs;
     }
 
     /*-- Score the followed order for each extra house --*/
@@ -416,6 +448,8 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
             if (house_won) ord.WinScore += BOSO_BUILD_ORDER_WIN + GameTimeBonusScore;
             else           ord.WinScore -= BOSO_BUILD_ORDER_LOSS;
             ord.GamesPlayed++;
+            strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+            ord.LastGameSecs = CurrentGameSecs;
         }
     }
 
@@ -442,6 +476,8 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
                 if (won) ord.WinScore += BOSO_BUILD_ORDER_WIN + GameTimeBonusScore;
                 else     ord.WinScore -= BOSO_BUILD_ORDER_LOSS;
                 ord.GamesPlayed++;
+                strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+                ord.LastGameSecs = CurrentGameSecs;
                 return;
             }
         }
@@ -468,6 +504,8 @@ void BosoAIManagerClass::Score_Session_Build_Order(bool won)
         strncpy(rec->Faction, faction, BOSO_FACTION_LEN - 1);
         rec->WinScore    = won ? (BOSO_BUILD_ORDER_WIN + GameTimeBonusScore) : -BOSO_BUILD_ORDER_LOSS;
         rec->GamesPlayed = 1;
+        strncpy(rec->LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+        rec->LastGameSecs = CurrentGameSecs;
         rec->Active      = true;
     };
 
@@ -685,6 +723,8 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
         if (won) ord.WinScore += BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore;
         else     ord.WinScore -= BOSO_COMBAT_ORDER_LOSS;
         ord.GamesPlayed++;
+        strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+        ord.LastGameSecs = CurrentGameSecs;
     }
 
     /*-- Score the followed order for each extra house --*/
@@ -699,6 +739,8 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
             if (house_won) ord.WinScore += BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore;
             else           ord.WinScore -= BOSO_COMBAT_ORDER_LOSS;
             ord.GamesPlayed++;
+            strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+            ord.LastGameSecs = CurrentGameSecs;
         }
     }
 
@@ -721,6 +763,8 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
                 if (won) ord.WinScore += BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore;
                 else     ord.WinScore -= BOSO_COMBAT_ORDER_LOSS;
                 ord.GamesPlayed++;
+                strncpy(ord.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+                ord.LastGameSecs = CurrentGameSecs;
                 return;
             }
         }
@@ -747,6 +791,8 @@ void BosoAIManagerClass::Score_Session_Combat_Order(bool won)
         strncpy(rec->Faction, faction, BOSO_FACTION_LEN - 1);
         rec->WinScore    = won ? (BOSO_COMBAT_ORDER_WIN + GameTimeBonusScore) : -BOSO_COMBAT_ORDER_LOSS;
         rec->GamesPlayed = 1;
+        strncpy(rec->LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+        rec->LastGameSecs = CurrentGameSecs;
         rec->Active      = true;
     };
 
@@ -924,6 +970,8 @@ void BosoAIManagerClass::Score_Session_Limits(int slot, bool won)
         if (won) r.WinScore += BOSO_LIMITS_WIN + GameTimeBonusScore;
         else     r.WinScore -= BOSO_LIMITS_LOSS;
         r.GamesPlayed++;
+        strncpy(r.LastGameUID, CurrentGameUID, BOSO_UID_LEN - 1);
+        r.LastGameSecs = CurrentGameSecs;
     }
 }
 
@@ -966,6 +1014,8 @@ void BosoAIManagerClass::Init(void)
     BosoSpectatorActive = false;
     GameStartFrame      = 0;
     GameTimeBonusScore  = 0;
+    CurrentGameSecs     = 0;
+    CurrentGameUID[0]   = '\0';
     GameOverFired       = false;
     StalemateTicks      = 0;
     AircraftLossCount   = 0;
@@ -1058,7 +1108,15 @@ void BosoAIManagerClass::On_Scenario_Load(void)
     GameOverFired          = false;
     GameStartFrame         = Frame;
     GameTimeBonusScore     = 0;
+    CurrentGameSecs        = 0;
     AircraftLossCount      = 0;
+
+    /*-- Generate a unique game UID: lower 32 bits of time XOR'd with tick counter --*/
+    {
+        unsigned int t  = (unsigned int)time(NULL);
+        unsigned int tc = (unsigned int)GetTickCount();
+        sprintf(CurrentGameUID, "%08X%04X", t, (tc >> 4) & 0xFFFF);
+    }
     SessionBuildStepCount  = 0;
     FollowBuildOrderIdx    = -1;
     FollowBuildStepIdx     = 0;
@@ -1217,25 +1275,28 @@ void BosoAIManagerClass::On_Game_Over(bool player_won)
 
     GlyphX_Debug_Print(player_won ? "BosoAI: game won" : "BosoAI: game lost");
 
-    /*-- Compute time bonus: faster wins earn extra score.
-    **   Linear decay from BOSO_TIME_BONUS_MAX (at MIN_SECS) down to 0 (at CAP_SECS).
-    **   Applied only to winner records; losers are unaffected. --*/
+    /*-- Compute elapsed time and time bonus --*/
     {
         long elapsed_ticks = Frame - GameStartFrame;
-        int  elapsed_secs  = (int)(elapsed_ticks / TICKS_PER_SECOND);
-        if (elapsed_secs <= BOSO_TIME_BONUS_MIN_SECS) {
+        CurrentGameSecs    = (int)(elapsed_ticks / TICKS_PER_SECOND);
+
+        if (CurrentGameSecs <= BOSO_TIME_BONUS_MIN_SECS) {
             GameTimeBonusScore = BOSO_TIME_BONUS_MAX;
-        } else if (elapsed_secs >= BOSO_TIME_BONUS_CAP_SECS) {
+        } else if (CurrentGameSecs >= BOSO_TIME_BONUS_CAP_SECS) {
             GameTimeBonusScore = 0;
         } else {
-            float fraction = (float)(BOSO_TIME_BONUS_CAP_SECS - elapsed_secs)
+            float fraction = (float)(BOSO_TIME_BONUS_CAP_SECS - CurrentGameSecs)
                            / (float)(BOSO_TIME_BONUS_CAP_SECS - BOSO_TIME_BONUS_MIN_SECS);
             GameTimeBonusScore = (int)(BOSO_TIME_BONUS_MAX * fraction);
         }
         char _tdbg[96];
-        sprintf(_tdbg, "BosoAI: elapsed %ds, time bonus = %d", elapsed_secs, GameTimeBonusScore);
+        sprintf(_tdbg, "BosoAI: elapsed %ds, time bonus = %d", CurrentGameSecs, GameTimeBonusScore);
         GlyphX_Debug_Print(_tdbg);
     }
+
+    Record_Game_History(CurrentGameUID, CurrentGameSecs,
+                        player_won ? "W" : "L",
+                        CurrentFaction, CurrentMap);
 
     Score_Session_Build_Order(player_won);
     Score_Session_Combat_Order(player_won);
@@ -1542,6 +1603,9 @@ void BosoAIManagerClass::Check_Stalemate(void)
     GameOverFired      = true;
     GameTimeBonusScore = 0;     // no time bonus for a deadlock
 
+    CurrentGameSecs = (int)((Frame - GameStartFrame) / TICKS_PER_SECOND);
+    Record_Game_History(CurrentGameUID, CurrentGameSecs, "S", CurrentFaction, CurrentMap);
+
     Score_Session_Build_Order(false);
     Score_Session_Combat_Order(false);
     for (int i = 0; i < BosoHouseCount; i++) {
@@ -1756,6 +1820,13 @@ void BosoAIManagerClass::Load_Data(void)
         sprintf(key, "Order_%d_Games", i);
         int games = ini.Get_Int("BosoBuildOrders", key, 1);
 
+        char last_uid[BOSO_UID_LEN] = {0};
+        sprintf(key, "Order_%d_LastUID", i);
+        ini.Get_String("BosoBuildOrders", key, "", last_uid, sizeof(last_uid));
+
+        sprintf(key, "Order_%d_LastSecs", i);
+        int last_secs = ini.Get_Int("BosoBuildOrders", key, 0);
+
         sprintf(key, "Order_%d_Steps", i);
         int steps = ini.Get_Int("BosoBuildOrders", key, 0);
         if (steps <= 0 || steps > BOSO_MAX_BUILD_STEPS) continue;
@@ -1765,6 +1836,8 @@ void BosoAIManagerClass::Load_Data(void)
         strncpy(ord.Faction, faction, BOSO_FACTION_LEN - 1);
         ord.WinScore    = score;
         ord.GamesPlayed = games > 0 ? games : 1;
+        strncpy(ord.LastGameUID, last_uid, BOSO_UID_LEN - 1);
+        ord.LastGameSecs = last_secs;
         ord.StepCount   = steps;
         ord.Active      = true;
 
@@ -1795,6 +1868,13 @@ void BosoAIManagerClass::Load_Data(void)
         sprintf(key, "COrder_%d_Games", i);
         int games = ini.Get_Int("BosoCombatOrders", key, 1);
 
+        char last_uid[BOSO_UID_LEN] = {0};
+        sprintf(key, "COrder_%d_LastUID", i);
+        ini.Get_String("BosoCombatOrders", key, "", last_uid, sizeof(last_uid));
+
+        sprintf(key, "COrder_%d_LastSecs", i);
+        int last_secs = ini.Get_Int("BosoCombatOrders", key, 0);
+
         sprintf(key, "COrder_%d_Steps", i);
         int steps = ini.Get_Int("BosoCombatOrders", key, 0);
         if (steps <= 0 || steps > BOSO_MAX_COMBAT_STEPS) continue;
@@ -1804,6 +1884,8 @@ void BosoAIManagerClass::Load_Data(void)
         strncpy(ord.Faction, faction, BOSO_FACTION_LEN - 1);
         ord.WinScore    = score;
         ord.GamesPlayed = games > 0 ? games : 1;
+        strncpy(ord.LastGameUID, last_uid, BOSO_UID_LEN - 1);
+        ord.LastGameSecs = last_secs;
         ord.StepCount   = steps;
         ord.Active      = true;
 
@@ -1856,8 +1938,40 @@ void BosoAIManagerClass::Load_Data(void)
         LGET(GamesPlayed, "Games",      0);
 #undef LGET
 
+        {
+            char luid[BOSO_UID_LEN] = {0};
+            char lkey[64];
+            sprintf(lkey, "Limits_%d_LastUID", i);
+            ini.Get_String("BosoLimits", lkey, "", luid, sizeof(luid));
+            strncpy(r.LastGameUID, luid, BOSO_UID_LEN - 1);
+
+            sprintf(lkey, "Limits_%d_LastSecs", i);
+            r.LastGameSecs = ini.Get_Int("BosoLimits", lkey, 0);
+        }
+
         r.Active = true;
         LimitsCount++;
+    }
+
+    /*-- Game history --*/
+    GameHistoryCount = 0;
+    memset(GameHistory, 0, sizeof(GameHistory));
+    int ghcount = ini.Get_Int("BosoGameHistory", "Count", 0);
+    for (int i = 0; i < ghcount && GameHistoryCount < BOSO_MAX_GAME_HISTORY; i++) {
+        char key[64];
+        char uid[BOSO_UID_LEN] = {0};
+        sprintf(key, "Game_%d_UID", i);
+        ini.Get_String("BosoGameHistory", key, "", uid, sizeof(uid));
+        if (uid[0] == '\0') continue;
+
+        BosoGameHistoryEntry & e = GameHistory[GameHistoryCount++];
+        memset(&e, 0, sizeof(e));
+        strncpy(e.UID, uid, BOSO_UID_LEN - 1);
+
+        sprintf(key, "Game_%d_Secs",    i); e.GameSecs = ini.Get_Int("BosoGameHistory", key, 0);
+        sprintf(key, "Game_%d_Outcome", i); ini.Get_String("BosoGameHistory", key, "?", e.Outcome, sizeof(e.Outcome));
+        sprintf(key, "Game_%d_Faction", i); ini.Get_String("BosoGameHistory", key, "", e.Faction, BOSO_FACTION_LEN);
+        sprintf(key, "Game_%d_Map",     i); ini.Get_String("BosoGameHistory", key, "", e.Map, BOSO_MAP_LEN);
     }
 
     GlyphX_Debug_Print("BosoAI: data loaded");
@@ -1886,10 +2000,14 @@ void BosoAIManagerClass::Save_Data(void)
     for (int i = 0; i < BuildOrderCount; i++) {
         BosoBuildOrderRecord & ord = BuildOrders[i];
         if (!ord.Active) continue;
-        fprintf(fp, "Order_%d_Faction=%s\n", idx, ord.Faction);
-        fprintf(fp, "Order_%d_Score=%d\n",   idx, ord.WinScore);
-        fprintf(fp, "Order_%d_Games=%d\n",   idx, ord.GamesPlayed);
-        fprintf(fp, "Order_%d_Steps=%d\n",   idx, ord.StepCount);
+        fprintf(fp, "Order_%d_Faction=%s\n",  idx, ord.Faction);
+        fprintf(fp, "Order_%d_Score=%d\n",    idx, ord.WinScore);
+        fprintf(fp, "Order_%d_Games=%d\n",    idx, ord.GamesPlayed);
+        if (ord.LastGameUID[0]) {
+            fprintf(fp, "Order_%d_LastUID=%s\n",  idx, ord.LastGameUID);
+            fprintf(fp, "Order_%d_LastSecs=%d\n", idx, ord.LastGameSecs);
+        }
+        fprintf(fp, "Order_%d_Steps=%d\n",    idx, ord.StepCount);
         for (int s = 0; s < ord.StepCount; s++) {
             fprintf(fp, "Order_%d_Step_%d=%s\n", idx, s, ord.Steps[s]);
         }
@@ -1905,10 +2023,14 @@ void BosoAIManagerClass::Save_Data(void)
     for (int i = 0; i < CombatOrderCount; i++) {
         BosoCombatOrderRecord & ord = CombatOrders[i];
         if (!ord.Active) continue;
-        fprintf(fp, "COrder_%d_Faction=%s\n", idx, ord.Faction);
-        fprintf(fp, "COrder_%d_Score=%d\n",   idx, ord.WinScore);
-        fprintf(fp, "COrder_%d_Games=%d\n",   idx, ord.GamesPlayed);
-        fprintf(fp, "COrder_%d_Steps=%d\n",   idx, ord.StepCount);
+        fprintf(fp, "COrder_%d_Faction=%s\n",  idx, ord.Faction);
+        fprintf(fp, "COrder_%d_Score=%d\n",    idx, ord.WinScore);
+        fprintf(fp, "COrder_%d_Games=%d\n",    idx, ord.GamesPlayed);
+        if (ord.LastGameUID[0]) {
+            fprintf(fp, "COrder_%d_LastUID=%s\n",  idx, ord.LastGameUID);
+            fprintf(fp, "COrder_%d_LastSecs=%d\n", idx, ord.LastGameSecs);
+        }
+        fprintf(fp, "COrder_%d_Steps=%d\n",    idx, ord.StepCount);
         for (int s = 0; s < ord.StepCount; s++) {
             fprintf(fp, "COrder_%d_Step_%d=%s\n", idx, s, ord.Steps[s]);
         }
@@ -1927,6 +2049,10 @@ void BosoAIManagerClass::Save_Data(void)
         fprintf(fp, "Limits_%d_Faction=%s\n",     idx, r.Faction);
         fprintf(fp, "Limits_%d_Score=%d\n",        idx, r.WinScore);
         fprintf(fp, "Limits_%d_Games=%d\n",        idx, r.GamesPlayed);
+        if (r.LastGameUID[0]) {
+            fprintf(fp, "Limits_%d_LastUID=%s\n",  idx, r.LastGameUID);
+            fprintf(fp, "Limits_%d_LastSecs=%d\n", idx, r.LastGameSecs);
+        }
         fprintf(fp, "Limits_%d_Unit=%d\n",         idx, r.MaxUnit);
         fprintf(fp, "Limits_%d_Building=%d\n",     idx, r.MaxBuilding);
         fprintf(fp, "Limits_%d_Infantry=%d\n",     idx, r.MaxInfantry);
@@ -1944,6 +2070,18 @@ void BosoAIManagerClass::Save_Data(void)
         fprintf(fp, "Limits_%d_BaseSizeAdd=%d\n",  idx, r.BaseSizeAdd);
         fprintf(fp, "Limits_%d_BaseSpacing=%d\n",  idx, r.BaseSpacing);
         idx++;
+    }
+
+    /*-- Game history --*/
+    fprintf(fp, "\n[BosoGameHistory]\n");
+    fprintf(fp, "Count=%d\n", GameHistoryCount);
+    for (int i = 0; i < GameHistoryCount; i++) {
+        const BosoGameHistoryEntry & e = GameHistory[i];
+        fprintf(fp, "Game_%d_UID=%s\n",     i, e.UID);
+        fprintf(fp, "Game_%d_Secs=%d\n",    i, e.GameSecs);
+        fprintf(fp, "Game_%d_Outcome=%s\n", i, e.Outcome);
+        fprintf(fp, "Game_%d_Faction=%s\n", i, e.Faction);
+        fprintf(fp, "Game_%d_Map=%s\n",     i, e.Map);
     }
 
     fclose(fp);

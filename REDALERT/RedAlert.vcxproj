@@ -113,6 +113,10 @@
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>false</DataExecutionPrevention>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(TargetPath)" "C:\Users\domen\OneDrive\Documents\CnCRemastered\Mods\Red_Alert\BosoAI\Data\$(TargetFileName)"</Command>
+      <Message>Copying DLL to mod folder...</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -138,6 +142,10 @@
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>false</DataExecutionPrevention>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(TargetPath)" "C:\Users\domen\OneDrive\Documents\CnCRemastered\Mods\Red_Alert\BosoAI\Data\$(TargetFileName)"</Command>
+      <Message>Copying DLL to mod folder...</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -172,6 +180,7 @@
     <ClCompile Include="AUDIO.CPP" />
     <ClCompile Include="B64PIPE.CPP" />
     <ClCompile Include="B64STRAW.CPP" />
+    <ClCompile Include="BOSOAI.CPP" />
     <ClCompile Include="BAR.CPP" />
     <ClCompile Include="BASE.CPP" />
     <ClCompile Include="BASE64.CPP" />
@@ -463,6 +472,7 @@
     <ClInclude Include="AUDIO.H" />
     <ClInclude Include="B64PIPE.H" />
     <ClInclude Include="B64STRAW.H" />
+    <ClInclude Include="BOSOAI.H" />
     <ClInclude Include="BAR.H" />
     <ClInclude Include="BASE.H" />
     <ClInclude Include="BASE64.H" />

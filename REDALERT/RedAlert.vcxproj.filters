@@ -42,6 +42,9 @@
     <ClCompile Include="AUDIO.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="AUTOPLAY.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="B64PIPE.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -582,6 +585,12 @@
     <ClCompile Include="SCENARIO.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PROCMISSION.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PROCINI.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SCORE.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -912,6 +921,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="AUDIO.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AUTOPLAY.H">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="B64PIPE.H">
@@ -1404,6 +1416,12 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="SCENARIO.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PROCMISSION.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PROCINI.H">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="SCORE.H">
