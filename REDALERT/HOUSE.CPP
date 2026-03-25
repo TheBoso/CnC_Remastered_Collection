@@ -5530,6 +5530,20 @@ bool HouseClass::AI_Attack(UrgencyType )
 		}
 	}
 
+	/*
+	** Refresh harvesters: reset any idle or stuck harvesters back to harvest mode.
+	** Harvesters can get stranded when ore runs out locally or pathing stalls; this
+	** kicks them loose every attack wave so funds keep flowing.
+	*/
+	for (index = 0; index < Units.Count(); index++) {
+		UnitClass * u = Units.Ptr(index);
+		if (u != NULL && !u->IsInLimbo && u->House == this && u->Strength > 0
+				&& u->Class->IsToHarvest
+				&& u->Mission != MISSION_HARVEST && u->Mission != MISSION_ENTER) {
+			u->Assign_Mission(MISSION_HARVEST);
+		}
+	}
+
 	/*-- BosoAI: use per-house attack interval if available --*/
 	if (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this)) {
 		const BosoLimitsRecord & _bl_atk = BosoAIManagerClass::Get_House_Limits(this);
@@ -7973,7 +7987,11 @@ void HouseClass::Do_All_To_Hunt(void) const
 
 		if (unit->House == this && unit->IsDown && !unit->IsInLimbo) {
 			if (unit->Team) unit->Team->Remove(unit);
-			unit->Assign_Mission(MISSION_HUNT);
+			if (unit->Class->IsToHarvest) {
+				unit->Assign_Mission(MISSION_HARVEST);
+			} else {
+				unit->Assign_Mission(MISSION_HUNT);
+			}
 		}
 	}
 
