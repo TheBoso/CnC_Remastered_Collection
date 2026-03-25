@@ -180,7 +180,28 @@ class HouseClass;
 /*---------------------------------------------------------------------------
 ** Shared evolution / exploration constants
 ---------------------------------------------------------------------------*/
-#define BOSO_EXPLOIT_CHANCE     70      // % chance to follow best known record; rest → mutate
+/* UCB1 exploration constant.  Scales the uncertainty bonus relative to the
+   per-game score range (~-3 to +5).  Higher = more willingness to re-test
+   under-explored records; lower = greedier exploitation of known winners. */
+#define BOSO_UCB1_C             3.0f
+
+/* Records with fewer than this many games are not used as mutation parents
+   or eviction candidates — they haven't had enough games to be judged. */
+#define BOSO_MIN_GAMES_TRUSTED  3
+
+/* Number of records randomly sampled in tournament parent selection. */
+#define BOSO_TOURNAMENT_K       4
+
+/* % chance that a new mutant is created by blending two parents (crossover)
+   before mutation, rather than mutating a single parent alone. */
+#define BOSO_CROSSOVER_CHANCE   30
+
+/* % chance each deployment creates a brand-new mutant to grow the gene pool,
+   rather than re-deploying an existing record selected by UCB1. */
+#define BOSO_NEW_RECORD_CHANCE  20
+
+/* Top-N records by normalised score that are immune from pool eviction. */
+#define BOSO_ELITE_COUNT        3
 
 /*---------------------------------------------------------------------------
 ** Anti-air threat detection

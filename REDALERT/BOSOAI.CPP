@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 extern int FastForwardMultiplier;
 
@@ -283,17 +284,54 @@ BosoLimitsRecord * BosoAIManagerClass::Alloc_Limits(void)
         LimitsRecords[LimitsCount].Active = true;
         return &LimitsRecords[LimitsCount++];
     }
-    int worst_idx   = 0;
-    int worst_score = LimitsRecords[0].WinScore;
-    for (int i = 1; i < BOSO_MAX_LIMITS_RECORDS; i++) {
-        if (LimitsRecords[i].WinScore < worst_score) {
-            worst_score = LimitsRecords[i].WinScore;
-            worst_idx   = i;
+
+    /*
+    ** Pool is full.  Mark the top BOSO_ELITE_COUNT records (by normalised
+    ** score) as immune, then evict the worst *trusted* non-elite record.
+    ** "Trusted" means GamesPlayed >= BOSO_MIN_GAMES_TRUSTED — a record that
+    ** has only played 1 game might just have been unlucky; evicting it would
+    ** throw away unexplored genetic material.  If no trusted non-elites exist
+    ** fall back to evicting whichever non-elite has the fewest games.
+    */
+    bool is_elite[BOSO_MAX_LIMITS_RECORDS];
+    memset(is_elite, 0, sizeof(is_elite));
+
+    for (int e = 0; e < BOSO_ELITE_COUNT; e++) {
+        float best = -1e30f;
+        int   best_i = -1;
+        for (int i = 0; i < BOSO_MAX_LIMITS_RECORDS; i++) {
+            if (is_elite[i] || !LimitsRecords[i].Active) continue;
+            int gp = LimitsRecords[i].GamesPlayed;
+            float s = (gp > 0) ? (float)LimitsRecords[i].WinScore / (float)gp : -1e30f;
+            if (s > best) { best = s; best_i = i; }
+        }
+        if (best_i >= 0) is_elite[best_i] = true;
+    }
+
+    /* Evict worst trusted non-elite */
+    int   evict = -1;
+    float worst = 1e30f;
+    for (int i = 0; i < BOSO_MAX_LIMITS_RECORDS; i++) {
+        if (is_elite[i] || !LimitsRecords[i].Active) continue;
+        if (LimitsRecords[i].GamesPlayed < BOSO_MIN_GAMES_TRUSTED) continue;
+        float s = (float)LimitsRecords[i].WinScore / (float)LimitsRecords[i].GamesPlayed;
+        if (evict < 0 || s < worst) { worst = s; evict = i; }
+    }
+
+    /* Fallback: evict non-elite with fewest games */
+    if (evict < 0) {
+        int fewest = INT_MAX;
+        for (int i = 0; i < BOSO_MAX_LIMITS_RECORDS; i++) {
+            if (is_elite[i] || !LimitsRecords[i].Active) continue;
+            if (LimitsRecords[i].GamesPlayed < fewest) { fewest = LimitsRecords[i].GamesPlayed; evict = i; }
         }
     }
-    memset(&LimitsRecords[worst_idx], 0, sizeof(BosoLimitsRecord));
-    LimitsRecords[worst_idx].Active = true;
-    return &LimitsRecords[worst_idx];
+
+    if (evict < 0) evict = 0; /* last resort */
+
+    memset(&LimitsRecords[evict], 0, sizeof(BosoLimitsRecord));
+    LimitsRecords[evict].Active = true;
+    return &LimitsRecords[evict];
 }
 
 int BosoAIManagerClass::Mutate_Limits(int parent_idx, const char * faction)
@@ -301,6 +339,48 @@ int BosoAIManagerClass::Mutate_Limits(int parent_idx, const char * faction)
     BosoLimitsRecord rec = (parent_idx >= 0 && parent_idx < LimitsCount && LimitsRecords[parent_idx].Active)
         ? LimitsRecords[parent_idx]
         : Make_Default_Limits(faction);
+
+    /*
+    ** Crossover: BOSO_CROSSOVER_CHANCE% of the time, blend in parameters
+    ** from a second parent chosen via tournament selection.  This lets
+    ** "good attack timing from record A" combine with "good defense ratios
+    ** from record B" — something pure mutation can never achieve.
+    ** Only trusted records (>= BOSO_MIN_GAMES_TRUSTED games) are eligible.
+    */
+    if (rand() % 100 < BOSO_CROSSOVER_CHANCE) {
+        int eligible[BOSO_MAX_LIMITS_RECORDS];
+        int ecount = 0;
+        for (int i = 0; i < LimitsCount; i++) {
+            BosoLimitsRecord & e = LimitsRecords[i];
+            if (e.Active && stricmp(e.Faction, faction) == 0
+                    && e.GamesPlayed >= BOSO_MIN_GAMES_TRUSTED && i != parent_idx)
+                eligible[ecount++] = i;
+        }
+        if (ecount > 0) {
+            int   second = -1;
+            float bs     = -1e30f;
+            int   k      = (BOSO_TOURNAMENT_K < ecount) ? BOSO_TOURNAMENT_K : ecount;
+            for (int t = 0; t < k; t++) {
+                int pick = eligible[rand() % ecount];
+                float s  = (float)LimitsRecords[pick].WinScore / (float)LimitsRecords[pick].GamesPlayed;
+                if (s > bs) { bs = s; second = pick; }
+            }
+            if (second >= 0) {
+                const BosoLimitsRecord & p2 = LimitsRecords[second];
+#define CROSS(field) if (rand() % 2) rec.field = p2.field
+                CROSS(DefenseRatio);    CROSS(AARatio);         CROSS(TeslaRatio);
+                CROSS(BarracksRatio);   CROSS(WarRatio);        CROSS(HelipadRatio);
+                CROSS(AirstripRatio);   CROSS(RefineryRatio);
+                CROSS(DefenseLimit);    CROSS(AALimit);         CROSS(TeslaLimit);
+                CROSS(BarracksLimit);   CROSS(WarLimit);        CROSS(HelipadLimit);
+                CROSS(AirstripLimit);   CROSS(RefineryLimit);
+                CROSS(PowerSurplus);    CROSS(InfantryReserve); CROSS(InfantryBaseMult);
+                CROSS(BaseSizeAdd);     CROSS(AttackSecs);      CROSS(AttackDelaySecs);
+                CROSS(AutocreateSecs);  CROSS(FirepowerBias);
+#undef CROSS
+            }
+        }
+    }
 
     auto mutate = [](int v, int range, int lo, int hi) -> int {
         int delta  = (rand() % (range * 2 + 1)) - range;
@@ -380,30 +460,72 @@ int BosoAIManagerClass::Mutate_Limits(int parent_idx, const char * faction)
 
 int BosoAIManagerClass::Select_Limits(const char * faction, BosoLimitsRecord & out)
 {
-    int   best_idx   = -1;
-    float best_score = -1e30f;
+    /*
+    ** UCB1 selection: score = norm_score + C * sqrt(ln(N+1) / games)
+    ** where N = total games across all records for this faction.
+    ** Records with fewer games get a large exploration bonus that shrinks
+    ** as evidence accumulates, so they are naturally tested before being
+    ** dismissed — no manual exploit/explore split needed.
+    */
+    int total_games = 0;
+    for (int i = 0; i < LimitsCount; i++) {
+        BosoLimitsRecord & r = LimitsRecords[i];
+        if (r.Active && stricmp(r.Faction, faction) == 0)
+            total_games += r.GamesPlayed;
+    }
+
+    int   ucb_idx  = -1;
+    float best_ucb = -1e30f;
     for (int i = 0; i < LimitsCount; i++) {
         BosoLimitsRecord & r = LimitsRecords[i];
         if (!r.Active || stricmp(r.Faction, faction) != 0) continue;
-        float norm = (float)r.WinScore / (float)(r.GamesPlayed > 0 ? r.GamesPlayed : 1);
-        if (norm > best_score) { best_score = norm; best_idx = i; }
+        int   gp      = (r.GamesPlayed > 0) ? r.GamesPlayed : 1;
+        float norm    = (float)r.WinScore / (float)gp;
+        float explore = BOSO_UCB1_C * sqrtf(logf((float)(total_games + 1)) / (float)gp);
+        float ucb     = norm + explore;
+        if (ucb > best_ucb) { best_ucb = ucb; ucb_idx = i; }
     }
 
-    int chosen;
-    if (best_idx < 0) {
-        chosen = Mutate_Limits(-1, faction);
-    } else if ((rand() % 100) >= BOSO_EXPLOIT_CHANCE) {
-        chosen = Mutate_Limits(best_idx, faction);
-        if (chosen < 0) chosen = best_idx;
-    } else {
-        chosen = best_idx;
+    /*
+    ** Occasionally inject a brand-new mutant to maintain genetic diversity.
+    ** The parent is chosen via tournament selection from trusted records so
+    ** we always breed from something that has actually proven itself.
+    */
+    if (rand() % 100 < BOSO_NEW_RECORD_CHANCE) {
+        int eligible[BOSO_MAX_LIMITS_RECORDS];
+        int ecount = 0;
+        for (int i = 0; i < LimitsCount; i++) {
+            BosoLimitsRecord & r = LimitsRecords[i];
+            if (r.Active && stricmp(r.Faction, faction) == 0 && r.GamesPlayed >= BOSO_MIN_GAMES_TRUSTED)
+                eligible[ecount++] = i;
+        }
+        int parent = ucb_idx; /* fallback if no trusted records yet */
+        if (ecount > 0) {
+            float bp = -1e30f;
+            int   k  = (BOSO_TOURNAMENT_K < ecount) ? BOSO_TOURNAMENT_K : ecount;
+            for (int t = 0; t < k; t++) {
+                int pick = eligible[rand() % ecount];
+                float s  = (float)LimitsRecords[pick].WinScore / (float)LimitsRecords[pick].GamesPlayed;
+                if (s > bp) { bp = s; parent = pick; }
+            }
+        }
+        int new_idx = Mutate_Limits(parent, faction);
+        /* Deploy the new record if it isn't just the parent re-deduplicated */
+        if (new_idx >= 0 && new_idx != parent) {
+            out = LimitsRecords[new_idx];
+            return new_idx;
+        }
     }
 
-    if (chosen >= 0 && chosen < LimitsCount) {
+    /* Deploy the UCB1 winner (an existing record that needs more data or is simply best) */
+    int chosen = ucb_idx;
+    if (chosen < 0)
+        chosen = Mutate_Limits(-1, faction); /* seed the pool from defaults */
+
+    if (chosen >= 0 && chosen < LimitsCount)
         out = LimitsRecords[chosen];
-    } else {
+    else
         out = Make_Default_Limits(faction);
-    }
     return chosen;
 }
 
