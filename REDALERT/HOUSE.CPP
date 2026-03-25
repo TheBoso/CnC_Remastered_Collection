@@ -1252,19 +1252,21 @@ void HouseClass::AI(void)
 	}
 
 	/*
-	** BosoAI: a house with no buildings, no infantry, and no ground units cannot
-	** rebuild or win the game, regardless of whether it still has aircraft or vessels.
-	** The standard defeat check requires ALL scans to be zero, so an aircraft-only
-	** or vessel-only house would stall the match indefinitely.
-	** Treat any such "baseless" house as defeated so the match can end.
+	** BosoAI: a house with no buildings and no MCV cannot rebuild. Without a
+	** Construction Yard (deployable only from an MCV) there is no path back to
+	** a functional base, so the house cannot win regardless of surviving units.
+	** The standard defeat check requires ALL scans to be zero, so a house with
+	** only tanks, infantry, harvesters, aircraft, or vessels would stall
+	** the match indefinitely.
+	** Treat any "no-base, no-MCV" house as defeated.
 	** Applies to ALL multiplayer houses when BosoAI is active.
 	*/
 	if (Session.Type != GAME_NORMAL && !IsDefeated && Frame > 0 &&
 		BosoAIManagerClass::IsBosoActive &&
-		!ActiveBScan && !UScan && !ActiveIScan) {
+		!ActiveBScan && UQuantity[UNIT_MCV] == 0) {
 		char _bl_dbg[128];
-		sprintf(_bl_dbg, "BosoAI: baseless house[%s] defeated (BScan=0 UScan=0 IScan=0 AScan=%d VScan=%d)",
-			IniName, ActiveAScan ? 1 : 0, ActiveVScan ? 1 : 0);
+		sprintf(_bl_dbg, "BosoAI: baseless house[%s] defeated (no buildings, no MCV; UScan=%d IScan=%d AScan=%d VScan=%d)",
+			IniName, UScan ? 1 : 0, ActiveIScan ? 1 : 0, ActiveAScan ? 1 : 0, ActiveVScan ? 1 : 0);
 		GlyphX_Debug_Print(_bl_dbg);
 		BosoAIManagerClass::Log(_bl_dbg);
 		MPlayer_Defeated();

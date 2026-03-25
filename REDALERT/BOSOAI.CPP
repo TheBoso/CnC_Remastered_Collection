@@ -90,6 +90,7 @@ bool BosoAIManagerClass::GameOverFired                          = false;
 long BosoAIManagerClass::GameStartFrame                         = 0;
 int  BosoAIManagerClass::GameTimeBonusScore                     = 0;
 int  BosoAIManagerClass::StalemateTicks                         = 0;
+int  BosoAIManagerClass::HouseDeadlockTicks[8]                  = {0};
 long BosoAIManagerClass::StaleCheckFrame                        = 0;
 
 /*-- Global spectator flag --*/
@@ -473,6 +474,7 @@ void BosoAIManagerClass::Init(void)
     CurrentGameUID[0]   = '\0';
     GameOverFired       = false;
     StalemateTicks      = 0;
+    memset(HouseDeadlockTicks, 0, sizeof(HouseDeadlockTicks));
     StaleCheckFrame     = 0;
     AircraftLossCount   = 0;
     memset(NavalViable, 0, sizeof(NavalViable));
@@ -769,19 +771,40 @@ void BosoAIManagerClass::Check_Stalemate(void)
     if (Frame - StaleCheckFrame < TICKS_PER_SECOND) return;
     StaleCheckFrame = Frame;
 
+    /*-- Per-house deadlock: a house with no way to earn or spend resources
+    **   cannot recover. Defeat it individually so the match can continue.
+    **   Deadlocked = broke AND (no harvester OR no refinery). --*/
     bool all_deadlocked = true;
     for (int i = 0; i < BosoHouseCount; i++) {
         HouseClass * h = BosoHouses[i];
-        if (!h || h->IsDefeated) continue;
+        if (!h || h->IsDefeated) {
+            HouseDeadlockTicks[i] = 0;
+            continue;
+        }
         bool no_harvester = (h->UQuantity[UNIT_HARVESTER] == 0);
         bool no_refinery  = (h->BQuantity[STRUCT_REFINERY] == 0);
         bool broke        = (h->Available_Money() <= BOSO_STALEMATE_MONEY_CAP);
-        if (!(broke && (no_harvester || no_refinery))) {
+        bool deadlocked   = broke && (no_harvester || no_refinery);
+
+        if (deadlocked) {
+            HouseDeadlockTicks[i]++;
+            if (HouseDeadlockTicks[i] >= BOSO_STALEMATE_SECS) {
+                char dbg[128];
+                sprintf(dbg, "BosoAI: house[%s] individually deadlocked %ds - defeating",
+                    h->IniName, BOSO_STALEMATE_SECS);
+                GlyphX_Debug_Print(dbg);
+                Boso_Log(dbg);
+                HouseDeadlockTicks[i] = 0;
+                h->MPlayer_Defeated();
+                return;
+            }
+        } else {
+            HouseDeadlockTicks[i] = 0;
             all_deadlocked = false;
-            break;
         }
     }
 
+    /*-- Global stalemate fallback: all surviving houses deadlocked simultaneously. --*/
     if (!all_deadlocked) {
         StalemateTicks = 0;
         return;
