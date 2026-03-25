@@ -244,7 +244,7 @@
         <option value="PowerSurplus">Power Surplus</option>
         <option value="FirepowerBias">FP Bias</option>
         <option value="BaseSizeAdd">Base Size</option>
-        <option value="BaseSpacing">Base Spacing</option>
+        <option value="ucb">UCB1 Score</option>
       </select>
       <select id="sort-dir">
         <option value="desc">Highest first</option>
@@ -380,7 +380,6 @@ function extractLimits(sec) {
       AttackSecs:      int(sec[p + 'AttackSecs']),
       AttackDelaySecs: int(sec[p + 'AttackDelaySecs']),
       AutocreateSecs:  int(sec[p + 'AutocreateSecs']),
-      BaseSpacing:     int(sec[p + 'BaseSpacing']),
       /* Bias (int*256; 256 = 1.0) */
       FirepowerBias:    int(sec[p + 'FirepowerBias']),
       GroundspeedBias:  int(sec[p + 'GroundspeedBias']),
@@ -388,10 +387,45 @@ function extractLimits(sec) {
       CostBias:         int(sec[p + 'CostBias']),
       BuildSpeedBias:   int(sec[p + 'BuildSpeedBias']),
     };
-    r.norm = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
+    r.norm    = r.WinScore / (r.GamesPlayed + CONFIDENCE_PRIOR);
+    r.normRaw = r.WinScore / Math.max(r.GamesPlayed, 1);
     records.push(r);
   }
   return records;
+}
+
+// ── UCB1 / evolution metrics ──────────────────────────────────────────────────
+// Mirrors the C++ Select_Limits constants exactly.
+const UCB1_C           = 3.0;
+const MIN_GAMES_TRUSTED = 3;
+const ELITE_COUNT       = 3;
+
+function computeEvolutionMetrics(limits) {
+  // Total games per faction (UCB1 denominator)
+  const factionGames = {};
+  for (const r of limits)
+    factionGames[r.Faction] = (factionGames[r.Faction] || 0) + r.GamesPlayed;
+
+  // UCB1 score and trusted flag
+  for (const r of limits) {
+    const total   = factionGames[r.Faction] || 0;
+    const gp      = r.GamesPlayed > 0 ? r.GamesPlayed : 1;
+    const explore = UCB1_C * Math.sqrt(Math.log(total + 1) / gp);
+    r.ucb     = r.normRaw + explore;
+    r.trusted = r.GamesPlayed >= MIN_GAMES_TRUSTED;
+    r.elite   = false;
+  }
+
+  // Mark top ELITE_COUNT records per faction (by normRaw — same as C++ elite check)
+  const byFaction = {};
+  for (const r of limits) {
+    (byFaction[r.Faction] = byFaction[r.Faction] || []).push(r);
+  }
+  for (const recs of Object.values(byFaction)) {
+    recs.slice().sort((a, b) => b.normRaw - a.normRaw)
+        .slice(0, ELITE_COUNT)
+        .forEach(r => r.elite = true);
+  }
 }
 
 function extractOrders(sec, prefix, stepKey) {
@@ -479,7 +513,9 @@ function rankBadge(rank) {
 // ── Limits table ──────────────────────────────────────────────────────────────
 const LIMITS_COLS = [
   { key: 'rank',            label: '#',            sortKey: null },
+  { key: 'status',          label: '',             sortKey: null },
   { key: 'Faction',         label: 'Faction',       sortKey: 'Faction' },
+  { key: 'ucb',             label: 'UCB1',          sortKey: 'ucb' },
   { key: 'norm',            label: 'Conf. Score',   sortKey: 'norm' },
   { key: 'WinScore',        label: 'Raw Score',     sortKey: 'WinScore' },
   { key: 'GamesPlayed',     label: 'Games',         sortKey: 'GamesPlayed' },
@@ -510,7 +546,6 @@ const LIMITS_COLS = [
   { key: 'AttackSecs',      label: 'Atk(s)',        sortKey: 'AttackSecs' },
   { key: 'AttackDelaySecs', label: 'AtkDly(s)',     sortKey: 'AttackDelaySecs' },
   { key: 'AutocreateSecs',  label: 'Auto(s)',       sortKey: 'AutocreateSecs' },
-  { key: 'BaseSpacing',     label: 'Spacing',       sortKey: 'BaseSpacing' },
   /* Firepower bias (256 = 1.0); other biases are fixed at 1.0 and not shown */
   { key: 'FirepowerBias',   label: 'FP Bias',       sortKey: 'FirepowerBias' },
 ];
@@ -530,8 +565,9 @@ function renderLimits() {
     return dir === 'desc' ? (bv > av ? 1 : -1) : (av > bv ? 1 : -1);
   });
 
-  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.norm)));
+  const maxAbs   = Math.max(1, ...rows.map(r => Math.abs(r.norm)));
   const maxGames = Math.max(1, ...rows.map(r => r.GamesPlayed));
+  const maxUCB   = Math.max(1, ...rows.map(r => Math.abs(r.ucb ?? 0)));
 
   const thead = document.querySelector('#limits-table thead');
   const tbody = document.querySelector('#limits-table tbody');
@@ -542,11 +578,22 @@ function renderLimits() {
 
   const fmtRatio = v => (v / 256).toFixed(2);
 
+  function statusBadge(r) {
+    const parts = [];
+    if (r.elite)   parts.push(`<span title="Elite — top ${ELITE_COUNT} by score, protected from eviction" style="color:var(--yellow);font-size:13px">★</span>`);
+    if (!r.trusted) parts.push(`<span class="pill" style="background:rgba(139,148,158,.12);color:var(--muted);border:1px solid var(--border);font-size:10px" title="Fewer than ${MIN_GAMES_TRUSTED} games — not yet trusted as a parent">?</span>`);
+    return parts.join(' ');
+  }
+
   tbody.innerHTML = rows.map((r, i) => {
-    const rank = i + 1;
-    return `<tr>
+    const rank    = i + 1;
+    const rowStyle = r.elite ? ' style="background:rgba(210,153,34,.06)"' : '';
+    const ucbSign  = (r.ucb ?? 0) >= 0 ? '+' : '';
+    return `<tr${rowStyle}>
       <td>${rankBadge(rank)}</td>
+      <td style="white-space:nowrap">${statusBadge(r)}</td>
       <td>${factionPill(r.Faction)}</td>
+      <td><span class="${scoreColor(r.ucb ?? 0)}" title="UCB1 = norm_score + ${UCB1_C}×√(ln(N)/games)">${ucbSign}${(r.ucb ?? 0).toFixed(2)}</span></td>
       <td>${scoreBar(r.norm, maxAbs)}</td>
       <td class="${scoreColor(r.WinScore)}">${r.WinScore >= 0 ? '+' : ''}${r.WinScore}</td>
       <td>${confDots(r.GamesPlayed, maxGames)} <span style="color:var(--muted);font-size:11px;margin-left:4px">${r.GamesPlayed}</span></td>
@@ -557,7 +604,7 @@ function renderLimits() {
       <td>${r.BarracksLimit}</td><td>${r.WarLimit}</td><td>${r.HelipadLimit}</td>
       <td>${r.AirstripLimit}</td><td>${r.RefineryLimit}</td>
       <td>${r.PowerSurplus}</td><td>${r.InfantryReserve}</td><td>${r.InfantryBaseMult}</td><td>${r.BaseSizeAdd}</td>
-      <td>${r.AttackSecs}s</td><td>${r.AttackDelaySecs}s</td><td>${r.AutocreateSecs}s</td><td>${r.BaseSpacing}</td>
+      <td>${r.AttackSecs}s</td><td>${r.AttackDelaySecs}s</td><td>${r.AutocreateSecs}s</td>
       <td>${fmtRatio(r.FirepowerBias)}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="${LIMITS_COLS.length}" class="empty">No records</td></tr>`;
@@ -751,6 +798,8 @@ function renderStats() {
     <div class="stat"><span class="stat-val neu">${stalemates}</span><span class="stat-lbl">Stalemates</span></div>
     <div class="stat"><span class="stat-val">${fmtSecs(avgSecs)}</span><span class="stat-lbl">Avg Game Length</span></div>
     <div class="stat"><span class="stat-val">${state.limits.length}</span><span class="stat-lbl">Limit Records</span></div>
+    <div class="stat"><span class="stat-val" style="color:var(--green)">${state.limits.filter(r => r.trusted).length}</span><span class="stat-lbl">Trusted (≥${MIN_GAMES_TRUSTED}g)</span></div>
+    <div class="stat"><span class="stat-val" style="color:var(--yellow)">${state.limits.filter(r => r.elite).length}</span><span class="stat-lbl">Elites ★</span></div>
     <div class="stat"><span class="stat-val">${state.build.length}</span><span class="stat-lbl">Build Orders</span></div>
     <div class="stat"><span class="stat-val">${state.combat.length}</span><span class="stat-lbl">Combat Orders</span></div>
     <div class="stat"><span class="stat-val">${factions.join(', ') || '—'}</span><span class="stat-lbl">Factions</span></div>
@@ -796,6 +845,7 @@ function loadData(text, filename) {
   state.build   = extractOrders(ini['BosoBuildOrders'],  'Order_',  'Step');
   state.combat  = extractOrders(ini['BosoCombatOrders'], 'COrder_', 'Step');
   state.history = extractGameHistory(ini['BosoGameHistory']);
+  computeEvolutionMetrics(state.limits);
 
   document.getElementById('landing').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
