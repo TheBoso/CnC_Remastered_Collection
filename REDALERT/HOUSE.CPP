@@ -5531,16 +5531,20 @@ bool HouseClass::AI_Attack(UrgencyType )
 	}
 
 	/*
-	** Refresh harvesters: reset any idle or stuck harvesters back to harvest mode.
-	** Harvesters can get stranded when ore runs out locally or pathing stalls; this
-	** kicks them loose every attack wave so funds keep flowing.
+	** Refresh harvesters: any harvester that isn't actively entering a refinery
+	** gets its radio contact broken, nav target cleared, and mission set to
+	** MISSION_GUARD_AREA. This physically unsticks units that are stuck
+	** waiting on a nav path or holding a radio lock with a refinery they can
+	** no longer reach. The vanilla AI will reassign them to harvest once idle.
 	*/
 	for (index = 0; index < Units.Count(); index++) {
 		UnitClass * u = Units.Ptr(index);
 		if (u != NULL && !u->IsInLimbo && u->House == this && u->Strength > 0
 				&& u->Class->IsToHarvest
-				&& u->Mission != MISSION_HARVEST && u->Mission != MISSION_ENTER) {
-			u->Assign_Mission(MISSION_HARVEST);
+				&& u->Mission != MISSION_ENTER) {
+			u->Transmit_Message(RADIO_OVER_OUT);
+			u->NavCom = TARGET_NONE;
+			u->Assign_Mission(MISSION_GUARD_AREA);
 		}
 	}
 
@@ -7988,7 +7992,9 @@ void HouseClass::Do_All_To_Hunt(void) const
 		if (unit->House == this && unit->IsDown && !unit->IsInLimbo) {
 			if (unit->Team) unit->Team->Remove(unit);
 			if (unit->Class->IsToHarvest) {
-				unit->Assign_Mission(MISSION_HARVEST);
+				unit->Transmit_Message(RADIO_OVER_OUT);
+				unit->NavCom = TARGET_NONE;
+				unit->Assign_Mission(MISSION_GUARD_AREA);
 			} else {
 				unit->Assign_Mission(MISSION_HUNT);
 			}
