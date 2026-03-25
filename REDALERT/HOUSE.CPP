@@ -6106,6 +6106,19 @@ int HouseClass::AI_Building(void)
 		**	Always build up some base defense.
 		*/
 		current = BQuantity[STRUCT_PILLBOX] + BQuantity[STRUCT_CAMOPILLBOX] + BQuantity[STRUCT_TURRET] + BQuantity[STRUCT_FLAME_TURRET];
+		if (boso_house) {
+			static int _def_log_throttle = 0;
+			if ((_def_log_throttle++ % 3000) == 0) {
+				char _def_dbg[192];
+				b = &BuildingTypeClass::As_Reference(STRUCT_FLAME_TURRET);
+				sprintf(_def_dbg, "BosoAI DefChk[%s]: cur=%u want=%d lim=%u CurBld=%u ratio=%.3f CanBld=%d money=%d",
+					IniName, current,
+					(int)Round_Up(boso_defense_ratio*fixed(CurBuildings)), boso_defense_limit,
+					CurBuildings, (float)boso_defense_ratio, (int)Can_Build(b, ActLike), money);
+				GlyphX_Debug_Print(_def_dbg);
+				BosoAIManagerClass::Log(_def_dbg);
+			}
+		}
 		if (current < Round_Up(boso_defense_ratio*fixed(CurBuildings)) && current < boso_defense_limit) {
 			b = &BuildingTypeClass::As_Reference(STRUCT_FLAME_TURRET);
 			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
@@ -8255,12 +8268,6 @@ CELL HouseClass::Find_Cell_In_Zone(TechnoClass const * techno, ZoneType zone) co
 	}
 
 	/*
-	**	BosoAI: require at least 3 of the 4 cardinal sides to have a clear (no building)
-	**	cell adjacent to the footprint. This prevents dense packing that blocks harvesters.
-	*/
-	bool boso_spacing = BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this);
-
-	/*
 	**	Find a legal placement position as close as possible to the picked location while still
 	**	remaining within the zone.
 	*/
@@ -8274,50 +8281,6 @@ CELL HouseClass::Find_Cell_In_Zone(TechnoClass const * techno, ZoneType zone) co
 			*/
 			if (ok && list != NULL && !Map.Passes_Proximity_Check(ttype, techno->House->Class->House, list, cell)) {
 				ok = false;
-			}
-
-			/*
-			**	BosoAI spacing check: require at least 3 cardinal sides to have at least one
-			**	cell free of buildings, so harvesters always have navigable paths through the base.
-			*/
-			if (ok && boso_spacing && list != NULL) {
-				BuildingTypeClass const * btype = (BuildingTypeClass const *)ttype;
-				int w     = btype->Width();
-				int h     = btype->Height();
-				int cellx = cell % MAP_CELL_W;
-				int celly = cell / MAP_CELL_W;
-
-				/*-- Require 2 consecutive free cells on a side (harvester-width corridor) --*/
-				auto side_has_clear = [&](int start_cell, int count, int stride) -> bool {
-					CELL c = start_cell;
-					int run = 0;
-					for (int i = 0; i < count; i++, c += stride) {
-						if (Map.In_Radar(c) && Map[c].Cell_Building() == NULL) {
-							if (++run >= 2) return true;
-						} else {
-							run = 0;
-						}
-					}
-					return false;
-				};
-
-			const BosoLimitsRecord & _bsp = BosoAIManagerClass::Get_House_Limits(this);
-			int spacing_threshold = (BosoAIManagerClass::IsBosoActive && BosoAIManagerClass::Is_Boso_House(this))
-				? _bsp.BaseSpacing : 3;
-
-
-
-				int clear_sides = 0;
-				if (celly > 0)
-					clear_sides += side_has_clear(cell - MAP_CELL_W, w, 1) ? 1 : 0;
-				if (celly + h < MAP_CELL_H)
-					clear_sides += side_has_clear(cell + h * MAP_CELL_W, w, 1) ? 1 : 0;
-				if (cellx > 0)
-					clear_sides += side_has_clear(cell - 1, h, MAP_CELL_W) ? 1 : 0;
-				if (cellx + w < MAP_CELL_W)
-					clear_sides += side_has_clear(cell + w, h, MAP_CELL_W) ? 1 : 0;
-
-				if (clear_sides < spacing_threshold) ok = false;
 			}
 
 			if (ok) {

@@ -151,11 +151,6 @@ class HouseClass;
 #define BOSO_MIN_AUTOCREATE_SECS   60
 #define BOSO_MAX_AUTOCREATE_SECS  600
 
-/* BaseSpacing: how many of 4 cardinal sides must have a clear corridor (2-4) */
-#define BOSO_DEF_BASE_SPACING      3
-#define BOSO_MUT_BASE_SPACING      1
-#define BOSO_MIN_BASE_SPACING      0
-#define BOSO_MAX_BASE_SPACING      4
 
 /*---------------------------------------------------------------------------
 ** Per-house firepower bias (scaled by 256: 256 = 1.0 = no modification).
@@ -244,9 +239,6 @@ struct BosoLimitsRecord {
     int  AttackSecs;        // seconds between attack waves
     int  AttackDelaySecs;   // seconds before the first attack
     int  AutocreateSecs;    // seconds between autocreate team formation
-
-    /* Base spacing: how many of the 4 cardinal sides (0-4) must have a 2-cell-wide clear corridor */
-    int  BaseSpacing;
 
     /* Per-house combat bias (int * 256; 256 = 1.0 = no modification)
     ** Applied directly to HouseClass bias fields at Apply_Limits_To_House. */

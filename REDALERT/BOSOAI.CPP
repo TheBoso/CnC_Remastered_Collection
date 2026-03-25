@@ -248,8 +248,6 @@ static BosoLimitsRecord Make_Default_Limits(const char * faction)
     r.AttackSecs     = BOSO_DEF_ATTACK_SECS;
     r.AttackDelaySecs= BOSO_DEF_ATTACK_DELAY;
     r.AutocreateSecs = BOSO_DEF_AUTOCREATE_SECS;
-    r.BaseSpacing    = BOSO_DEF_BASE_SPACING;
-
     /* Bias (256 = 1.0 = no modification) */
     r.FirepowerBias  = BOSO_DEF_BIAS;
     r.GroundspeedBias= BOSO_DEF_BIAS;
@@ -342,8 +340,6 @@ int BosoAIManagerClass::Mutate_Limits(int parent_idx, const char * faction)
     rec.AttackSecs      = mutate(rec.AttackSecs,     BOSO_MUT_ATTACK_SECS,    BOSO_MIN_ATTACK_SECS,    BOSO_MAX_ATTACK_SECS);
     rec.AttackDelaySecs = mutate(rec.AttackDelaySecs,BOSO_MUT_ATTACK_DELAY,   BOSO_MIN_ATTACK_DELAY,   BOSO_MAX_ATTACK_DELAY);
     rec.AutocreateSecs  = mutate(rec.AutocreateSecs, BOSO_MUT_AUTOCREATE_SECS,BOSO_MIN_AUTOCREATE_SECS,BOSO_MAX_AUTOCREATE_SECS);
-    rec.BaseSpacing     = mutate(rec.BaseSpacing,    BOSO_MUT_BASE_SPACING,   BOSO_MIN_BASE_SPACING,   BOSO_MAX_BASE_SPACING);
-
     /* Bias — only firepower is evolved; the rest remain fixed at 1.0 */
     rec.FirepowerBias   = mutate(rec.FirepowerBias,  BOSO_MUT_FIREPOWER,   BOSO_MIN_FIREPOWER,   BOSO_MAX_FIREPOWER);
     rec.GroundspeedBias = BOSO_DEF_BIAS;
@@ -370,7 +366,7 @@ int BosoAIManagerClass::Mutate_Limits(int parent_idx, const char * faction)
             e.PowerSurplus   == rec.PowerSurplus   && e.InfantryReserve==rec.InfantryReserve &&
             e.InfantryBaseMult==rec.InfantryBaseMult&& e.BaseSizeAdd  == rec.BaseSizeAdd   &&
             e.AttackSecs     == rec.AttackSecs     && e.AttackDelaySecs==rec.AttackDelaySecs&&
-            e.AutocreateSecs == rec.AutocreateSecs && e.BaseSpacing    == rec.BaseSpacing &&
+            e.AutocreateSecs == rec.AutocreateSecs &&
             e.FirepowerBias  == rec.FirepowerBias) {
             return i;
         }
@@ -1111,8 +1107,6 @@ void BosoAIManagerClass::Load_Data(void)
         LGET(AttackSecs,     "AttackSecs",     BOSO_DEF_ATTACK_SECS);
         LGET(AttackDelaySecs,"AttackDelaySecs",BOSO_DEF_ATTACK_DELAY);
         LGET(AutocreateSecs, "AutocreateSecs", BOSO_DEF_AUTOCREATE_SECS);
-        LGET(BaseSpacing,    "BaseSpacing",    BOSO_DEF_BASE_SPACING);
-
         /* Bias */
         LGET(FirepowerBias,  "FirepowerBias",  BOSO_DEF_BIAS);
         LGET(GroundspeedBias,"GroundspeedBias",BOSO_DEF_BIAS);
@@ -1217,7 +1211,6 @@ void BosoAIManagerClass::Save_Data(void)
         fprintf(fp, "Limits_%d_AttackSecs=%d\n",     idx, r.AttackSecs);
         fprintf(fp, "Limits_%d_AttackDelaySecs=%d\n",idx, r.AttackDelaySecs);
         fprintf(fp, "Limits_%d_AutocreateSecs=%d\n", idx, r.AutocreateSecs);
-        fprintf(fp, "Limits_%d_BaseSpacing=%d\n",    idx, r.BaseSpacing);
         /* Bias */
         fprintf(fp, "Limits_%d_FirepowerBias=%d\n",  idx, r.FirepowerBias);
         fprintf(fp, "Limits_%d_GroundspeedBias=%d\n",idx, r.GroundspeedBias);
