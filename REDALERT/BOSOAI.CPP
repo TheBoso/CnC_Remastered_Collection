@@ -780,7 +780,8 @@ void BosoAIManagerClass::Check_Stalemate(void)
     **   the match is geographically stuck (e.g. one house enclosed by terrain).
     **   Grace period = same constant, so minimum game time before trigger = 2x. --*/
     {
-        bool in_grace  = (Frame - GameStartFrame < (long)(BOSO_NO_COMBAT_TIMEOUT_SECS * TICKS_PER_SECOND));
+        int ff = (FastForwardMultiplier > 1) ? FastForwardMultiplier : 1;
+        bool in_grace  = (Frame - GameStartFrame < (long)(BOSO_NO_COMBAT_TIMEOUT_SECS * TICKS_PER_SECOND) * ff);
         bool any_losses = false;
         for (int i = 0; i < BosoHouseCount; i++) {
             HouseClass * h = BosoHouses[i];
@@ -793,7 +794,7 @@ void BosoAIManagerClass::Check_Stalemate(void)
             NoCombatTicks = 0;
         } else {
             NoCombatTicks++;
-            if (NoCombatTicks >= BOSO_NO_COMBAT_TIMEOUT_SECS) {
+            if (NoCombatTicks >= BOSO_NO_COMBAT_TIMEOUT_SECS * ff) {
                 /*-- Award the win to the strongest alive house so the better
                 **   strategy still gets credit even if it was unreachable. --*/
                 int winner_slot = -1;
