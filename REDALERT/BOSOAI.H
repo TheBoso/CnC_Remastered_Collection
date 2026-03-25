@@ -199,6 +199,14 @@ class HouseClass;
 #define BOSO_STALEMATE_MONEY_CAP  500   // credits at/below which a house is "broke"
 
 /*---------------------------------------------------------------------------
+** No-combat stalemate — geographic isolation detection.
+** If no house takes any unit/building losses for BOSO_NO_COMBAT_TIMEOUT_SECS
+** seconds after an equal grace period, the match is geographically stuck.
+** Total minimum game time before this fires = 2 * BOSO_NO_COMBAT_TIMEOUT_SECS.
+---------------------------------------------------------------------------*/
+#define BOSO_NO_COMBAT_TIMEOUT_SECS  300  // 5 minutes of no losses = stalemate
+
+/*---------------------------------------------------------------------------
 ** BosoLimitsRecord - per-house evolved AI parameter set.
 ** All ratio values are stored as int scaled by 256 (256 = 1.0) for INI
 ** compatibility. Convert to fixed with fixed(val, 256) before use.
@@ -348,6 +356,8 @@ private:
     static int  StalemateTicks;          // Consecutive seconds all houses have been deadlocked
     static int  HouseDeadlockTicks[8];   // Per-house consecutive seconds individually deadlocked
     static long StaleCheckFrame;         // Frame of last stalemate check (throttle: once per second)
+    static int  NoCombatTicks;           // Consecutive seconds with no house taking any losses
+    static int  PrevHouseStrength[8];    // Per-house unit+building count snapshot for combat detection
 
     /*-- Current game UID and length (set at game start / game over) --*/
     static char CurrentGameUID[BOSO_UID_LEN];

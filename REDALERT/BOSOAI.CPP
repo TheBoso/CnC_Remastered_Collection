@@ -92,6 +92,8 @@ int  BosoAIManagerClass::GameTimeBonusScore                     = 0;
 int  BosoAIManagerClass::StalemateTicks                         = 0;
 int  BosoAIManagerClass::HouseDeadlockTicks[8]                  = {0};
 long BosoAIManagerClass::StaleCheckFrame                        = 0;
+int  BosoAIManagerClass::NoCombatTicks                          = 0;
+int  BosoAIManagerClass::PrevHouseStrength[8]                   = {0};
 
 /*-- Global spectator flag --*/
 bool BosoSpectatorActive = false;
@@ -476,6 +478,8 @@ void BosoAIManagerClass::Init(void)
     StalemateTicks      = 0;
     memset(HouseDeadlockTicks, 0, sizeof(HouseDeadlockTicks));
     StaleCheckFrame     = 0;
+    NoCombatTicks       = 0;
+    memset(PrevHouseStrength, 0, sizeof(PrevHouseStrength));
     AircraftLossCount   = 0;
     memset(NavalViable, 0, sizeof(NavalViable));
     BosoHouseCount  = 0;
@@ -770,6 +774,47 @@ void BosoAIManagerClass::Check_Stalemate(void)
 
     if (Frame - StaleCheckFrame < TICKS_PER_SECOND) return;
     StaleCheckFrame = Frame;
+
+    /*-- No-combat stalemate: if no house takes any unit/building losses for
+    **   BOSO_NO_COMBAT_TIMEOUT_SECS seconds (after an equal grace period),
+    **   the match is geographically stuck (e.g. one house enclosed by terrain).
+    **   Grace period = same constant, so minimum game time before trigger = 2x. --*/
+    {
+        bool in_grace  = (Frame - GameStartFrame < (long)(BOSO_NO_COMBAT_TIMEOUT_SECS * TICKS_PER_SECOND));
+        bool any_losses = false;
+        for (int i = 0; i < BosoHouseCount; i++) {
+            HouseClass * h = BosoHouses[i];
+            if (!h || h->IsDefeated) { PrevHouseStrength[i] = 0; continue; }
+            int cur = (int)(h->CurUnits + h->CurBuildings + h->CurInfantry + h->CurVessels);
+            if (PrevHouseStrength[i] > 0 && cur < PrevHouseStrength[i]) any_losses = true;
+            PrevHouseStrength[i] = cur;
+        }
+        if (in_grace || any_losses) {
+            NoCombatTicks = 0;
+        } else {
+            NoCombatTicks++;
+            if (NoCombatTicks >= BOSO_NO_COMBAT_TIMEOUT_SECS) {
+                char dbg[128];
+                sprintf(dbg, "BosoAI: no combat for %ds - geographic stalemate, restarting",
+                    BOSO_NO_COMBAT_TIMEOUT_SECS);
+                GlyphX_Debug_Print(dbg);
+                Boso_Log(dbg);
+                GameOverFired      = true;
+                GameTimeBonusScore = 0;
+                CurrentGameSecs = (int)((Frame - GameStartFrame) / TICKS_PER_SECOND);
+                Record_Game_History(CurrentGameUID, CurrentGameSecs, "S", CurrentFaction, CurrentMap);
+                for (int i = 0; i < BosoHouseCount; i++) {
+                    Score_Session_Limits(i, false);
+                }
+                Save_Data();
+                NoCombatTicks = 0;
+                if (IsAutoRestart) {
+                    PlayerRestarts = true;
+                }
+                return;
+            }
+        }
+    }
 
     /*-- Per-house deadlock: a house with no way to earn or spend resources
     **   cannot recover. Defeat it individually so the match can continue.
