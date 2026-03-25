@@ -794,17 +794,28 @@ void BosoAIManagerClass::Check_Stalemate(void)
         } else {
             NoCombatTicks++;
             if (NoCombatTicks >= BOSO_NO_COMBAT_TIMEOUT_SECS) {
-                char dbg[128];
-                sprintf(dbg, "BosoAI: no combat for %ds - geographic stalemate, restarting",
-                    BOSO_NO_COMBAT_TIMEOUT_SECS);
+                /*-- Award the win to the strongest alive house so the better
+                **   strategy still gets credit even if it was unreachable. --*/
+                int winner_slot = -1;
+                int best_strength = -1;
+                for (int i = 0; i < BosoHouseCount; i++) {
+                    HouseClass * h = BosoHouses[i];
+                    if (!h || h->IsDefeated) continue;
+                    int s = (int)(h->CurUnits + h->CurBuildings + h->CurInfantry + h->CurVessels);
+                    if (s > best_strength) { best_strength = s; winner_slot = i; }
+                }
+                char dbg[192];
+                sprintf(dbg, "BosoAI: no combat for %ds - geographic stalemate; winner_slot=%d strength=%d",
+                    BOSO_NO_COMBAT_TIMEOUT_SECS, winner_slot, best_strength);
                 GlyphX_Debug_Print(dbg);
                 Boso_Log(dbg);
                 GameOverFired      = true;
                 GameTimeBonusScore = 0;
                 CurrentGameSecs = (int)((Frame - GameStartFrame) / TICKS_PER_SECOND);
-                Record_Game_History(CurrentGameUID, CurrentGameSecs, "S", CurrentFaction, CurrentMap);
+                const char * win_faction = (winner_slot >= 0) ? Get_Faction_Name(BosoHouses[winner_slot]) : CurrentFaction;
+                Record_Game_History(CurrentGameUID, CurrentGameSecs, "W", win_faction, CurrentMap);
                 for (int i = 0; i < BosoHouseCount; i++) {
-                    Score_Session_Limits(i, false);
+                    Score_Session_Limits(i, i == winner_slot);
                 }
                 Save_Data();
                 NoCombatTicks = 0;
