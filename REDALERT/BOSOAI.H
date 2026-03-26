@@ -39,7 +39,7 @@ class HouseClass;
 /*---------------------------------------------------------------------------
 ** Game history log
 ---------------------------------------------------------------------------*/
-#define BOSO_MAX_GAME_HISTORY   128  // Max game entries stored in [BosoGameHistory]
+#define BOSO_MAX_GAME_HISTORY   512  // Max game entries stored in [BosoGameHistory]
 
 /*---------------------------------------------------------------------------
 ** INI file names
