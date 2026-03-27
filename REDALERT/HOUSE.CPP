@@ -5477,8 +5477,6 @@ bool HouseClass::AI_Raise_Power(UrgencyType urgency) const
 		UrgencyType Urgency;
 	} _types[] = {
 		{STRUCT_CHRONOSPHERE, URGENCY_LOW},
-		{STRUCT_SHIP_YARD, URGENCY_LOW},
-		{STRUCT_SUB_PEN, URGENCY_LOW},
 		{STRUCT_ADVANCED_TECH, URGENCY_LOW},
 		{STRUCT_FORWARD_COM, URGENCY_LOW},
 		{STRUCT_SOVIET_TECH, URGENCY_LOW},
@@ -5533,12 +5531,9 @@ bool HouseClass::AI_Raise_Money(UrgencyType urgency) const
 		UrgencyType	Urgency;
 	} _types[] = {
 		{STRUCT_CHRONOSPHERE, URGENCY_LOW},
-		{STRUCT_SHIP_YARD, URGENCY_LOW},
-		{STRUCT_SUB_PEN, URGENCY_LOW},
 		{STRUCT_ADVANCED_TECH, URGENCY_LOW},
 		{STRUCT_FORWARD_COM, URGENCY_LOW},
 		{STRUCT_SOVIET_TECH, URGENCY_LOW},
-		{STRUCT_STORAGE,URGENCY_LOW},
 		{STRUCT_REPAIR,URGENCY_LOW},
 		{STRUCT_TESLA,URGENCY_MEDIUM},
 		{STRUCT_HELIPAD,URGENCY_MEDIUM},
@@ -5989,6 +5984,31 @@ int HouseClass::AI_Building(void)
 					}
 
 					*choiceptr = BuildChoiceClass((CurAircraft < (unsigned)threat_quantity) ? URGENCY_HIGH : URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
+
+		/*
+		**	Build a naval production facility if able. Can_Build handles
+		**	faction gating (Allied builds Naval Yard, Soviet builds Sub Pen)
+		**	and will return false if no water is adjacent to the base, so
+		**	only one of the two checks will succeed per faction. Cap at one each.
+		*/
+		if (BQuantity[STRUCT_SHIP_YARD] < 1) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_SHIP_YARD);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
+		if (BQuantity[STRUCT_SUB_PEN] < 1) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_SUB_PEN);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
 				}
 			}
 		}
