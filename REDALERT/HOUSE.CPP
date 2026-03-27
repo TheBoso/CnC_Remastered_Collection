@@ -133,6 +133,8 @@
 #include	"function.h"
 #include	"vortex.h"
 
+extern void SkirmishTeams_Log(const char * fmt, ...);
+
 //#include "WolDebug.h"
 
 /*
@@ -982,15 +984,21 @@ void HouseClass::AI(void)
 		**	Adjusted to reduce maximum number of teams created.
 		*/
 		int maxteams = Random_Pick(2, (int)(((Control.TechLevel-1)/3)+1));
+		int hslot = (int)Class->House - (int)HOUSE_MULTI1 + 1;
+		SkirmishTeams_Log("[Alert] House slot %d: alert fired, will try %d teams", hslot, maxteams);
 		for (int index = 0; index < maxteams; index++) {
 			TeamTypeClass const * ttype = Suggested_New_Team(true);
 			if (ttype != NULL) {
+				SkirmishTeams_Log("[Alert] House slot %d: creating team '%s' (now count=%d)", hslot, ttype->IniName, ttype->Number + 1);
 				ScenarioInit++;
 				ttype->Create_One_Of();
 				ScenarioInit--;
+			} else {
+				SkirmishTeams_Log("[Alert] House slot %d: Suggested_New_Team returned NULL", hslot);
 			}
 		}
 		AlertTime = Rule.AutocreateTime * Random_Pick(TICKS_PER_MINUTE/2, TICKS_PER_MINUTE*2);
+		SkirmishTeams_Log("[Alert] House slot %d: AlertTime reset to %d ticks", hslot, AlertTime);
 //		int mintime = Rule.AutocreateTime * (TICKS_PER_MINUTE/2);
 //		int maxtime = Rule.AutocreateTime * (TICKS_PER_MINUTE*2);
 //		AlertTime = Random_Pick(mintime, maxtime);
@@ -5299,6 +5307,7 @@ bool HouseClass::AI_Attack(UrgencyType )
 		AircraftClass * a = Aircraft.Ptr(index);
 
 		if (a != NULL && !a->IsInLimbo && a->House == this && a->Strength > 0) {
+			if (a->Team) continue;
 			if (!shuffle && a->Is_Weapon_Equipped() && (forced || Percent_Chance(75))) {
 				a->Assign_Mission(MISSION_HUNT);
 			}
@@ -5308,6 +5317,7 @@ bool HouseClass::AI_Attack(UrgencyType )
 		UnitClass * u = Units.Ptr(index);
 
 		if (u != NULL && !u->IsInLimbo && u->House == this && u->Strength > 0) {
+			if (u->Team) continue;
 			if (!shuffle && u->Is_Weapon_Equipped() && (forced || Percent_Chance(75))) {
 				u->Assign_Mission(MISSION_HUNT);
 			} else {
@@ -5326,6 +5336,7 @@ bool HouseClass::AI_Attack(UrgencyType )
 		InfantryClass * i = Infantry.Ptr(index);
 
 		if (i != NULL && !i->IsInLimbo && i->House == this && i->Strength > 0) {
+			if (i->Team) continue;
 			if (!shuffle && (i->Is_Weapon_Equipped() || *i == INFANTRY_RENOVATOR) && (forced || Percent_Chance(75))) {
 				i->Assign_Mission(MISSION_HUNT);
 			} else {
@@ -5738,7 +5749,21 @@ int HouseClass::AI_Building(void)
 				}
 			}
 		}
-
+		
+		//  build silos for our refinery count
+		current = BQuantity[STRUCT_STORAGE];
+		if(!IsTiberiumShort && (int)current < BQuantity[STRUCT_REFINERY])
+		{
+		
+					b = &BuildingTypeClass::As_Reference(STRUCT_STORAGE);
+					if (Can_Build(b, ActLike) && (money > b->Cost_Of() || hasincome)) {
+						choiceptr = BuildChoice.Alloc();
+						if (choiceptr != NULL) {
+							*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+						}
+					}
+		}
+		
 		/*
 		**	Always make sure there is a barracks available, but only if there
 		**	will be sufficient money to train troopers.
@@ -5847,7 +5872,7 @@ int HouseClass::AI_Building(void)
 			**	Building air defense only makes sense if the opponent has aircraft
 			**	of some kind.
 			*/
-			bool airthreat = false;
+			bool airthreat = true;
 			int threat_quantity = 0;
 			if (enemy != NULL && enemy->AScan != 0) {
 				airthreat = true;
@@ -6035,7 +6060,7 @@ int HouseClass::AI_Unit(void)
 		}
 	}
 
-	if (Session.Type == GAME_NORMAL) {
+	if (Session.Type == GAME_NORMAL || Session.Type == GAME_SKIRMISH || Session.Type == GAME_INTERNET || Session.Type == GAME_GLYPHX_MULTIPLAYER) {
 
 		int counter[UNIT_COUNT];
 		memset(counter, 0x00, sizeof(counter));
@@ -6098,7 +6123,7 @@ int HouseClass::AI_Unit(void)
 		int bestcount = 0;
 		UnitType bestlist[UNIT_COUNT];
 		for (UnitType utype = UNIT_FIRST; utype < UNIT_COUNT; utype++) {
-			if (counter[utype] > 0 && Can_Build(&UnitTypeClass::As_Reference(utype), Class->House) && UnitTypeClass::As_Reference(utype).Cost_Of() <= Available_Money()) {
+			if (counter[utype] > 0 && Can_Build(&UnitTypeClass::As_Reference(utype), ActLike) && UnitTypeClass::As_Reference(utype).Cost_Of() <= Available_Money()) {
 				if (bestval == -1 || bestval < counter[utype]) {
 					bestval = counter[utype];
 					bestcount = 0;
@@ -6115,7 +6140,7 @@ int HouseClass::AI_Unit(void)
 		}
 	}
 
-	if (IsBaseBuilding) {
+	if (IsBaseBuilding && BuildUnit == UNIT_NONE && Session.Type != GAME_SKIRMISH && Session.Type != GAME_INTERNET && Session.Type != GAME_GLYPHX_MULTIPLAYER) {
 
 		int counter[UNIT_COUNT];
 		int total = 0;
@@ -6159,20 +6184,10 @@ int HouseClass::AI_Vessel(void)
 		return(TICKS_PER_SECOND);
 	}
 
-	if (Session.Type == GAME_NORMAL) {
+	if (Session.Type == GAME_NORMAL || Session.Type == GAME_SKIRMISH || Session.Type == GAME_INTERNET || Session.Type == GAME_GLYPHX_MULTIPLAYER) {
 
 		int counter[VESSEL_COUNT];
-		if (Session.Type == GAME_NORMAL) {
-			memset(counter, 0x00, sizeof(counter));
-		} else {
-			for (VesselType index = VESSEL_FIRST; index < VESSEL_COUNT; index++) {
-				if (Can_Build(&VesselTypeClass::As_Reference(index), Class->House) && VesselTypeClass::As_Reference(index).Level <= (unsigned)Control.TechLevel) {
-					counter[index] = 16;
-				} else {
-					counter[index] = 0;
-				}
-			}
-		}
+		memset(counter, 0x00, sizeof(counter));
 
 		/*
 		**	Build a list of the maximum of each type we wish to produce. This will be
@@ -6232,7 +6247,7 @@ int HouseClass::AI_Vessel(void)
 		int bestcount = 0;
 		VesselType bestlist[VESSEL_COUNT];
 		for (VesselType utype = VESSEL_FIRST; utype < VESSEL_COUNT; utype++) {
-			if (counter[utype] > 0 && Can_Build(&VesselTypeClass::As_Reference(utype), Class->House) && VesselTypeClass::As_Reference(utype).Cost_Of() <= Available_Money()) {
+			if (counter[utype] > 0 && Can_Build(&VesselTypeClass::As_Reference(utype), ActLike) && VesselTypeClass::As_Reference(utype).Cost_Of() <= Available_Money()) {
 				if (bestval == -1 || bestval < counter[utype]) {
 					bestval = counter[utype];
 					bestcount = 0;
@@ -6280,7 +6295,7 @@ int HouseClass::AI_Infantry(void)
 	if (BuildInfantry != INFANTRY_NONE) return(TICKS_PER_SECOND);
 	if (CurInfantry >= Control.MaxInfantry) return(TICKS_PER_SECOND);
 
-	if (Session.Type == GAME_NORMAL) {
+	if (Session.Type == GAME_NORMAL || Session.Type == GAME_SKIRMISH || Session.Type == GAME_INTERNET || Session.Type == GAME_GLYPHX_MULTIPLAYER) {
 		TechnoTypeClass const * techno = 0;
 		int counter[INFANTRY_COUNT];
 		memset(counter, 0x00, sizeof(counter));
@@ -6347,7 +6362,7 @@ int HouseClass::AI_Infantry(void)
 		for (InfantryType utype = INFANTRY_FIRST; utype < INFANTRY_COUNT; utype++) {
 
 			if (utype != INFANTRY_DOG || !(IScan & INFANTRYF_DOG)) {
-				if (counter[utype] > 0 && Can_Build(&InfantryTypeClass::As_Reference(utype), Class->House) && InfantryTypeClass::As_Reference(utype).Cost_Of() <= Available_Money()) {
+				if (counter[utype] > 0 && Can_Build(&InfantryTypeClass::As_Reference(utype), ActLike) && InfantryTypeClass::As_Reference(utype).Cost_Of() <= Available_Money()) {
 					if (bestval == -1 || bestval < counter[utype]) {
 						bestval = counter[utype];
 						bestcount = 0;
@@ -6367,7 +6382,7 @@ int HouseClass::AI_Infantry(void)
 
 	}
 
-	if (IsBaseBuilding) {
+	if (IsBaseBuilding && BuildInfantry == INFANTRY_NONE && Session.Type != GAME_SKIRMISH && Session.Type != GAME_INTERNET && Session.Type != GAME_GLYPHX_MULTIPLAYER) {
 		HouseClass const * enemy = NULL;
 		if (Enemy != HOUSE_NONE) {
 			enemy = HouseClass::As_Pointer(Enemy);
