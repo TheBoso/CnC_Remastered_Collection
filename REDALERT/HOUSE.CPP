@@ -3718,6 +3718,7 @@ bool HouseClass::Flag_Attach(UnitClass * object, bool set_home)
 }
 
 extern void On_Defeated_Message(const char* message, float timeout_seconds);
+extern bool IsSkirmishSpectator;
 
 /***************************************************************************
  * HouseClass::MPlayer_Defeated -- multiplayer; house is defeated          *
@@ -3889,7 +3890,7 @@ void HouseClass::MPlayer_Defeated(void)
 	**	- Find all players' indices in the Session.Score array
 	**	- Tally up scores for this game
 	*/
-	if (num_alive == 1 || num_humans == 0) {
+	if (num_alive == 1 || (num_humans == 0 && !IsSkirmishSpectator)) {
 		if (PlayerPtr->IsDefeated) {
 			PlayerLoses = true;
 		} else {

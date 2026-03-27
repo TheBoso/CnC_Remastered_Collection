@@ -72,10 +72,40 @@ void Display_Briefing_Text_GlyphX();
 
 extern void GlyphX_Assign_Houses(void);	//ST - 8/8/2019 12:35PM
 extern bool UseGlyphXStartLocations;		//ST - 3/31/2020 9:54AM
+extern HINSTANCE ProgramInstance;
 
 #include "skirmishteams.h"
 
 //#include "WolDebug.h"
+
+/*
+** Set to true when spectator.ini [Spectator] Enable=yes is found next to the DLL.
+** When active, the human player (MULTI1) is immediately defeated at game start
+** so the built-in post-defeat observation mode can be used to watch AI vs AI.
+*/
+bool IsSkirmishSpectator = false;
+
+static bool Load_Spectator_INI(void)
+{
+	char path[MAX_PATH];
+	GetModuleFileNameA(ProgramInstance, path, sizeof(path));
+	char * slash = strrchr(path, '\\');
+	if (slash) {
+		*(slash + 1) = '\0';
+		strncat(path, "spectator.ini", sizeof(path) - strlen(path) - 1);
+	} else {
+		strncpy(path, "spectator.ini", sizeof(path) - 1);
+		path[sizeof(path) - 1] = '\0';
+	}
+
+	RawFileClass file(path);
+	if (!file.Is_Available()) return false;
+
+	INIClass ini;
+	if (!ini.Load(file)) return false;
+
+	return ini.Get_Bool("Spectator", "Enable", false);
+}
 
 #ifdef FIXIT_VERSION_3		//	Stalemate games.
 #include "WolStrng.h"
@@ -2416,6 +2446,25 @@ bool Read_Scenario_INI(char * fname, bool )
 	}
 	PlayerPtr->IsHuman = true;
 	PlayerPtr->IsPlayerControl = true;
+
+	/*
+	** Spectator mode: if spectator.ini exists next to the DLL with [Spectator] Enable=yes,
+	** immediately defeat the human player (MULTI1) so the built-in post-defeat observation
+	** camera activates. ObiWan allows sending messages to all players regardless.
+	** IsSkirmishSpectator suppresses the num_humans==0 game-over trigger in MPlayer_Defeated
+	** so AI vs AI can play to completion.
+	*/
+	if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+		IsSkirmishSpectator = Load_Spectator_INI();
+		if (IsSkirmishSpectator) {
+			PlayerPtr->IsDefeated = true;
+			Session.ObiWan = 1;
+			Map.Flag_To_Redraw(true);
+			GlyphX_Debug_Print("SpectatorMode: active - MULTI1 defeated, observation enabled.");
+		} else {
+			IsSkirmishSpectator = false;
+		}
+	}
 
 //	if (NewINIFormat < 2 || !ini.Is_Present("MapPack")) {
 //		Map.Read_Binary(root, &ScenarioCRC);
