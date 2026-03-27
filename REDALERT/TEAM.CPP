@@ -3097,16 +3097,21 @@ int TeamClass::TMission_GatherAtBase(void)
 
 	/*
 	** Pick a random passable cell near the base centroid so the team doesn't
-	** all converge on the exact same point.
+	** all converge on the exact same point.  Only do this once per mission
+	** entry: re-picking every frame cancels in-flight movement orders and
+	** leaves members animating but never arriving.
 	*/
-	FootClass * leader = Fetch_A_Leader();
-	SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
-	CELL dest_cell = Map.Nearby_Location(centroid, speed, -1, MZONE_NORMAL, true);
-	if (dest_cell == 0) dest_cell = centroid;
+	if (!Target_Legal(Target)) {
+		FootClass * leader = Fetch_A_Leader();
+		SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
+		CELL dest_cell = Map.Nearby_Location(centroid, speed, -1, MZONE_NORMAL, true);
+		if (dest_cell == 0) dest_cell = centroid;
+		TARGET dest_tgt = ::As_Target(dest_cell);
+		Assign_Mission_Target(dest_tgt);
+		Target = dest_tgt;
+	}
 
-	TARGET dest_tgt = ::As_Target(dest_cell);
-	Assign_Mission_Target(dest_tgt);
-	Target = dest_tgt;
+	TARGET dest_tgt = Target;
 
 	/*
 	** Check if all active members are within stray distance — if so, advance.
@@ -3188,16 +3193,21 @@ int TeamClass::TMission_GatherNearEnemy(void)
 
 	/*
 	** Pick a passable cell near the closest enemy building so the team
-	** gathers just outside it rather than on top of it.
+	** gathers just outside it rather than on top of it.  Same as
+	** GatherAtBase: only pick once per mission entry to avoid cancelling
+	** movement orders every frame.
 	*/
-	FootClass * leader = Fetch_A_Leader();
-	SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
-	CELL near_cell = Map.Nearby_Location(best_cell, speed, -1, MZONE_NORMAL, true);
-	if (near_cell == 0) near_cell = best_cell;
+	if (!Target_Legal(Target)) {
+		FootClass * leader = Fetch_A_Leader();
+		SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
+		CELL near_cell = Map.Nearby_Location(best_cell, speed, -1, MZONE_NORMAL, true);
+		if (near_cell == 0) near_cell = best_cell;
+		TARGET dest_tgt = ::As_Target(near_cell);
+		Assign_Mission_Target(dest_tgt);
+		Target = dest_tgt;
+	}
 
-	TARGET dest_tgt = ::As_Target(near_cell);
-	Assign_Mission_Target(dest_tgt);
-	Target = dest_tgt;
+	TARGET dest_tgt = Target;
 
 	bool finished = true;
 	FootClass const * unit = Member;

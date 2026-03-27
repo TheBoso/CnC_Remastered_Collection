@@ -5825,6 +5825,31 @@ int HouseClass::AI_Building(void)
 				}
 			}
 		}
+		
+		/*
+**	Build a naval production facility if able. Can_Build handles
+**	faction gating (Allied builds Naval Yard, Soviet builds Sub Pen)
+**	and will return false if no water is adjacent to the base, so
+**	only one of the two checks will succeed per faction. Cap at one each.
+*/
+		if (BQuantity[STRUCT_SHIP_YARD] < 1) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_SHIP_YARD);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
+		if (BQuantity[STRUCT_SUB_PEN] < 1) {
+			b = &BuildingTypeClass::As_Reference(STRUCT_SUB_PEN);
+			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
+				choiceptr = BuildChoice.Alloc();
+				if (choiceptr != NULL) {
+					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
+				}
+			}
+		}
 
 		/*
 		**	Always build up some base defense.
@@ -5988,30 +6013,7 @@ int HouseClass::AI_Building(void)
 			}
 		}
 
-		/*
-		**	Build a naval production facility if able. Can_Build handles
-		**	faction gating (Allied builds Naval Yard, Soviet builds Sub Pen)
-		**	and will return false if no water is adjacent to the base, so
-		**	only one of the two checks will succeed per faction. Cap at one each.
-		*/
-		if (BQuantity[STRUCT_SHIP_YARD] < 1) {
-			b = &BuildingTypeClass::As_Reference(STRUCT_SHIP_YARD);
-			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
-				choiceptr = BuildChoice.Alloc();
-				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
-				}
-			}
-		}
-		if (BQuantity[STRUCT_SUB_PEN] < 1) {
-			b = &BuildingTypeClass::As_Reference(STRUCT_SUB_PEN);
-			if (Can_Build(b, ActLike) && (b->Cost_Of() < money || hasincome)) {
-				choiceptr = BuildChoice.Alloc();
-				if (choiceptr != NULL) {
-					*choiceptr = BuildChoiceClass(URGENCY_MEDIUM, b->Type);
-				}
-			}
-		}
+
 
 #ifdef OLD
 		/*
@@ -6285,7 +6287,7 @@ int HouseClass::AI_Vessel(void)
 		}
 	}
 
-	if (IsBaseBuilding) {
+	if (IsBaseBuilding && Session.Type != GAME_SKIRMISH && Session.Type != GAME_INTERNET && Session.Type != GAME_GLYPHX_MULTIPLAYER) {
 		BuildVessel = VESSEL_NONE;
 	}
 

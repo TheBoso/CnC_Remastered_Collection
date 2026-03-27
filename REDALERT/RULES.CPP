@@ -140,7 +140,7 @@ RulesClass::RulesClass(void) :
 	MaxIQ(5),
 	IQSuperWeapons(4),
 	IQProduction(5),
-	IQGuardArea(4),
+	IQGuardArea(999),
 	IQRepairSell(3),
 	IQCrush(2),
 	IQScatter(3),
