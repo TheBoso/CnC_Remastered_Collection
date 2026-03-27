@@ -75,6 +75,8 @@
 #include "function.h"
 #include "mission.h"
 
+extern void SkirmishTeams_Log(const char * fmt, ...);
+
 
 /***********************************************************************************************
  * _Is_It_Breathing -- Checks to see if unit is an active team member.                         *
@@ -625,6 +627,9 @@ void TeamClass::AI(void)
 		IsMoving = true;
 		IsHasBeen = true;
 		IsUnderStrength = false;
+		if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+			SkirmishTeams_Log("[Team] '%s' reached full strength (%d members) -- starting missions", Class->IniName, Total);
+		}
 
 		/*
 		**	Infantry can do a gesture when they start their mission. Pick
@@ -703,7 +708,9 @@ void TeamClass::AI(void)
 		CurrentMission++;
 		if (CurrentMission < Class->MissionCount) {
 			TeamMissionClass const * mission = &Class->MissionList[CurrentMission];
-
+			if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+				SkirmishTeams_Log("[Team] '%s' advancing to mission %d: %d", Class->IniName, CurrentMission, (int)mission->Mission);
+			}
 			TimeOut = mission->Data.Value * (TICKS_PER_MINUTE/10);
 			Target = TARGET_NONE;
 			switch (mission->Mission) {
@@ -746,6 +753,9 @@ void TeamClass::AI(void)
 					break;
 			}
 		} else {
+			if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+				SkirmishTeams_Log("[Team] '%s' completed all %d missions -- deleting", Class->IniName, Class->MissionCount);
+			}
 			delete this;
 			return;
 		}
@@ -3075,23 +3085,38 @@ int TeamClass::TMission_GatherAtBase(void)
 	}
 
 	if (count == 0) {
+		if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+			SkirmishTeams_Log("[Team] '%s' GatherAtBase: no buildings found, advancing", Class->IniName);
+		}
 		IsNextMission = true;
 		return 1;
 	}
 
 	COORDINATE dest_coord = XY_Coord((int)(sum_x / count), (int)(sum_y / count));
-	CELL        dest_cell  = Coord_Cell(dest_coord);
-	TARGET      dest_tgt   = ::As_Target(dest_cell);
+	CELL        centroid  = Coord_Cell(dest_coord);
+
+	/*
+	** Pick a random passable cell near the base centroid so the team doesn't
+	** all converge on the exact same point.
+	*/
+	FootClass * leader = Fetch_A_Leader();
+	SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
+	CELL dest_cell = Map.Nearby_Location(centroid, speed, -1, MZONE_NORMAL, true);
+	if (dest_cell == 0) dest_cell = centroid;
+
+	TARGET dest_tgt = ::As_Target(dest_cell);
 	Assign_Mission_Target(dest_tgt);
 	Target = dest_tgt;
 
 	/*
 	** Check if all active members are within stray distance — if so, advance.
+	** Use _Is_It_Breathing (not _Is_It_Playing) so uninitiated recruits are counted;
+	** IsInitiated starts false for new members and would cause an immediate false "finished".
 	*/
 	bool finished = true;
 	FootClass const * unit = Member;
 	while (unit != NULL) {
-		if (_Is_It_Playing(unit)) {
+		if (_Is_It_Breathing(unit)) {
 			if (unit->Distance(dest_tgt) > Rule.StrayDistance) {
 				finished = false;
 			}
@@ -3100,6 +3125,9 @@ int TeamClass::TMission_GatherAtBase(void)
 	}
 
 	if (finished) {
+		if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+			SkirmishTeams_Log("[Team] '%s' GatherAtBase: at base (%d buildings), advancing", Class->IniName, count);
+		}
 		IsNextMission = true;
 	} else {
 		Coordinate_Move();
@@ -3125,8 +3153,10 @@ int TeamClass::TMission_GatherNearEnemy(void)
 	assert(Teams.ID(this) == ID);
 
 	/*
-	** Find the centroid of buildings belonging to the closest enemy house.
-	** "Closest" is determined by the average distance of their buildings to our team center.
+	** Find the single enemy building closest to this team's current position.
+	** Using the nearest building (rather than a base centroid) keeps the rally
+	** point on the edge of the enemy base that faces us, so the team doesn't
+	** try to walk through the middle of the base to gather.
 	*/
 	TARGET team_center = TARGET_NONE;
 	TARGET dummy       = TARGET_NONE;
@@ -3136,30 +3166,18 @@ int TeamClass::TMission_GatherNearEnemy(void)
 	CELL   best_cell = -1;
 	long   best_dist = 0x7FFFFFFF;
 
-	for (HousesType htype = HOUSE_FIRST; htype < HOUSE_COUNT; htype++) {
-		HouseClass const * h = HouseClass::As_Pointer(htype);
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass const * b = Buildings.Ptr(i);
+		if (b == NULL || b->IsInLimbo) continue;
+		if (House->Is_Ally(b->Owner())) continue;
+		HouseClass const * h = HouseClass::As_Pointer(b->Owner());
 		if (h == NULL || !h->IsActive || h->IsDefeated) continue;
-		if (House->Is_Ally(htype))                       continue;
 
-		long sum_x = 0, sum_y = 0;
-		int  count  = 0;
-		for (int i = 0; i < Buildings.Count(); i++) {
-			BuildingClass const * b = Buildings.Ptr(i);
-			if (b != NULL && !b->IsInLimbo && b->Owner() == htype) {
-				COORDINATE coord = b->Center_Coord();
-				sum_x += (long)Coord_X(coord);
-				sum_y += (long)Coord_Y(coord);
-				count++;
-			}
-		}
-
-		if (count == 0) continue;
-
-		COORDINATE centroid = XY_Coord((int)(sum_x / count), (int)(sum_y / count));
-		long dist = ::Distance(team_coord, centroid);
+		COORDINATE coord = b->Center_Coord();
+		long dist = ::Distance(team_coord, coord);
 		if (dist < best_dist) {
 			best_dist = dist;
-			best_cell = Coord_Cell(centroid);
+			best_cell = Coord_Cell(coord);
 		}
 	}
 
@@ -3168,14 +3186,23 @@ int TeamClass::TMission_GatherNearEnemy(void)
 		return 1;
 	}
 
-	TARGET dest_tgt = ::As_Target(best_cell);
+	/*
+	** Pick a passable cell near the closest enemy building so the team
+	** gathers just outside it rather than on top of it.
+	*/
+	FootClass * leader = Fetch_A_Leader();
+	SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
+	CELL near_cell = Map.Nearby_Location(best_cell, speed, -1, MZONE_NORMAL, true);
+	if (near_cell == 0) near_cell = best_cell;
+
+	TARGET dest_tgt = ::As_Target(near_cell);
 	Assign_Mission_Target(dest_tgt);
 	Target = dest_tgt;
 
 	bool finished = true;
 	FootClass const * unit = Member;
 	while (unit != NULL) {
-		if (_Is_It_Playing(unit)) {
+		if (_Is_It_Breathing(unit)) {
 			if (unit->Distance(dest_tgt) > Rule.StrayDistance) {
 				finished = false;
 			}
@@ -3184,6 +3211,9 @@ int TeamClass::TMission_GatherNearEnemy(void)
 	}
 
 	if (finished) {
+		if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+			SkirmishTeams_Log("[Team] '%s' GatherNearEnemy: arrived at enemy base, advancing", Class->IniName);
+		}
 		IsNextMission = true;
 	} else {
 		Coordinate_Move();
