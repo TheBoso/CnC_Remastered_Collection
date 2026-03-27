@@ -57,6 +57,8 @@ typedef enum TeamMissionType : char {
 	TMISSION_LOAD,						// Load onto transport member of team.
 	TMISSION_SPY,						// Spy enter the building at specified waypoint
 	TMISSION_PATROL,					// Move but look for enemies as well.
+	TMISSION_GATHER_AT_BASE,			// Move team to own base centroid.
+	TMISSION_GATHER_NEAR_ENEMY,		// Move team near nearest enemy base centroid.
 
 	TMISSION_COUNT,
 	TMISSION_FIRST=0

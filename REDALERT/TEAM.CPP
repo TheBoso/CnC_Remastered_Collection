@@ -538,7 +538,7 @@ void TeamClass::AI(void)
 			**	result of reinforcement logic and no longer needs to exist when there
 			**	are no more team members.
 			*/
-			if (IsHasBeen || Session.Type != GAME_NORMAL) {
+			if (IsHasBeen || (Session.Type != GAME_NORMAL && Session.Type != GAME_GLYPHX_MULTIPLAYER)) {
 
 				/*
 				**	If this team had no members (i.e., the team object wasn't terminated by some
@@ -660,7 +660,7 @@ void TeamClass::AI(void)
 	**	Try to recruit members if there is room to do so for this team.
 	**	Only try to recruit members for a non player controlled team.
 	*/
-	if ((!IsMoving || (!IsFullStrength && Class->IsReinforcable)) && ((!House->IsHuman || !IsHasBeen) && Session.Type == GAME_NORMAL)) {
+	if ((!IsMoving || (!IsFullStrength && Class->IsReinforcable)) && ((!House->IsHuman || !IsHasBeen) && (Session.Type == GAME_NORMAL || Session.Type == GAME_GLYPHX_MULTIPLAYER))) {
 //	if ((!IsMoving || (!IsFullStrength && Class->IsReinforcable)) && ((/*!House->IsHuman ||*/ !IsHasBeen) && Session.Type == GAME_NORMAL)) {
 		for (int index = 0; index < Class->ClassCount; index++) {
 			if (Quantity[index] < Class->Members[index].Quantity) {
@@ -738,6 +738,8 @@ void TeamClass::AI(void)
 					Assign_Mission_Target(mission->Data.Value);
 					break;
 
+				case TMISSION_GATHER_AT_BASE:
+				case TMISSION_GATHER_NEAR_ENEMY:
 				case TMISSION_UNLOAD:
 				default:
 					Assign_Mission_Target(TARGET_NONE);
@@ -840,6 +842,14 @@ void TeamClass::AI(void)
 
 			case TMISSION_LOOP:
 				TMission_Loop();
+				break;
+
+			case TMISSION_GATHER_AT_BASE:
+				TMission_GatherAtBase();
+				break;
+
+			case TMISSION_GATHER_NEAR_ENEMY:
+				TMission_GatherNearEnemy();
 				break;
 		}
 
@@ -3030,6 +3040,155 @@ int TeamClass::TMission_Deploy(void)
 		IsNextMission = true;
 	}
 	return(1);
+}
+
+
+/***********************************************************************************************
+ * TeamClass::TMission_GatherAtBase -- Move team to centroid of own house's buildings.          *
+ *                                                                                             *
+ *    Scans all buildings owned by this team's house and moves the team toward their average   *
+ *    position. Advances the mission when every member is within StrayDistance of the target.  *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ * OUTPUT:  Always returns 1.                                                                  *
+ * WARNINGS:   none                                                                            *
+ * HISTORY:   Feature/TeamTypeBasedAI                                                          *
+ *=============================================================================================*/
+int TeamClass::TMission_GatherAtBase(void)
+{
+	assert(IsActive);
+	assert(Teams.ID(this) == ID);
+
+	/*
+	** Compute the centroid of all buildings owned by our house.
+	*/
+	long sum_x = 0, sum_y = 0;
+	int  count  = 0;
+	for (int i = 0; i < Buildings.Count(); i++) {
+		BuildingClass const * b = Buildings.Ptr(i);
+		if (b != NULL && !b->IsInLimbo && b->House == House) {
+			COORDINATE coord = b->Center_Coord();
+			sum_x += (long)Coord_X(coord);
+			sum_y += (long)Coord_Y(coord);
+			count++;
+		}
+	}
+
+	if (count == 0) {
+		IsNextMission = true;
+		return 1;
+	}
+
+	COORDINATE dest_coord = XY_Coord((int)(sum_x / count), (int)(sum_y / count));
+	CELL        dest_cell  = Coord_Cell(dest_coord);
+	TARGET      dest_tgt   = ::As_Target(dest_cell);
+	Assign_Mission_Target(dest_tgt);
+	Target = dest_tgt;
+
+	/*
+	** Check if all active members are within stray distance — if so, advance.
+	*/
+	bool finished = true;
+	FootClass const * unit = Member;
+	while (unit != NULL) {
+		if (_Is_It_Playing(unit)) {
+			if (unit->Distance(dest_tgt) > Rule.StrayDistance) {
+				finished = false;
+			}
+		}
+		unit = unit->Member;
+	}
+
+	if (finished) {
+		IsNextMission = true;
+	} else {
+		Coordinate_Move();
+	}
+	return 1;
+}
+
+
+/***********************************************************************************************
+ * TeamClass::TMission_GatherNearEnemy -- Move team to centroid of nearest enemy base.         *
+ *                                                                                             *
+ *    Finds the first active enemy house with buildings and moves the team toward the average  *
+ *    position of those buildings. Advances the mission when members are close enough.         *
+ *                                                                                             *
+ * INPUT:   none                                                                               *
+ * OUTPUT:  Always returns 1.                                                                  *
+ * WARNINGS:   none                                                                            *
+ * HISTORY:   Feature/TeamTypeBasedAI                                                          *
+ *=============================================================================================*/
+int TeamClass::TMission_GatherNearEnemy(void)
+{
+	assert(IsActive);
+	assert(Teams.ID(this) == ID);
+
+	/*
+	** Find the centroid of buildings belonging to the closest enemy house.
+	** "Closest" is determined by the average distance of their buildings to our team center.
+	*/
+	TARGET team_center = TARGET_NONE;
+	TARGET dummy       = TARGET_NONE;
+	Calc_Center(team_center, dummy);
+	COORDINATE team_coord = As_Coord(team_center);
+
+	CELL   best_cell = -1;
+	long   best_dist = 0x7FFFFFFF;
+
+	for (HousesType htype = HOUSE_FIRST; htype < HOUSE_COUNT; htype++) {
+		HouseClass const * h = HouseClass::As_Pointer(htype);
+		if (h == NULL || !h->IsActive || h->IsDefeated) continue;
+		if (House->Is_Ally(htype))                       continue;
+
+		long sum_x = 0, sum_y = 0;
+		int  count  = 0;
+		for (int i = 0; i < Buildings.Count(); i++) {
+			BuildingClass const * b = Buildings.Ptr(i);
+			if (b != NULL && !b->IsInLimbo && b->Owner() == htype) {
+				COORDINATE coord = b->Center_Coord();
+				sum_x += (long)Coord_X(coord);
+				sum_y += (long)Coord_Y(coord);
+				count++;
+			}
+		}
+
+		if (count == 0) continue;
+
+		COORDINATE centroid = XY_Coord((int)(sum_x / count), (int)(sum_y / count));
+		long dist = ::Distance(team_coord, centroid);
+		if (dist < best_dist) {
+			best_dist = dist;
+			best_cell = Coord_Cell(centroid);
+		}
+	}
+
+	if (best_cell < 0) {
+		IsNextMission = true;
+		return 1;
+	}
+
+	TARGET dest_tgt = ::As_Target(best_cell);
+	Assign_Mission_Target(dest_tgt);
+	Target = dest_tgt;
+
+	bool finished = true;
+	FootClass const * unit = Member;
+	while (unit != NULL) {
+		if (_Is_It_Playing(unit)) {
+			if (unit->Distance(dest_tgt) > Rule.StrayDistance) {
+				finished = false;
+			}
+		}
+		unit = unit->Member;
+	}
+
+	if (finished) {
+		IsNextMission = true;
+	} else {
+		Coordinate_Move();
+	}
+	return 1;
 }
 
 

@@ -58,6 +58,8 @@
 
 #include "function.h"
 
+extern void SkirmishTeams_Log(const char * fmt, ...);
+
 
 TeamMissionClass TeamMissions[TMISSION_COUNT] = {
 	{TMISSION_ATTACK},
@@ -76,6 +78,8 @@ TeamMissionClass TeamMissions[TMISSION_COUNT] = {
 	{TMISSION_LOAD},
 	{TMISSION_SPY},
 	{TMISSION_PATROL},
+	{TMISSION_GATHER_AT_BASE},
+	{TMISSION_GATHER_NEAR_ENEMY},
 };
 
 
@@ -142,7 +146,9 @@ char const * TeamTypeClass::TMissions[TMISSION_COUNT] = {
 	"Invulnerable",
 	"Load onto Transport",
 	"Spy on bldg @ waypt...",
-	"Patrol to waypoint..."
+	"Patrol to waypoint...",
+	"Gather at base",
+	"Gather near enemy"
 };
 
 
@@ -422,6 +428,10 @@ TeamTypeClass const * TeamTypeClass::Suggested_New_Team(HouseClass * house, long
 	TeamTypeClass const * choices[20];
 	int choicecount = 0;
 
+	int hslot = (int)house->Class->House - (int)HOUSE_MULTI1 + 1;
+	SkirmishTeams_Log("[Autocreate] House slot %d: Suggested_New_Team(alerted=%d) -- %d team types registered",
+	                  hslot, (int)alerted, TeamTypes.Count());
+
 	for (int index = 0; index < TeamTypes.Count(); index++) {
 		TeamTypeClass const * ttype = TeamTypes.Ptr(index);
 
@@ -436,6 +446,8 @@ TeamTypeClass const * TeamTypeClass::Suggested_New_Team(HouseClass * house, long
 
 		if (ttype != NULL && ttype->House == house->Class->House && ttype->Number < maxnum) {
 
+			SkirmishTeams_Log("[Autocreate]   candidate: %s  count=%d  max=%d",
+			                  ttype->IniName, ttype->Number, ttype->MaxAllowed);
 			choices[choicecount++] = ttype;
 
 #ifdef OBSOLETE
@@ -486,8 +498,11 @@ TeamTypeClass const * TeamTypeClass::Suggested_New_Team(HouseClass * house, long
 	}
 
 	if (choicecount > 0) {
-		return(choices[Random_Pick(0, choicecount-1)]);
+		TeamTypeClass const * chosen = choices[Random_Pick(0, choicecount-1)];
+		SkirmishTeams_Log("[Autocreate]   selected: %s  (%d candidates)", chosen->IniName, choicecount);
+		return(chosen);
 	}
+	SkirmishTeams_Log("[Autocreate]   no candidates (alerted=%d, house slot %d)", (int)alerted, hslot);
 	return(NULL);
 
 //	return(best);
