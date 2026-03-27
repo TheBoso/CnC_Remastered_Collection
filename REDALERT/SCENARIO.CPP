@@ -2497,8 +2497,8 @@ bool Read_Scenario_INI(char * fname, bool )
 			for (int y = Map.MapCellY; y < Map.MapCellY + Map.MapCellHeight; y++) {
 				for (int x = Map.MapCellX; x < Map.MapCellX + Map.MapCellWidth; x++) {
 					CellClass & cell = Map[XY_Cell(x, y)];
-					cell.IsMapped  = true;
-					cell.IsVisible = true;
+					cell.Set_Mapped(PlayerPtr, true);
+					cell.Set_Visible(PlayerPtr, true);
 				}
 			}
 			Map.Flag_To_Redraw(true);
