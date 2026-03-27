@@ -73,6 +73,8 @@ void Display_Briefing_Text_GlyphX();
 extern void GlyphX_Assign_Houses(void);	//ST - 8/8/2019 12:35PM
 extern bool UseGlyphXStartLocations;		//ST - 3/31/2020 9:54AM
 
+#include "skirmishteams.h"
+
 //#include "WolDebug.h"
 
 #ifdef FIXIT_VERSION_3		//	Stalemate games.
@@ -2403,6 +2405,14 @@ bool Read_Scenario_INI(char * fname, bool )
 		//Call the new Assign_Houses function. ST - 8/8/2019 12:35PM
 		//Assign_Houses();
 		GlyphX_Assign_Houses();
+
+		/*
+		** Inject skirmish team types from teams.ini for all AI houses.
+		** Must run after GlyphX_Assign_Houses so each house's ActLike faction is set.
+		*/
+		if (Session.Type == GAME_SKIRMISH || Session.Type == GAME_INTERNET || Session.Type == GAME_GLYPHX_MULTIPLAYER) {
+			SkirmishTeamsClass::Load_And_Inject();
+		}
 	}
 	PlayerPtr->IsHuman = true;
 	PlayerPtr->IsPlayerControl = true;

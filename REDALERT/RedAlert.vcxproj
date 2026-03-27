@@ -75,7 +75,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>..\bin\$(PlatformName)\</OutDir>
+    <OutDir>C:\Users\domen\OneDrive\Documents\CnCRemastered\Mods\Red_Alert\TeamBasedAI\Data\</OutDir>
     <IntDir>$(PlatformName)\$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
@@ -113,6 +113,10 @@
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>false</DataExecutionPrevention>
     </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Tools\MSVC\14.16.27023\atlmfc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -368,6 +372,7 @@
     <ClCompile Include="SHASTRAW.CPP" />
     <ClCompile Include="SIDEBAR.CPP" />
     <ClCompile Include="SIDEBARGlyphx.CPP" />
+    <ClCompile Include="SKIRMISHTEAMS.CPP" />
     <ClCompile Include="SLIDER.CPP" />
     <ClCompile Include="SMUDGE.CPP" />
     <ClCompile Include="SOUNDDLG.CPP" />
@@ -643,6 +648,7 @@
     <ClInclude Include="SHASTRAW.H" />
     <ClInclude Include="SIDEBAR.H" />
     <ClInclude Include="SIDEBARGlyphx.H" />
+    <ClInclude Include="SKIRMISHTEAMS.H" />
     <ClInclude Include="SLIDER.H" />
     <ClInclude Include="SMUDGE.H" />
     <ClInclude Include="SOUNDDLG.H" />
@@ -756,6 +762,7 @@
     </MASM>
     <MASM Include="Win32Lib\TOBUFF.ASM" />
     <None Include="COORDA.ASM" />
+    <None Include="teams.ini" />
     <MASM Include="KEYFBUFF.ASM">
       <FileType>Document</FileType>
       <EnableMASM51Compatibility Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</EnableMASM51Compatibility>
