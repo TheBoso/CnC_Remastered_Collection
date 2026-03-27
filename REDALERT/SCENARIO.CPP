@@ -2457,10 +2457,53 @@ bool Read_Scenario_INI(char * fname, bool )
 	if (Session.Type == GAME_GLYPHX_MULTIPLAYER) {
 		IsSkirmishSpectator = Load_Spectator_INI();
 		if (IsSkirmishSpectator) {
+			/*
+			** Mark defeated and enable ObiWan observation before destroying units,
+			** so no victory/defeat logic fires during the cleanup loop.
+			*/
 			PlayerPtr->IsDefeated = true;
 			Session.ObiWan = 1;
+
+			/*
+			** Destroy all units, infantry, vehicles, aircraft and vessels owned by
+			** the spectator house so the player cannot interact with anything.
+			*/
+			HousesType playerHouse = PlayerPtr->Class->House;
+			for (int i = Buildings.Count() - 1; i >= 0; i--) {
+				BuildingClass * b = Buildings.Ptr(i);
+				if (b && !b->IsInLimbo && b->Owner() == playerHouse) delete b;
+			}
+			for (int i = Units.Count() - 1; i >= 0; i--) {
+				UnitClass * u = Units.Ptr(i);
+				if (u && !u->IsInLimbo && u->Owner() == playerHouse) delete u;
+			}
+			for (int i = Infantry.Count() - 1; i >= 0; i--) {
+				InfantryClass * inf = Infantry.Ptr(i);
+				if (inf && !inf->IsInLimbo && inf->Owner() == playerHouse) delete inf;
+			}
+			for (int i = Aircraft.Count() - 1; i >= 0; i--) {
+				AircraftClass * a = Aircraft.Ptr(i);
+				if (a && !a->IsInLimbo && a->Owner() == playerHouse) delete a;
+			}
+			for (int i = Vessels.Count() - 1; i >= 0; i--) {
+				VesselClass * v = Vessels.Ptr(i);
+				if (v && !v->IsInLimbo && v->Owner() == playerHouse) delete v;
+			}
+
+			/*
+			** Reveal the full playable map area by marking every cell as mapped and
+			** visible, then flag for a full redraw.
+			*/
+			for (int y = Map.MapCellY; y < Map.MapCellY + Map.MapCellHeight; y++) {
+				for (int x = Map.MapCellX; x < Map.MapCellX + Map.MapCellWidth; x++) {
+					CellClass & cell = Map[XY_Cell(x, y)];
+					cell.IsMapped  = true;
+					cell.IsVisible = true;
+				}
+			}
 			Map.Flag_To_Redraw(true);
-			GlyphX_Debug_Print("SpectatorMode: active - MULTI1 defeated, observation enabled.");
+
+			GlyphX_Debug_Print("SpectatorMode: active - player assets removed, map revealed.");
 		} else {
 			IsSkirmishSpectator = false;
 		}
