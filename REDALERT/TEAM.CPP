@@ -3101,7 +3101,7 @@ int TeamClass::TMission_GatherAtBase(void)
 	** entry: re-picking every frame cancels in-flight movement orders and
 	** leaves members animating but never arriving.
 	*/
-	if (!Target_Legal(Target)) {
+	if (!Target_Legal(MissionTarget)) {
 		FootClass * leader = Fetch_A_Leader();
 		SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
 		CELL dest_cell = Map.Nearby_Location(centroid, speed, -1, MZONE_NORMAL, true);
@@ -3111,7 +3111,7 @@ int TeamClass::TMission_GatherAtBase(void)
 		Target = dest_tgt;
 	}
 
-	TARGET dest_tgt = Target;
+	TARGET dest_tgt = MissionTarget;
 
 	/*
 	** Check if all active members are within stray distance — if so, advance.
@@ -3197,7 +3197,7 @@ int TeamClass::TMission_GatherNearEnemy(void)
 	** GatherAtBase: only pick once per mission entry to avoid cancelling
 	** movement orders every frame.
 	*/
-	if (!Target_Legal(Target)) {
+	if (!Target_Legal(MissionTarget)) {
 		FootClass * leader = Fetch_A_Leader();
 		SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
 		CELL near_cell = Map.Nearby_Location(best_cell, speed, -1, MZONE_NORMAL, true);
@@ -3207,7 +3207,7 @@ int TeamClass::TMission_GatherNearEnemy(void)
 		Target = dest_tgt;
 	}
 
-	TARGET dest_tgt = Target;
+	TARGET dest_tgt = MissionTarget;
 
 	bool finished = true;
 	FootClass const * unit = Member;
