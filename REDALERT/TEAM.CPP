@@ -3192,16 +3192,32 @@ int TeamClass::TMission_GatherNearEnemy(void)
 	}
 
 	/*
-	** Pick a passable cell near the closest enemy building so the team
-	** gathers just outside it rather than on top of it.  Same as
-	** GatherAtBase: only pick once per mission entry to avoid cancelling
-	** movement orders every frame.
+	** Compute a rally point that is outside the enemy base: start at the
+	** nearest enemy building and walk 8 cells back toward the team's own
+	** position.  This keeps the team clear of base defences while still
+	** being close enough to attack quickly.  Only compute once per mission
+	** entry (MissionTarget is reset to TARGET_NONE on every entry).
 	*/
 	if (!Target_Legal(MissionTarget)) {
+		COORDINATE enemy_coord = Cell_Coord(best_cell);
+		int vec_x = (int)(short)Coord_X(team_coord) - (int)(short)Coord_X(enemy_coord);
+		int vec_y = (int)(short)Coord_Y(team_coord) - (int)(short)Coord_Y(enemy_coord);
+		int vlen  = ::Distance(enemy_coord, team_coord);
+		if (vlen < 1) vlen = 1;
+
+		// Offset 8 cells toward the team; cap at 2/3 of the total distance
+		// so the anchor never overshoots past the team's own position.
+		const int RALLY_LEPTONS = 8 * 256;
+		int offset = min(RALLY_LEPTONS, vlen * 2 / 3);
+
+		LEPTON anchor_x = (LEPTON)((int)(short)Coord_X(enemy_coord) + vec_x * offset / vlen);
+		LEPTON anchor_y = (LEPTON)((int)(short)Coord_Y(enemy_coord) + vec_y * offset / vlen);
+		CELL anchor_cell = Coord_Cell(XY_Coord(anchor_x, anchor_y));
+
 		FootClass * leader = Fetch_A_Leader();
 		SpeedType speed = (leader != NULL) ? leader->Techno_Type_Class()->Speed : SPEED_FOOT;
-		CELL near_cell = Map.Nearby_Location(best_cell, speed, -1, MZONE_NORMAL, true);
-		if (near_cell == 0) near_cell = best_cell;
+		CELL near_cell = Map.Nearby_Location(anchor_cell, speed, -1, MZONE_NORMAL, false);
+		if (near_cell == 0) near_cell = anchor_cell;
 		TARGET dest_tgt = ::As_Target(near_cell);
 		Assign_Mission_Target(dest_tgt);
 		Target = dest_tgt;
