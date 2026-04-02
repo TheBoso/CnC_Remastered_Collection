@@ -2073,7 +2073,8 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 							**	center of the base.
 							*/
 							base->Assign_Destination(::As_Target(cell));
-							if (House->IQ >= Rule.IQGuardArea) {
+							if (House->IQ >= Rule.IQGuardArea) 
+								{
 								base->Assign_Mission(MISSION_GUARD_AREA);
 								base->ArchiveTarget = ::As_Target(House->Where_To_Go((FootClass *)base));
 							}
@@ -2109,6 +2110,7 @@ int BuildingClass::Exit_Object(TechnoClass * base)
 							*/
 							base->Assign_Destination(::As_Target(cell));
 							if (House->IQ >= Rule.IQGuardArea) {
+								
 								base->Assign_Mission(MISSION_GUARD_AREA);
 								base->ArchiveTarget = ::As_Target(House->Where_To_Go((FootClass *)base));
 							}
