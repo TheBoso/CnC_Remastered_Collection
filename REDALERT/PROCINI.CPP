@@ -23,6 +23,7 @@ static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive
 static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
 static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player"};
 static char const * s_SpawnNames[PROC_SPAWN_COUNT] = {"Base", "Edge"};
+static char const * s_StartNames[PROC_START_COUNT] = {"MCV", "Base", "Random", "Same"};
 static char const * s_DiffNames[DIFF_COUNT] = {"Easy", "Normal", "Hard"};
 
 static char const * s_QuarryNames[QUARRY_COUNT] = {
@@ -88,7 +89,8 @@ ProcDifficultyPreset::ProcDifficultyPreset() :
 
 ProcSettings::ProcSettings() :
     Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true),
-    IsKeepStartUnits(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE)
+    IsKeepStartUnits(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
+    PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
     strcpy(Primary, "RANDOM");
 }
@@ -450,6 +452,12 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
     settings.WaveMaxSeconds = max(settings.WaveMinSeconds, ini.Get_Int(section, "WaveMaxSeconds", settings.WaveMaxSeconds));
     settings.SpawnMode = (ProcSpawnModeType)Get_Enum(ini, section, "SpawnMode", s_SpawnNames, PROC_SPAWN_COUNT, settings.SpawnMode);
+    settings.PlayerStart = (ProcStartType)Get_Enum(ini, section, "PlayerStart", s_StartNames, PROC_START_COUNT, settings.PlayerStart);
+    settings.AllyStart = (ProcStartType)Get_Enum(ini, section, "AllyStart", s_StartNames, PROC_START_COUNT, settings.AllyStart);
+    settings.PlayerBaseChance = Bound(ini.Get_Int(section, "PlayerBaseChance", settings.PlayerBaseChance), 0, 100);
+
+    // "Same" only makes sense for allies.
+    if (settings.PlayerStart == PROC_START_SAME) settings.PlayerStart = PROC_START_RANDOM;
 }
 
 bool ProcPresetLibrary::Load()

@@ -115,6 +115,15 @@ typedef enum ProcObjectiveStateType : unsigned char {
     PROC_STATE_FAILED
 } ProcObjectiveStateType;
 
+// How a player-team house starts the mission.
+typedef enum ProcStartType : unsigned char {
+    PROC_START_MCV = 0,             // Normal skirmish start (MCV + lobby units)
+    PROC_START_BASE,                // Pre-built base from a Defend preset
+    PROC_START_RANDOM,              // Base with PlayerBaseChance %, otherwise MCV
+    PROC_START_SAME,                // Allies only: start the same way the player does
+    PROC_START_COUNT
+} ProcStartType;
+
 typedef enum ProcSpawnModeType : unsigned char {
     PROC_SPAWN_BASE = 0,            // Waves appear next to the owning house's base
     PROC_SPAWN_EDGE,                // Waves drive in from the map edge nearest the owning base
@@ -245,6 +254,9 @@ struct ProcSettings {
     int                     WaveMinSeconds;
     int                     WaveMaxSeconds;
     ProcSpawnModeType       SpawnMode;
+    ProcStartType           PlayerStart;        // Human players
+    ProcStartType           AllyStart;          // AI players on the player's team
+    int                     PlayerBaseChance;   // % used by PROC_START_RANDOM
 
     ProcSettings();
 };
@@ -331,6 +343,7 @@ private:
     void Classify_Houses();
     void Pick_Objectives();
     void Build_Enemy_Bases();
+    void Build_Player_Bases();
     void Place_Objective_Targets();
     void Announce_Objectives();
 

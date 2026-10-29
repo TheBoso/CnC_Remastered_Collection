@@ -190,6 +190,7 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
 
     Pick_Objectives();
     Build_Enemy_Bases();
+    Build_Player_Bases();
     Place_Objective_Targets();
 
     ScenarioInit = save_init;
@@ -308,24 +309,55 @@ void ProcMissionManager::Build_Enemy_Bases()
         sprintf(buf, "ProcMission: enemy %d (%s) base '%s', %d buildings", i, Proc_Side_Name(side), preset->Name, house->CurBuildings);
         GlyphX_Debug_Print(buf);
     }
+}
 
-    /*
-    **	Some primary objectives (survival style) hand the human players a ready made base.
-    */
+/*
+**	The player's team either starts the normal skirmish way (MCV) or with an established
+**	base from a Defend preset. A primary objective with PlayerBase= forces a base for the
+**	human players; otherwise PlayerStart / AllyStart decide.
+*/
+void ProcMissionManager::Build_Player_Bases()
+{
+    char buf[120];
+
     ProcObjectivePreset const * primary = (ObjectiveCount > 0) ? Objectives[0].Preset : NULL;
-    if (primary != NULL && primary->PlayerBase[0] != '\0') {
-        for (int i = 0; i < PlayerTeamCount; i++) {
-            HouseClass * house = PlayerTeam[i];
-            if (!house->IsHuman) continue;
+    bool forced = (primary != NULL && primary->PlayerBase[0] != '\0');
 
-            ProcBasePreset const * preset = (stricmp(primary->PlayerBase, "AUTO") == 0)
-                ? ProcPresets.Pick_Base(Proc_Side_Of(house), PROC_BASE_DEFEND, house->Control.TechLevel)
-                : ProcPresets.Find_Base(primary->PlayerBase);
-            if (preset == NULL) continue;
+    // One roll for all the humans, so co-op players start alike.
+    bool playerbase = forced || Settings.PlayerStart == PROC_START_BASE ||
+        (Settings.PlayerStart == PROC_START_RANDOM && Random_Pick(0, 99) < Settings.PlayerBaseChance);
 
-            Clear_Start_Units(house, true);
-            Build_Base(house, preset, true);
+    bool allybase;
+    switch (Settings.AllyStart) {
+        case PROC_START_BASE:   allybase = true; break;
+        case PROC_START_RANDOM: allybase = Random_Pick(0, 99) < Settings.PlayerBaseChance; break;
+        case PROC_START_SAME:   allybase = playerbase; break;
+        default:                allybase = false; break;
+    }
+
+    for (int i = 0; i < PlayerTeamCount; i++) {
+        HouseClass * house = PlayerTeam[i];
+        if (!(house->IsHuman ? playerbase : allybase)) continue;
+
+        ProcBasePreset const * preset = NULL;
+        if (house->IsHuman && forced && stricmp(primary->PlayerBase, "AUTO") != 0) {
+            preset = ProcPresets.Find_Base(primary->PlayerBase);
         }
+        if (preset == NULL) {
+            preset = ProcPresets.Pick_Base(Proc_Side_Of(house), PROC_BASE_DEFEND, house->Control.TechLevel);
+        }
+        if (preset == NULL) continue;
+
+        Clear_Start_Units(house, true);
+        Build_Base(house, preset, true);
+        if (!house->IsHuman) {
+            house->Credits += preset->Credits;
+            house->IsBaseBuilding = true;
+        }
+
+        sprintf(buf, "ProcMission: %s %s starts with base '%s'", house->IsHuman ? "player" : "ally",
+            house->IniName, preset->Name);
+        GlyphX_Debug_Print(buf);
     }
 }
 
@@ -448,6 +480,9 @@ void ProcMissionManager::Place_Naval_Yard(HouseClass * house, CELL center)
     }
 }
 
+/*
+**	'isplayer' means the base belongs to the player's team: no difficulty scaling.
+*/
 bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer)
 {
     CELL center = Coord_Cell(house->Center);
@@ -484,7 +519,7 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
         Place_Units(house, &UnitTypeClass::As_Reference(UNIT_HARVESTER), preset->Harvesters, center, MISSION_HARVEST);
     }
 
-    MissionType guard = isplayer ? MISSION_GUARD : MISSION_GUARD_AREA;
+    MissionType guard = house->IsHuman ? MISSION_GUARD : MISSION_GUARD_AREA;
     for (int g = 0; g < preset->GuardCount; g++) {
         TechnoTypeClass const * type = preset->Guards[g].Type;
         if (!Is_Allowed(*type, house)) continue;
