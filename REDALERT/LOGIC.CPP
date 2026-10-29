@@ -421,9 +421,9 @@ void LogicClass::AI(void)
 #endif
 
 	/*
-	**	Procedural mission director AI (enemy wave spawning).
+	**	Procedural mission objectives and attack waves.
 	*/
-	if (Session.Type == GAME_NORMAL && Scen.IsProcedural) {
+	if (Scen.IsProcedural) {
 		ProcMission.AI();
 	}
 }

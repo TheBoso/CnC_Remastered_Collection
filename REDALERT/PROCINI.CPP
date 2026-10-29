@@ -1,1026 +1,636 @@
 // PROCINI.CPP
 //
-// Procedural Mission INI Parser for Red Alert
-// Implementation of INI loading for mission rules and configuration
+// Preset library loader for the procedural mission generator.
+// Reads PROCMISSION.INI, PROCTEAMS.INI, PROCBASES.INI and PROCOBJECTIVES.INI.
 //
 
 #include "function.h"
+#include "procmission.h"
 #include "procini.h"
-#include "ccini.h"
 
 extern void GlyphX_Debug_Print(const char *debug_text);
 
 
 /*******************************************************************************
- * GLOBAL INSTANCE
+ * NAME TABLES
  ******************************************************************************/
 
-ProcMissionINIClass ProcMissionINI;
+static char const * s_SideNames[PROC_SIDE_COUNT] = {"Any", "Allied", "Soviet"};
+static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Medium", "Heavy", "Overwhelming"};
+static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense"};
+static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend"};
+static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect"};
+static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
+static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player"};
+static char const * s_SpawnNames[PROC_SPAWN_COUNT] = {"Base", "Edge"};
+static char const * s_DiffNames[DIFF_COUNT] = {"Easy", "Normal", "Hard"};
+
+static char const * s_QuarryNames[QUARRY_COUNT] = {
+    "None", "Anything", "Buildings", "Harvesters", "Infantry", "Vehicles",
+    "Vessels", "Factories", "Defense", "Threat", "Power", "Fakes"
+};
+
+
+static int Name_Index(char const * name, char const * const * table, int count, int defvalue)
+{
+    if (name == NULL || *name == '\0') return defvalue;
+    for (int i = 0; i < count; i++) {
+        if (stricmp(name, table[i]) == 0) return i;
+    }
+    return defvalue;
+}
+
+char const * Proc_Side_Name(ProcSideType side)
+{
+    return (side < PROC_SIDE_COUNT) ? s_SideNames[side] : "?";
+}
+
+char const * Proc_Objective_Kind_Name(ProcObjectiveKindType kind)
+{
+    return (kind < PROC_OBJ_KIND_COUNT) ? s_KindNames[kind] : "?";
+}
 
 
 /*******************************************************************************
- * NAME LOOKUP TABLES
+ * CONSTRUCTORS
  ******************************************************************************/
 
-static const char* s_HouseNames[] = {
-    "Spain", "Greece", "USSR", "England", "Ukraine", "Germany", "France", "Turkey",
-    "GoodGuy", "BadGuy", "Neutral", "Special",
-    NULL
-};
+ProcTeamPreset::ProcTeamPreset() :
+    Side(PROC_SIDE_ANY), Role(PROC_TEAM_ATTACK), Threat(PROC_THREAT_LIGHT), Weight(10),
+    MemberCount(0), MissionCount(0), IsGathering(true), IsSuicide(false), IsRoundAbout(false)
+{
+    Name[0] = '\0';
+}
 
-static const char* s_StructNames[] = {
-    "ATEK", "IRON", "WEAP", "PDOX", "PBOX", "HBOX", "DOME", "GAP",
-    "GUN", "AGUN", "FTUR", "FACT", "PROC", "SILO", "HPAD", "SAM",
-    "AFLD", "POWR", "APWR", "STEK", "HOSP", "BARR", "TENT", "KENN",
-    "FIX", "BIO", "MISS", "SYRD", "SPEN", "MSLO", "FCOM", "TSLA",
-    "WEAF", "FACF", "SYRF", "SPENF", "DOMEF",
-    "SBAG", "CYCL", "BRIK", "BARB", "WOOD", "FENC",
-    "MINV", "MINP",
-    NULL
-};
+ProcBasePreset::ProcBasePreset() :
+    Side(PROC_SIDE_ANY), Role(PROC_BASE_MAIN), MinTech(1), Weight(10), EntryCount(0), GuardCount(0),
+    Harvesters(1), IsAutoPower(true), IsNaval(false), Credits(5000)
+{
+    Name[0] = '\0';
+}
 
-static const StructType s_StructTypes[] = {
-    STRUCT_ADVANCED_TECH, STRUCT_IRON_CURTAIN, STRUCT_WEAP, STRUCT_CHRONOSPHERE,
-    STRUCT_PILLBOX, STRUCT_CAMOPILLBOX, STRUCT_RADAR, STRUCT_GAP,
-    STRUCT_TURRET, STRUCT_AAGUN, STRUCT_FLAME_TURRET, STRUCT_CONST,
-    STRUCT_REFINERY, STRUCT_STORAGE, STRUCT_HELIPAD, STRUCT_SAM,
-    STRUCT_AIRSTRIP, STRUCT_POWER, STRUCT_ADVANCED_POWER, STRUCT_SOVIET_TECH,
-    STRUCT_HOSPITAL, STRUCT_BARRACKS, STRUCT_TENT, STRUCT_KENNEL,
-    STRUCT_REPAIR, STRUCT_BIO_LAB, STRUCT_MISSION, STRUCT_SHIP_YARD,
-    STRUCT_SUB_PEN, STRUCT_MSLO, STRUCT_FORWARD_COM, STRUCT_TESLA,
-    STRUCT_FAKEWEAP, STRUCT_FAKECONST, STRUCT_FAKE_YARD, STRUCT_FAKE_PEN, STRUCT_FAKE_RADAR,
-    STRUCT_SANDBAG_WALL, STRUCT_CYCLONE_WALL, STRUCT_BRICK_WALL,
-    STRUCT_BARBWIRE_WALL, STRUCT_WOOD_WALL, STRUCT_FENCE,
-    STRUCT_AVMINE, STRUCT_APMINE,
-    STRUCT_NONE
-};
+ProcObjectivePreset::ProcObjectivePreset() :
+    Kind(PROC_OBJ_DESTROY_BASES), Slot(PROC_SLOT_EITHER), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10),
+    MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0)
+{
+    Name[0] = '\0';
+    Guard[0] = '\0';
+    PlayerBase[0] = '\0';
+    Text[0] = '\0';
+}
 
-static const char* s_UnitNames[] = {
-    // Standard units
-    "HTNK", "3TNK", "2TNK", "1TNK", "APC", "MNLY", "JEEP", "HARV",
-    "ARTY", "MRJ", "MGG", "MCV", "V2RL", "TRUK",
-    // Aftermath units
-    "CTNK", "TTNK", "QTNK", "DTRK", "STNK",
-    NULL
-};
-
-static const UnitType s_UnitTypes[] = {
-    // Standard units
-    UNIT_HTANK, UNIT_MTANK, UNIT_MTANK2, UNIT_LTANK, UNIT_APC,
-    UNIT_MINELAYER, UNIT_JEEP, UNIT_HARVESTER,
-    UNIT_ARTY, UNIT_MRJ, UNIT_MGG, UNIT_MCV, UNIT_V2_LAUNCHER, UNIT_TRUCK,
-    // Aftermath units
-    UNIT_CHRONOTANK, UNIT_TESLATANK, UNIT_MAD, UNIT_DEMOTRUCK, UNIT_PHASE,
-    UNIT_NONE
-};
-
-static const char* s_InfantryNames[] = {
-    "E1", "E2", "E3", "E4", "E6", "E7", "SPY", "THF", "MEDI", "GNRL", "DOG",
-    "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10",
-    "EINSTEIN", "DELPHI", "CHAN",
-    NULL
-};
-
-static const InfantryType s_InfantryTypes[] = {
-    INFANTRY_E1, INFANTRY_E2, INFANTRY_E3, INFANTRY_E4,
-    INFANTRY_RENOVATOR, INFANTRY_TANYA, INFANTRY_SPY, INFANTRY_THIEF,
-    INFANTRY_MEDIC, INFANTRY_GENERAL, INFANTRY_DOG,
-    INFANTRY_C1, INFANTRY_C2, INFANTRY_C3, INFANTRY_C4, INFANTRY_C5,
-    INFANTRY_C6, INFANTRY_C7, INFANTRY_C8, INFANTRY_C9, INFANTRY_C10,
-    INFANTRY_EINSTEIN, INFANTRY_DELPHI, INFANTRY_CHAN,
-    INFANTRY_NONE
-};
-
-static const char* s_MissionNames[] = {
-    "SLEEP", "ATTACK", "MOVE", "QMOVE", "RETREAT", "GUARD", "STICKY",
-    "ENTER", "CAPTURE", "HARVEST", "GUARD_AREA", "RETURN", "STOP",
-    "AMBUSH", "HUNT", "UNLOAD", "SABOTAGE", "CONSTRUCTION",
-    "DECONSTRUCTION", "REPAIR", "RESCUE", "MISSILE", "HARMLESS",
-    NULL
-};
-
-static const char* s_QuarryNames[] = {
-    "NONE", "ANYTHING", "BUILDINGS", "HARVESTERS", "INFANTRY",
-    "VEHICLES", "VESSELS", "FACTORIES", "DEFENSE", "THREAT", "POWER", "FAKES",
-    NULL
-};
-
-// Team mission names for INI parsing
-static const char* s_TeamMissionNames[] = {
-    "ATTACK", "ATT_WAYPT", "FORMATION", "MOVE", "MOVECELL", "GUARD",
-    "LOOP", "PATROL", "SET_GLOBAL", "INVULNERABLE", "LOAD", "SPY",
-    "UNLOAD", "DO", "DEPLOY", "ATTACKTARCOM", "HOUND_DOG",
-    NULL
-};
-
-static const TeamMissionType s_TeamMissionTypes[] = {
-    TMISSION_ATTACK, TMISSION_ATT_WAYPT, TMISSION_FORMATION, TMISSION_MOVE,
-    TMISSION_MOVECELL, TMISSION_GUARD, TMISSION_LOOP, TMISSION_PATROL,
-    TMISSION_SET_GLOBAL, TMISSION_INVULNERABLE, TMISSION_LOAD, TMISSION_SPY,
-    TMISSION_UNLOAD, TMISSION_DO, TMISSION_DEPLOY, TMISSION_ATTACKTARCOM,
-    TMISSION_HOUND_DOG,
-    TMISSION_NONE
-};
-
-// Vessel type names
-static const char* s_VesselNames[] = {
-    "SS", "DD", "CA", "LST", "PT", "MSUB", "CARR",
-    NULL
-};
-
-static const VesselType s_VesselTypes[] = {
-    VESSEL_SS, VESSEL_DD, VESSEL_CA, VESSEL_TRANSPORT, VESSEL_PT,
-    VESSEL_MISSILESUB, VESSEL_CARRIER,
-    VESSEL_NONE
-};
-
-
-/*******************************************************************************
- * CONSTRUCTOR/DESTRUCTOR
- ******************************************************************************/
-
-ProcMissionINIClass::ProcMissionINIClass()
+ProcDifficultyPreset::ProcDifficultyPreset() :
+    EnemyCreditsPct(100), DefenseScalePct(100), GuardScalePct(100), WaveSizePct(100), WaveIntervalPct(100),
+    MaxActiveWaves(2), OutpostChance(50), FirstWaveSeconds(240), StartThreat(PROC_THREAT_SCOUT),
+    MaxThreat(PROC_THREAT_HEAVY), EscalateMinutes(5)
 {
 }
 
-ProcMissionINIClass::~ProcMissionINIClass()
+ProcSettings::ProcSettings() :
+    Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true),
+    IsKeepStartUnits(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE)
+{
+    strcpy(Primary, "RANDOM");
+}
+
+ProcPresetLibrary::ProcPresetLibrary() : TeamCount(0), BaseCount(0), ObjectiveCount(0)
 {
 }
 
 
 /*******************************************************************************
- * TYPE CONVERSION HELPERS
+ * VALUE PARSERS
  ******************************************************************************/
 
-HousesType ProcMissionINIClass::House_From_Name(const char* name)
+static TechnoTypeClass const * Techno_From_Name(char const * name)
 {
-    if (!name || !*name) return HOUSE_NONE;
+    UnitType unit = UnitTypeClass::From_Name(name);
+    if (unit != UNIT_NONE) return &UnitTypeClass::As_Reference(unit);
 
-    for (int i = 0; s_HouseNames[i]; i++) {
-        if (stricmp(name, s_HouseNames[i]) == 0) {
-            return (HousesType)i;
+    InfantryType inf = InfantryTypeClass::From_Name(name);
+    if (inf != INFANTRY_NONE) return &InfantryTypeClass::As_Reference(inf);
+
+    VesselType vessel = VesselTypeClass::From_Name(name);
+    if (vessel != VESSEL_NONE) return &VesselTypeClass::As_Reference(vessel);
+
+    AircraftType air = AircraftTypeClass::From_Name(name);
+    if (air != AIRCRAFT_NONE) return &AircraftTypeClass::As_Reference(air);
+
+    return NULL;
+}
+
+/*
+**	Splits "A:1:2,B:3" into tokens. Calls back with the colon separated fields of each entry.
+*/
+typedef void (*ProcFieldCallback)(char ** fields, int fieldcount, void * context);
+
+static void Parse_List(char const * text, ProcFieldCallback callback, void * context)
+{
+    char buffer[512];
+    strncpy(buffer, text, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+
+    char * entry = buffer;
+    while (entry != NULL && *entry != '\0') {
+        char * next = strchr(entry, ',');
+        if (next != NULL) *next++ = '\0';
+
+        char * fields[4];
+        int fieldcount = 0;
+        char * field = entry;
+        while (field != NULL && fieldcount < 4) {
+            while (*field == ' ' || *field == '\t') field++;
+            char * colon = strchr(field, ':');
+            if (colon != NULL) *colon++ = '\0';
+            char * end = field + strlen(field);
+            while (end > field && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+            fields[fieldcount++] = field;
+            field = colon;
         }
-    }
-
-    if (stricmp(name, "None") == 0) return HOUSE_NONE;
-    if (stricmp(name, "Player") == 0) return HOUSE_GREECE;
-    if (stricmp(name, "Allies") == 0) return HOUSE_GREECE;
-    if (stricmp(name, "Soviet") == 0) return HOUSE_USSR;
-
-    return HOUSE_NONE;
-}
-
-StructType ProcMissionINIClass::Struct_From_Name(const char* name)
-{
-    if (!name || !*name) return STRUCT_NONE;
-
-    for (int i = 0; s_StructNames[i]; i++) {
-        if (stricmp(name, s_StructNames[i]) == 0) {
-            return s_StructTypes[i];
+        if (fieldcount > 0 && *fields[0] != '\0') {
+            callback(fields, fieldcount, context);
         }
+        entry = next;
     }
-
-    return STRUCT_NONE;
 }
 
-UnitType ProcMissionINIClass::Unit_From_Name(const char* name)
+struct TechnoListContext {
+    ProcTechnoCount * List;
+    int Max;
+    int * Count;
+    char const * Section;
+};
+
+static void Techno_List_Callback(char ** fields, int fieldcount, void * context)
 {
-    if (!name || !*name) return UNIT_NONE;
+    TechnoListContext * ctx = (TechnoListContext *)context;
+    if (*ctx->Count >= ctx->Max) return;
 
-    for (int i = 0; s_UnitNames[i]; i++) {
-        if (stricmp(name, s_UnitNames[i]) == 0) {
-            return s_UnitTypes[i];
-        }
+    TechnoTypeClass const * type = Techno_From_Name(fields[0]);
+    if (type == NULL) {
+        char buf[128];
+        sprintf(buf, "ProcINI: [%s] unknown unit type '%s'", ctx->Section, fields[0]);
+        GlyphX_Debug_Print(buf);
+        return;
     }
-
-    return UNIT_NONE;
+    ProcTechnoCount & item = ctx->List[(*ctx->Count)++];
+    item.Type = type;
+    item.Count = (fieldcount > 1) ? max(1, atoi(fields[1])) : 1;
 }
 
-InfantryType ProcMissionINIClass::Infantry_From_Name(const char* name)
+static void Parse_Techno_List(CCINIClass & ini, char const * section, char const * entry, ProcTechnoCount * list, int maxcount, int & count)
 {
-    if (!name || !*name) return INFANTRY_NONE;
-
-    for (int i = 0; s_InfantryNames[i]; i++) {
-        if (stricmp(name, s_InfantryNames[i]) == 0) {
-            return s_InfantryTypes[i];
-        }
+    char buffer[512];
+    count = 0;
+    if (ini.Get_String(section, entry, "", buffer, sizeof(buffer)) > 0) {
+        TechnoListContext ctx = {list, maxcount, &count, section};
+        Parse_List(buffer, Techno_List_Callback, &ctx);
     }
-
-    return INFANTRY_NONE;
 }
 
-MissionType ProcMissionINIClass::Mission_From_Name(const char* name)
+struct BaseEntryContext {
+    ProcBasePreset * Base;
+    bool IsDefense;
+    char const * Section;
+};
+
+static void Base_Entry_Callback(char ** fields, int fieldcount, void * context)
 {
-    if (!name || !*name) return MISSION_NONE;
+    BaseEntryContext * ctx = (BaseEntryContext *)context;
+    ProcBasePreset & base = *ctx->Base;
+    if (base.EntryCount >= PROC_MAX_BASE_ENTRIES) return;
 
-    for (int i = 0; s_MissionNames[i]; i++) {
-        if (stricmp(name, s_MissionNames[i]) == 0) {
-            return (MissionType)i;
-        }
+    StructType type = BuildingTypeClass::From_Name(fields[0]);
+    if (type == STRUCT_NONE) {
+        char buf[128];
+        sprintf(buf, "ProcINI: [%s] unknown structure '%s'", ctx->Section, fields[0]);
+        GlyphX_Debug_Print(buf);
+        return;
     }
 
-    return MISSION_NONE;
+    // TYPE[:COUNT[:MINRADIUS[:MAXRADIUS]]]
+    ProcBaseEntry & item = base.Entries[base.EntryCount++];
+    item.Type = type;
+    item.IsDefense = ctx->IsDefense;
+    item.Count = (fieldcount > 1) ? max(0, atoi(fields[1])) : 1;
+    if (ctx->IsDefense) {
+        item.MinRadius = 7;
+        item.MaxRadius = 13;
+    }
+    if (fieldcount > 2) item.MinRadius = max(0, atoi(fields[2]));
+    if (fieldcount > 3) item.MaxRadius = max(item.MinRadius, atoi(fields[3]));
 }
 
-QuarryType ProcMissionINIClass::Quarry_From_Name(const char* name)
+static void Parse_Base_Entries(CCINIClass & ini, char const * section, char const * entry, ProcBasePreset & base, bool isdefense)
 {
-    if (!name || !*name) return QUARRY_NONE;
-
-    for (int i = 0; s_QuarryNames[i]; i++) {
-        if (stricmp(name, s_QuarryNames[i]) == 0) {
-            return (QuarryType)i;
-        }
+    char buffer[512];
+    if (ini.Get_String(section, entry, "", buffer, sizeof(buffer)) > 0) {
+        BaseEntryContext ctx = {&base, isdefense, section};
+        Parse_List(buffer, Base_Entry_Callback, &ctx);
     }
-
-    return QUARRY_NONE;
 }
 
-VesselType ProcMissionINIClass::Vessel_From_Name(const char* name)
+struct MissionListContext {
+    ProcTeamPreset * Team;
+    char const * Section;
+};
+
+static void Mission_Callback(char ** fields, int fieldcount, void * context)
 {
-    if (!name || !*name) return VESSEL_NONE;
+    MissionListContext * ctx = (MissionListContext *)context;
+    ProcTeamPreset & team = *ctx->Team;
+    if (team.MissionCount >= PROC_MAX_TEAM_MISSIONS) return;
 
-    for (int i = 0; s_VesselNames[i]; i++) {
-        if (stricmp(name, s_VesselNames[i]) == 0) {
-            return s_VesselTypes[i];
-        }
+    ProcTeamMission & mission = team.Missions[team.MissionCount];
+    char const * arg = (fieldcount > 1) ? fields[1] : "";
+
+    if (stricmp(fields[0], "Attack") == 0) {
+        mission.Mission = TMISSION_ATTACK;
+        mission.Data = Name_Index(arg, s_QuarryNames, QUARRY_COUNT, QUARRY_ANYTHING);
+    } else if (stricmp(fields[0], "Hunt") == 0) {
+        mission.Mission = TMISSION_DO;
+        mission.Data = MISSION_HUNT;
+    } else if (stricmp(fields[0], "Guard") == 0) {
+        // Guard for N tenths of a minute
+        mission.Mission = TMISSION_GUARD;
+        mission.Data = (*arg != '\0') ? atoi(arg) : 10;
+    } else if (stricmp(fields[0], "Loop") == 0) {
+        mission.Mission = TMISSION_LOOP;
+        mission.Data = (*arg != '\0') ? atoi(arg) : 0;
+    } else {
+        char buf[128];
+        sprintf(buf, "ProcINI: [%s] unknown team mission '%s'", ctx->Section, fields[0]);
+        GlyphX_Debug_Print(buf);
+        return;
     }
-
-    return VESSEL_NONE;
+    team.MissionCount++;
 }
 
-TeamMissionType ProcMissionINIClass::TeamMission_From_Name(const char* name)
+static void Parse_Name(CCINIClass & ini, char const * section, char const * entry, char * out, int size)
 {
-    if (!name || !*name) return TMISSION_NONE;
-
-    for (int i = 0; s_TeamMissionNames[i]; i++) {
-        if (stricmp(name, s_TeamMissionNames[i]) == 0) {
-            return s_TeamMissionTypes[i];
-        }
-    }
-
-    return TMISSION_NONE;
+    ini.Get_String(section, entry, "", out, size);
+    out[size - 1] = '\0';
 }
 
-
-/*******************************************************************************
- * LOAD FUNCTIONS
- ******************************************************************************/
-
-bool ProcMissionINIClass::Load(const char* filename, ProcMissionDef& mission)
-{
-    GlyphX_Debug_Print("ProcINI: Loading mission file...");
-    GlyphX_Debug_Print(filename);
-
-    CCFileClass file(filename);
-    if (!file.Is_Available()) {
-        GlyphX_Debug_Print("ProcINI: File not available!");
-        return false;
-    }
-
-    GlyphX_Debug_Print("ProcINI: File found, parsing...");
-    CCINIClass ini;
-    ini.Load(file, false);
-
-    return Load(ini, mission);
-}
-
-bool ProcMissionINIClass::Load(CCINIClass& ini, ProcMissionDef& mission)
-{
-    mission = ProcMissionDef();
-
-    // Parse main mission section
-    GlyphX_Debug_Print("ProcINI: Parsing [Mission] section...");
-    if (!Parse_Mission_Section(ini, mission)) {
-        GlyphX_Debug_Print("ProcINI: [Mission] section not found or invalid!");
-        return false;
-    }
-    GlyphX_Debug_Print("ProcINI: [Mission] parsed OK");
-
-    // Parse player section
-    GlyphX_Debug_Print("ProcINI: Parsing [Player] section...");
-    Parse_Player_Section(ini, mission.PlayerConfig);
-
-    char debugBuf[128];
-    sprintf(debugBuf, "ProcINI: Player region=%d, buildings=%d, units=%d, infantry=%d",
-        (int)mission.PlayerConfig.Region,
-        mission.PlayerConfig.BuildingCount,
-        mission.PlayerConfig.UnitCount,
-        mission.PlayerConfig.InfantryCount);
-    GlyphX_Debug_Print(debugBuf);
-
-    // Parse player handicaps
-    Parse_Handicaps_Section(ini, mission.PlayerConfig.Handicaps);
-
-    // Parse enemy bases
-    char sectionName[32];
-    for (int i = 1; i <= PROC_MAX_ENEMY_BASES; i++) {
-        sprintf(sectionName, "%s%d", PROC_INI_ENEMY_BASE, i);
-        if (ini.Is_Present(sectionName)) {
-            if (mission.EnemyBaseCount < PROC_MAX_ENEMY_BASES) {
-                Parse_Enemy_Base(ini, sectionName, mission.EnemyBases[mission.EnemyBaseCount]);
-                mission.EnemyBaseCount++;
-            }
-        }
-    }
-
-    // Parse director rules
-    Parse_Director_Rules(ini, mission.DirectorRules);
-
-    // Parse spawn entries
-    for (int i = 1; i <= PROC_MAX_SPAWN_ENTRIES; i++) {
-        sprintf(sectionName, "%s%d", PROC_INI_SPAWN_ENTRY, i);
-        if (ini.Is_Present(sectionName)) {
-            if (mission.DirectorRules.SpawnEntryCount < PROC_MAX_SPAWN_ENTRIES) {
-                Parse_Spawn_Entry(ini, sectionName,
-                    mission.DirectorRules.SpawnEntries[mission.DirectorRules.SpawnEntryCount]);
-                mission.DirectorRules.SpawnEntryCount++;
-            }
-        }
-    }
-
-    // Parse difficulty settings
-    Parse_Difficulty(ini, PROC_INI_DIFF_EASY, mission.EasyDifficulty);
-    Parse_Difficulty(ini, PROC_INI_DIFF_NORMAL, mission.NormalDifficulty);
-    Parse_Difficulty(ini, PROC_INI_DIFF_HARD, mission.HardDifficulty);
-
-    return true;
-}
-
-
-/*******************************************************************************
- * SECTION PARSERS
- ******************************************************************************/
-
-bool ProcMissionINIClass::Parse_Mission_Section(CCINIClass& ini, ProcMissionDef& mission)
-{
-    if (!ini.Is_Present(PROC_INI_MISSION)) {
-        return false;
-    }
-
-    char buffer[256];
-
-    ini.Get_String(PROC_INI_MISSION, "ID", "", buffer, sizeof(buffer));
-    strncpy(mission.MissionID, buffer, PROC_MISSION_ID_LEN - 1);
-
-    ini.Get_String(PROC_INI_MISSION, "Theme", "BASE_ASSAULT", buffer, sizeof(buffer));
-    mission.Theme = Proc_Theme_From_Name(buffer);
-
-    ini.Get_String(PROC_INI_MISSION, "PlayerFaction", "Greece", buffer, sizeof(buffer));
-    mission.PlayerFaction = House_From_Name(buffer);
-
-    ini.Get_String(PROC_INI_MISSION, "EnemyFaction", "USSR", buffer, sizeof(buffer));
-    mission.EnemyFaction = House_From_Name(buffer);
-
-    ini.Get_String(PROC_INI_MISSION, "TemplateMap", "", buffer, sizeof(buffer));
-    strncpy(mission.TemplateMap, buffer, sizeof(mission.TemplateMap) - 1);
-
-    // Theme-specific settings
-    mission.SurvivalTime = ini.Get_Int(PROC_INI_MISSION, "SurvivalTime", 0);
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Player_Section(CCINIClass& ini, ProcPlayerConfig& config)
-{
-    if (!ini.Is_Present(PROC_INI_PLAYER)) {
-        return false;
-    }
-
-    char buffer[1024];
-
-    ini.Get_String(PROC_INI_PLAYER, "Region", "Base_A", buffer, sizeof(buffer));
-    config.Region = Proc_Region_From_Name(buffer);
-
-    config.TechLevel = ini.Get_Int(PROC_INI_PLAYER, "TechLevel", 5);
-    config.Credits = ini.Get_Int(PROC_INI_PLAYER, "Credits", 10000);
-    config.MaxUnits = ini.Get_Int(PROC_INI_PLAYER, "MaxUnits", 100);
-    config.MaxBuildings = ini.Get_Int(PROC_INI_PLAYER, "MaxBuildings", 50);
-    config.MaxInfantry = ini.Get_Int(PROC_INI_PLAYER, "MaxInfantry", 100);
-
-    ini.Get_String(PROC_INI_PLAYER, "Buildings", "", buffer, sizeof(buffer));
-    Parse_Building_List(buffer, config.Buildings, PROC_MAX_BUILDINGS, config.BuildingCount);
-
-    ini.Get_String(PROC_INI_PLAYER, "Units", "", buffer, sizeof(buffer));
-    Parse_Unit_List(buffer, config.Units, PROC_MAX_UNITS, config.UnitCount);
-
-    ini.Get_String(PROC_INI_PLAYER, "Infantry", "", buffer, sizeof(buffer));
-    Parse_Infantry_List(buffer, config.Infantry, PROC_MAX_INFANTRY, config.InfantryCount);
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Handicaps_Section(CCINIClass& ini, ProcHandicaps& handicaps)
-{
-    if (!ini.Is_Present(PROC_INI_HANDICAPS)) {
-        return false;
-    }
-
-    int val;
-
-    val = ini.Get_Int(PROC_INI_HANDICAPS, "Firepower", 100);
-    handicaps.FirepowerBias = fixed(val, 100);
-
-    val = ini.Get_Int(PROC_INI_HANDICAPS, "Armor", 100);
-    handicaps.ArmorBias = fixed(val, 100);
-
-    val = ini.Get_Int(PROC_INI_HANDICAPS, "Cost", 100);
-    handicaps.CostBias = fixed(val, 100);
-
-    val = ini.Get_Int(PROC_INI_HANDICAPS, "BuildSpeed", 100);
-    handicaps.BuildSpeedBias = fixed(val, 100);
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Enemy_Base(CCINIClass& ini, const char* section, ProcEnemyBase& base)
-{
-    char buffer[1024];
-
-    ini.Get_String(section, "ID", "", buffer, sizeof(buffer));
-    strncpy(base.ID, buffer, PROC_MISSION_ID_LEN - 1);
-
-    ini.Get_String(section, "House", "USSR", buffer, sizeof(buffer));
-    base.House = House_From_Name(buffer);
-
-    ini.Get_String(section, "Region", "Base_B", buffer, sizeof(buffer));
-    base.Region = Proc_Region_From_Name(buffer);
-
-    ini.Get_String(section, "State", "ACTIVE", buffer, sizeof(buffer));
-    if (stricmp(buffer, "ACTIVE") == 0) {
-        base.State = PROC_BASE_STATE_ACTIVE;
-    } else if (stricmp(buffer, "DORMANT") == 0) {
-        base.State = PROC_BASE_STATE_DORMANT;
-    } else if (stricmp(buffer, "DELAYED") == 0) {
-        base.State = PROC_BASE_STATE_DELAYED;
-    }
-
-    base.TechLevel = ini.Get_Int(section, "TechLevel", 5);
-    base.Credits = ini.Get_Int(section, "Credits", 10000);
-
-    // AI Flags - defaults to enabled for active AI
-    base.AIFlags.IsBaseBuilding = ini.Get_Bool(section, "BaseBuilding", true);
-    base.AIFlags.IsAlerted = ini.Get_Bool(section, "Alerted", true);
-    base.AIFlags.IsAutocreate = ini.Get_Bool(section, "Autocreate", true);
-    base.AIFlags.ProductionEnabled = ini.Get_Bool(section, "Production", true);
-
-    ini.Get_String(section, "Buildings", "", buffer, sizeof(buffer));
-    Parse_Building_List(buffer, base.Buildings, PROC_MAX_BUILDINGS, base.BuildingCount);
-
-    ini.Get_String(section, "Defenses", "", buffer, sizeof(buffer));
-    Parse_Building_List(buffer, base.Defenses, PROC_MAX_BUILDINGS, base.DefenseCount);
-
-    ini.Get_String(section, "GuardUnits", "", buffer, sizeof(buffer));
-    Parse_Unit_List(buffer, base.GuardUnits, PROC_MAX_UNITS, base.GuardUnitCount);
-
-    ini.Get_String(section, "GuardInfantry", "", buffer, sizeof(buffer));
-    Parse_Infantry_List(buffer, base.GuardInfantry, PROC_MAX_INFANTRY, base.GuardInfantryCount);
-
-    base.ActivationDelay = ini.Get_Int(section, "ActivationDelay", 0);
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Director_Rules(CCINIClass& ini, ProcDirectorRules& rules)
-{
-    if (!ini.Is_Present(PROC_INI_DIRECTOR)) {
-        return false;
-    }
-
-    rules.AntiRushPeriod = ini.Get_Int(PROC_INI_DIRECTOR, "AntiRushPeriod", 300);
-    rules.InitialWaveDelay = ini.Get_Int(PROC_INI_DIRECTOR, "InitialWaveDelay", 50);
-    rules.MinSpawnInterval = ini.Get_Int(PROC_INI_DIRECTOR, "MinSpawnInterval", 120);
-    rules.MaxSpawnInterval = ini.Get_Int(PROC_INI_DIRECTOR, "MaxSpawnInterval", 300);
-
-    rules.EscalationThreshold1 = ini.Get_Int(PROC_INI_DIRECTOR, "EscalationThreshold1", 25);
-    rules.EscalationThreshold2 = ini.Get_Int(PROC_INI_DIRECTOR, "EscalationThreshold2", 50);
-    rules.EscalationThreshold3 = ini.Get_Int(PROC_INI_DIRECTOR, "EscalationThreshold3", 75);
-
-    rules.TurtleCheckTime = ini.Get_Int(PROC_INI_DIRECTOR, "TurtleCheckTime", 150);
-    rules.TurtleCreditThreshold = ini.Get_Int(PROC_INI_DIRECTOR, "TurtleCreditThreshold", 20000);
-    rules.TurtleResponseDelay = ini.Get_Int(PROC_INI_DIRECTOR, "TurtleResponseDelay", 30);
-
-    rules.MaxConcurrentTeams = ini.Get_Int(PROC_INI_DIRECTOR, "MaxConcurrentTeams", 2);
-    rules.MaxTotalSpawns = ini.Get_Int(PROC_INI_DIRECTOR, "MaxTotalSpawns", 0);
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Spawn_Entry(CCINIClass& ini, const char* section, ProcSpawnEntry& entry)
+static int Get_Enum(CCINIClass & ini, char const * section, char const * entry, char const * const * table, int count, int defvalue)
 {
     char buffer[64];
-
-    ini.Get_String(section, "Region", "Entry_North", buffer, sizeof(buffer));
-    entry.SpawnRegion = Proc_Region_From_Name(buffer);
-
-    ini.Get_String(section, "Pool", "SOVIET_ATTACK", buffer, sizeof(buffer));
-    entry.PoolType = Proc_Pool_From_Name(buffer);
-
-    ini.Get_String(section, "MinThreat", "LIGHT", buffer, sizeof(buffer));
-    entry.MinThreat = Proc_Threat_From_Name(buffer);
-
-    ini.Get_String(section, "MaxThreat", "HEAVY", buffer, sizeof(buffer));
-    entry.MaxThreat = Proc_Threat_From_Name(buffer);
-
-    ini.Get_String(section, "Quarry", "ANYTHING", buffer, sizeof(buffer));
-    entry.Quarry = Quarry_From_Name(buffer);
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Difficulty(CCINIClass& ini, const char* section, ProcDifficultyModifiers& mods)
-{
-    if (!ini.Is_Present(section)) {
-        return false;
-    }
-
-    int val;
-
-    val = ini.Get_Int(section, "PlayerCreditMult", 100);
-    mods.PlayerCreditMult = fixed(val, 100);
-
-    val = ini.Get_Int(section, "PlayerCostBias", 100);
-    mods.PlayerCostBias = fixed(val, 100);
-
-    val = ini.Get_Int(section, "PlayerArmorBias", 100);
-    mods.PlayerArmorBias = fixed(val, 100);
-
-    val = ini.Get_Int(section, "PlayerFirepowerBias", 100);
-    mods.PlayerFirepowerBias = fixed(val, 100);
-
-    val = ini.Get_Int(section, "EnemyCreditMult", 100);
-    mods.EnemyCreditMult = fixed(val, 100);
-
-    mods.EnemyTechLevelCap = ini.Get_Int(section, "EnemyTechCap", 10);
-
-    val = ini.Get_Int(section, "EnemyArmorBias", 100);
-    mods.EnemyArmorBias = fixed(val, 100);
-
-    val = ini.Get_Int(section, "EnemyFirepowerBias", 100);
-    mods.EnemyFirepowerBias = fixed(val, 100);
-
-    mods.EnemyIQLevel = ini.Get_Int(section, "EnemyIQ", 2);
-
-    val = ini.Get_Int(section, "TeamQuantityScale", 100);
-    mods.TeamQuantityScale = fixed(val, 100);
-
-    val = ini.Get_Int(section, "SpawnRateScale", 100);
-    mods.SpawnRateScale = fixed(val, 100);
-
-    mods.MaxConcurrentTeams = ini.Get_Int(section, "MaxConcurrentTeams", 2);
-    mods.AntiRushPeriod = ini.Get_Int(section, "AntiRushPeriod", 300);
-
-    return true;
+    ini.Get_String(section, entry, "", buffer, sizeof(buffer));
+    return Name_Index(buffer, table, count, defvalue);
 }
 
 
 /*******************************************************************************
- * LIST PARSERS
+ * FILE LOADING
  ******************************************************************************/
 
-bool ProcMissionINIClass::Parse_Building_List(const char* str, ProcBuildingDef* buildings, int maxCount, int& count)
-{
-    count = 0;
-    if (!str || !*str) return false;
-
-    char buffer[1024];
-    strncpy(buffer, str, sizeof(buffer) - 1);
-    buffer[sizeof(buffer) - 1] = '\0';
-
-    char* token = strtok(buffer, ",");
-    while (token && count < maxCount) {
-        char* parts[3] = {NULL, NULL, NULL};
-        int partCount = 0;
-
-        char* p = token;
-        while (*p && partCount < 3) {
-            parts[partCount++] = p;
-            while (*p && *p != ':') p++;
-            if (*p == ':') *p++ = '\0';
-        }
-
-        if (partCount >= 1) {
-            while (*parts[0] == ' ') parts[0]++;
-
-            buildings[count].Type = Struct_From_Name(parts[0]);
-            buildings[count].OffsetX = (partCount >= 2) ? atoi(parts[1]) : 0;
-            buildings[count].OffsetY = (partCount >= 3) ? atoi(parts[2]) : 0;
-            buildings[count].Count = 1;
-
-            if (buildings[count].Type != STRUCT_NONE) {
-                count++;
-            }
-        }
-
-        token = strtok(NULL, ",");
-    }
-
-    return count > 0;
-}
-
-bool ProcMissionINIClass::Parse_Unit_List(const char* str, ProcUnitDef* units, int maxCount, int& count)
-{
-    count = 0;
-    if (!str || !*str) return false;
-
-    char buffer[1024];
-    strncpy(buffer, str, sizeof(buffer) - 1);
-    buffer[sizeof(buffer) - 1] = '\0';
-
-    char* token = strtok(buffer, ",");
-    while (token && count < maxCount) {
-        char* parts[3] = {NULL, NULL, NULL};
-        int partCount = 0;
-
-        char* p = token;
-        while (*p && partCount < 3) {
-            parts[partCount++] = p;
-            while (*p && *p != ':') p++;
-            if (*p == ':') *p++ = '\0';
-        }
-
-        if (partCount >= 1) {
-            while (*parts[0] == ' ') parts[0]++;
-
-            units[count].Type = Unit_From_Name(parts[0]);
-            units[count].Count = (partCount >= 2) ? atoi(parts[1]) : 1;
-            units[count].Mission = (partCount >= 3) ? Mission_From_Name(parts[2]) : MISSION_GUARD;
-
-            if (units[count].Type != UNIT_NONE) {
-                count++;
-            }
-        }
-
-        token = strtok(NULL, ",");
-    }
-
-    return count > 0;
-}
-
-bool ProcMissionINIClass::Parse_Infantry_List(const char* str, ProcInfantryDef* infantry, int maxCount, int& count)
-{
-    count = 0;
-    if (!str || !*str) return false;
-
-    char buffer[1024];
-    strncpy(buffer, str, sizeof(buffer) - 1);
-    buffer[sizeof(buffer) - 1] = '\0';
-
-    char* token = strtok(buffer, ",");
-    while (token && count < maxCount) {
-        char* parts[3] = {NULL, NULL, NULL};
-        int partCount = 0;
-
-        char* p = token;
-        while (*p && partCount < 3) {
-            parts[partCount++] = p;
-            while (*p && *p != ':') p++;
-            if (*p == ':') *p++ = '\0';
-        }
-
-        if (partCount >= 1) {
-            while (*parts[0] == ' ') parts[0]++;
-
-            infantry[count].Type = Infantry_From_Name(parts[0]);
-            infantry[count].Count = (partCount >= 2) ? atoi(parts[1]) : 1;
-            infantry[count].Mission = (partCount >= 3) ? Mission_From_Name(parts[2]) : MISSION_GUARD;
-
-            if (infantry[count].Type != INFANTRY_NONE) {
-                count++;
-            }
-        }
-
-        token = strtok(NULL, ",");
-    }
-
-    return count > 0;
-}
-
-bool ProcMissionINIClass::Save(const char* filename, const ProcMissionDef& mission)
-{
-    // Save implementation for editor support
-    return false;
-}
-
-
-/*******************************************************************************
- * MASTER CONFIG LOADING
- ******************************************************************************/
-
-bool ProcMissionINIClass::Load_Master_Config(const char* filename)
+static bool Load_INI(char const * filename, CCINIClass & ini)
 {
     CCFileClass file(filename);
     if (!file.Is_Available()) {
+        char buf[128];
+        sprintf(buf, "ProcINI: %s not found", filename);
+        GlyphX_Debug_Print(buf);
         return false;
     }
-
-    CCINIClass ini;
-    ini.Load(file, false);
-
-    return Load_Master_Config(ini);
+    return ini.Load(file, false);
 }
 
-bool ProcMissionINIClass::Load_Master_Config(CCINIClass& ini)
+/*
+**	Each preset file has an index section ([Teams], [Bases], [Objectives]) listing the
+**	preset sections in the file, in the same style as RULES.INI type lists.
+*/
+template<class T, class F>
+static int Load_Presets(CCINIClass & ini, char const * index, T * presets, int maxcount, F parser)
 {
-    // Load team pools
-    Load_Team_Pools(ini);
+    int count = 0;
+    int entries = ini.Entry_Count(index);
+    for (int i = 0; i < entries && count < maxcount; i++) {
+        char section[PROC_NAME_LEN];
+        ini.Get_String(index, ini.Get_Entry(index, i), "", section, sizeof(section));
+        if (section[0] == '\0' || !ini.Is_Present(section)) continue;
 
-    // Load map pool
-    Load_Map_Pool(ini);
-
-    // Load menu missions
-    Load_Menu_Missions(ini);
-
-    return true;
-}
-
-
-/*******************************************************************************
- * TEAM POOL LOADING
- ******************************************************************************/
-
-bool ProcMissionINIClass::Load_Team_Pools(CCINIClass& ini)
-{
-    char sectionName[32];
-    char buffer[64];
-
-    // Look for Team1, Team2, etc. sections
-    for (int i = 1; i <= 100; i++) {
-        sprintf(sectionName, "%s%d", PROC_INI_TEAM, i);
-
-        if (!ini.Is_Present(sectionName)) {
-            continue;
-        }
-
-        ProcPoolTeam team;
-        if (Parse_Team(ini, sectionName, team)) {
-            // Determine which pool this team belongs to
-            ini.Get_String(sectionName, "Pool", "SOVIET_ATTACK", buffer, sizeof(buffer));
-            ProcTeamPoolType poolType = Proc_Pool_From_Name(buffer);
-
-            // Add to appropriate pool
-            ProcTeamPools.Add_Team_To_Pool(poolType, team);
-        }
-    }
-
-    // Mark pools as initialized
-    ProcTeamPools.Initialize_Default_Pools();
-
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Team(CCINIClass& ini, const char* section, ProcPoolTeam& team)
-{
-    char buffer[512];
-
-    // Team name (8 chars max)
-    ini.Get_String(section, "Name", "", buffer, sizeof(buffer));
-    strncpy(team.Name, buffer, PROC_TEAM_NAME_LEN - 1);
-    team.Name[PROC_TEAM_NAME_LEN - 1] = '\0';
-
-    // House
-    ini.Get_String(section, "House", "USSR", buffer, sizeof(buffer));
-    team.House = House_From_Name(buffer);
-
-    // Threat level
-    ini.Get_String(section, "ThreatLevel", "LIGHT", buffer, sizeof(buffer));
-    team.ThreatLevel = Proc_Threat_From_Name(buffer);
-
-    // Composition: "3TNK:3,1TNK:2,E1:4"
-    ini.Get_String(section, "Composition", "", buffer, sizeof(buffer));
-    Parse_Team_Composition(buffer, team.Members, PROC_MAX_TEAM_MEMBERS, team.MemberCount);
-
-    // Missions: "ATTACK:BUILDINGS" or "PATROL:11,PATROL:12,LOOP:0"
-    ini.Get_String(section, "Missions", "ATTACK:ANYTHING", buffer, sizeof(buffer));
-    Parse_Team_Missions(buffer, team.Missions, PROC_MAX_TEAM_MISSIONS, team.MissionCount);
-
-    // Properties
-    team.RecruitPriority = ini.Get_Int(section, "Priority", 7);
-    team.IsRoundAbout = ini.Get_Bool(section, "RoundAbout", false);
-    team.IsSuicide = ini.Get_Bool(section, "Suicide", false);
-    team.UseGathering = ini.Get_Bool(section, "Gathering", true);  // Default to true for attack teams
-
-    return team.Name[0] != '\0' && team.MemberCount > 0;
-}
-
-bool ProcMissionINIClass::Parse_Team_Composition(const char* str, ProcPoolMember* members, int maxCount, int& count)
-{
-    count = 0;
-    if (!str || !*str) return false;
-
-    char buffer[512];
-    strncpy(buffer, str, sizeof(buffer) - 1);
-    buffer[sizeof(buffer) - 1] = '\0';
-
-    char* token = strtok(buffer, ",");
-    while (token && count < maxCount) {
-        // Format: TYPE:QUANTITY  e.g., "3TNK:3" or "E1:4"
-        char* parts[2] = {NULL, NULL};
-        int partCount = 0;
-
-        char* p = token;
-        while (*p == ' ') p++;  // Skip leading spaces
-
-        while (*p && partCount < 2) {
-            parts[partCount++] = p;
-            while (*p && *p != ':') p++;
-            if (*p == ':') *p++ = '\0';
-        }
-
-        if (partCount >= 1 && parts[0]) {
-            // Try to identify the type
-            UnitType unit = Unit_From_Name(parts[0]);
-            if (unit != UNIT_NONE) {
-                members[count].RTTI = RTTI_UNITTYPE;
-                members[count].TypeIndex = unit;
-            } else {
-                InfantryType inf = Infantry_From_Name(parts[0]);
-                if (inf != INFANTRY_NONE) {
-                    members[count].RTTI = RTTI_INFANTRYTYPE;
-                    members[count].TypeIndex = inf;
-                } else {
-                    VesselType vessel = Vessel_From_Name(parts[0]);
-                    if (vessel != VESSEL_NONE) {
-                        members[count].RTTI = RTTI_VESSELTYPE;
-                        members[count].TypeIndex = vessel;
-                    } else {
-                        // Skip unknown type
-                        token = strtok(NULL, ",");
-                        continue;
-                    }
-                }
-            }
-
-            members[count].Quantity = (partCount >= 2) ? atoi(parts[1]) : 1;
-            if (members[count].Quantity < 1) members[count].Quantity = 1;
+        T & preset = presets[count];
+        preset = T();
+        strncpy(preset.Name, section, PROC_NAME_LEN - 1);
+        preset.Name[PROC_NAME_LEN - 1] = '\0';
+        if (parser(ini, section, preset)) {
             count++;
         }
-
-        token = strtok(NULL, ",");
     }
-
-    return count > 0;
+    return count;
 }
 
-bool ProcMissionINIClass::Parse_Team_Missions(const char* str, ProcPoolMission* missions, int maxCount, int& count)
+static bool Parse_Team(CCINIClass & ini, char const * section, ProcTeamPreset & team)
 {
-    count = 0;
-    if (!str || !*str) return false;
-
     char buffer[512];
-    strncpy(buffer, str, sizeof(buffer) - 1);
-    buffer[sizeof(buffer) - 1] = '\0';
 
-    char* token = strtok(buffer, ",");
-    while (token && count < maxCount) {
-        // Format: MISSION:DATA  e.g., "ATTACK:BUILDINGS" or "PATROL:11"
-        char* parts[2] = {NULL, NULL};
-        int partCount = 0;
+    team.Side = (ProcSideType)Get_Enum(ini, section, "Side", s_SideNames, PROC_SIDE_COUNT, PROC_SIDE_ANY);
+    team.Role = (ProcTeamRoleType)Get_Enum(ini, section, "Role", s_TeamRoleNames, PROC_TEAM_ROLE_COUNT, PROC_TEAM_ATTACK);
+    team.Threat = (ProcThreatType)Get_Enum(ini, section, "Threat", s_ThreatNames, PROC_THREAT_COUNT, PROC_THREAT_LIGHT);
+    team.Weight = ini.Get_Int(section, "Weight", 10);
+    team.IsGathering = ini.Get_Bool(section, "Gather", team.Role == PROC_TEAM_ATTACK);
+    team.IsSuicide = ini.Get_Bool(section, "Suicide", false);
+    team.IsRoundAbout = ini.Get_Bool(section, "RoundAbout", false);
 
-        char* p = token;
-        while (*p == ' ') p++;  // Skip leading spaces
+    Parse_Techno_List(ini, section, "Members", team.Members, PROC_MAX_MEMBERS, team.MemberCount);
 
-        while (*p && partCount < 2) {
-            parts[partCount++] = p;
-            while (*p && *p != ':') p++;
-            if (*p == ':') *p++ = '\0';
-        }
+    if (ini.Get_String(section, "Missions", "Attack:Anything", buffer, sizeof(buffer)) > 0) {
+        MissionListContext ctx = {&team, section};
+        Parse_List(buffer, Mission_Callback, &ctx);
+    }
 
-        if (partCount >= 1 && parts[0]) {
-            missions[count].Mission = TeamMission_From_Name(parts[0]);
+    return team.MemberCount > 0;
+}
 
-            if (missions[count].Mission != TMISSION_NONE) {
-                // Data interpretation depends on mission type
-                if (partCount >= 2 && parts[1]) {
-                    // Check if it's a quarry name or a number
-                    QuarryType quarry = Quarry_From_Name(parts[1]);
-                    if (quarry != QUARRY_NONE) {
-                        missions[count].Data = quarry;
-                    } else {
-                        missions[count].Data = atoi(parts[1]);
-                    }
-                } else {
-                    missions[count].Data = 0;
-                }
-                count++;
+static bool Parse_Base(CCINIClass & ini, char const * section, ProcBasePreset & base)
+{
+    base.Side = (ProcSideType)Get_Enum(ini, section, "Side", s_SideNames, PROC_SIDE_COUNT, PROC_SIDE_ANY);
+    base.Role = (ProcBaseRoleType)Get_Enum(ini, section, "Role", s_BaseRoleNames, PROC_BASE_ROLE_COUNT, PROC_BASE_MAIN);
+    base.MinTech = ini.Get_Int(section, "MinTech", 1);
+    base.Weight = ini.Get_Int(section, "Weight", 10);
+    base.Harvesters = ini.Get_Int(section, "Harvesters", 1);
+    base.IsAutoPower = ini.Get_Bool(section, "AutoPower", true);
+    base.IsNaval = ini.Get_Bool(section, "Naval", false);
+    base.Credits = ini.Get_Int(section, "Credits", 5000);
+
+    Parse_Base_Entries(ini, section, "Structures", base, false);
+    Parse_Base_Entries(ini, section, "Defenses", base, true);
+    Parse_Techno_List(ini, section, "Guards", base.Guards, PROC_MAX_BASE_GUARDS, base.GuardCount);
+
+    return base.EntryCount > 0;
+}
+
+struct TargetListContext {
+    ProcObjectivePreset * Objective;
+    char const * Section;
+};
+
+static void Target_Callback(char ** fields, int, void * context)
+{
+    TargetListContext * ctx = (TargetListContext *)context;
+    ProcObjectivePreset & obj = *ctx->Objective;
+    if (obj.TargetCount >= PROC_MAX_TARGET_TYPES) return;
+
+    StructType type = BuildingTypeClass::From_Name(fields[0]);
+    if (type == STRUCT_NONE) {
+        char buf[128];
+        sprintf(buf, "ProcINI: [%s] unknown target structure '%s'", ctx->Section, fields[0]);
+        GlyphX_Debug_Print(buf);
+        return;
+    }
+    obj.Targets[obj.TargetCount++] = type;
+}
+
+static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectivePreset & obj)
+{
+    char buffer[512];
+
+    obj.Kind = (ProcObjectiveKindType)Get_Enum(ini, section, "Kind", s_KindNames, PROC_OBJ_KIND_COUNT, PROC_OBJ_DESTROY_BASES);
+    obj.Slot = (ProcObjectiveSlotType)Get_Enum(ini, section, "Slot", s_SlotNames, PROC_SLOT_COUNT, PROC_SLOT_EITHER);
+    obj.PlayerSide = (ProcSideType)Get_Enum(ini, section, "PlayerSide", s_SideNames, PROC_SIDE_COUNT, PROC_SIDE_ANY);
+    obj.Owner = (ProcOwnerType)Get_Enum(ini, section, "Owner", s_OwnerNames, PROC_OWNER_COUNT,
+        (obj.Kind == PROC_OBJ_PROTECT) ? PROC_OWNER_PLAYER : PROC_OWNER_ENEMY);
+    obj.MinTech = ini.Get_Int(section, "MinTech", 1);
+    obj.Weight = ini.Get_Int(section, "Weight", 10);
+    obj.MinMinutes = ini.Get_Int(section, "MinMinutes", 0);
+    obj.MaxMinutes = max(obj.MinMinutes, ini.Get_Int(section, "MaxMinutes", obj.MinMinutes));
+    obj.RewardCredits = ini.Get_Int(section, "RewardCredits", 0);
+
+    Parse_Name(ini, section, "Guard", obj.Guard, sizeof(obj.Guard));
+    Parse_Name(ini, section, "PlayerBase", obj.PlayerBase, sizeof(obj.PlayerBase));
+    Parse_Name(ini, section, "Text", obj.Text, sizeof(obj.Text));
+    Parse_Techno_List(ini, section, "RewardUnits", obj.RewardUnits, PROC_MAX_MEMBERS, obj.RewardUnitCount);
+
+    if (ini.Get_String(section, "Targets", "", buffer, sizeof(buffer)) > 0) {
+        TargetListContext ctx = {&obj, section};
+        Parse_List(buffer, Target_Callback, &ctx);
+    }
+
+    // Structure objectives are useless without a target; timed objectives need a duration.
+    bool needstarget = (obj.Kind == PROC_OBJ_DESTROY || obj.Kind == PROC_OBJ_CAPTURE || obj.Kind == PROC_OBJ_PROTECT);
+    bool needstime = (obj.Kind == PROC_OBJ_SURVIVE || obj.Kind == PROC_OBJ_PROTECT);
+    if (needstarget && obj.TargetCount == 0) return false;
+    if (needstime && obj.MinMinutes <= 0) return false;
+    return true;
+}
+
+static void Parse_Difficulty(CCINIClass & ini, char const * section, ProcDifficultyPreset & diff)
+{
+    diff.EnemyCreditsPct = ini.Get_Int(section, "EnemyCredits", diff.EnemyCreditsPct);
+    diff.DefenseScalePct = ini.Get_Int(section, "DefenseScale", diff.DefenseScalePct);
+    diff.GuardScalePct = ini.Get_Int(section, "GuardScale", diff.GuardScalePct);
+    diff.WaveSizePct = ini.Get_Int(section, "WaveSize", diff.WaveSizePct);
+    diff.WaveIntervalPct = ini.Get_Int(section, "WaveInterval", diff.WaveIntervalPct);
+    diff.MaxActiveWaves = ini.Get_Int(section, "MaxActiveWaves", diff.MaxActiveWaves);
+    diff.OutpostChance = ini.Get_Int(section, "OutpostChance", diff.OutpostChance);
+    diff.FirstWaveSeconds = ini.Get_Int(section, "FirstWaveSeconds", diff.FirstWaveSeconds);
+    diff.StartThreat = (ProcThreatType)Get_Enum(ini, section, "StartThreat", s_ThreatNames, PROC_THREAT_COUNT, diff.StartThreat);
+    diff.MaxThreat = (ProcThreatType)Get_Enum(ini, section, "MaxThreat", s_ThreatNames, PROC_THREAT_COUNT, diff.MaxThreat);
+    diff.EscalateMinutes = max(1, ini.Get_Int(section, "EscalateMinutes", diff.EscalateMinutes));
+}
+
+void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, ProcSettings & settings) const
+{
+    if (!ini.Is_Present(section)) return;
+
+    char buffer[64];
+    if (ini.Get_String(section, "Difficulty", "", buffer, sizeof(buffer)) > 0) {
+        settings.Difficulty = (stricmp(buffer, "Random") == 0) ? -1 : Name_Index(buffer, s_DiffNames, DIFF_COUNT, settings.Difficulty);
+    }
+    if (ini.Get_String(section, "Primary", "", buffer, sizeof(buffer)) > 0) {
+        strncpy(settings.Primary, buffer, PROC_NAME_LEN - 1);
+        settings.Primary[PROC_NAME_LEN - 1] = '\0';
+    }
+    settings.SecondaryMin = ini.Get_Int(section, "SecondaryMin", settings.SecondaryMin);
+    settings.SecondaryMax = max(settings.SecondaryMin, ini.Get_Int(section, "SecondaryMax", settings.SecondaryMax));
+    settings.TechLevel = ini.Get_Int(section, "TechLevel", settings.TechLevel);
+    settings.IsWaves = ini.Get_Bool(section, "Waves", settings.IsWaves);
+    settings.IsKeepStartUnits = ini.Get_Bool(section, "KeepStartUnits", settings.IsKeepStartUnits);
+    settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
+    settings.WaveMaxSeconds = max(settings.WaveMinSeconds, ini.Get_Int(section, "WaveMaxSeconds", settings.WaveMaxSeconds));
+    settings.SpawnMode = (ProcSpawnModeType)Get_Enum(ini, section, "SpawnMode", s_SpawnNames, PROC_SPAWN_COUNT, settings.SpawnMode);
+}
+
+bool ProcPresetLibrary::Load()
+{
+    char buf[160];
+
+    Settings = ProcSettings();
+    for (int d = 0; d < DIFF_COUNT; d++) {
+        Difficulty[d] = ProcDifficultyPreset();
+    }
+    TeamCount = BaseCount = ObjectiveCount = 0;
+
+    {
+        CCINIClass ini;
+        if (Load_INI(PROC_SETTINGS_INI, ini)) {
+            Read_Settings(ini, PROC_GENERATOR_SECTION, Settings);
+            for (int d = 0; d < DIFF_COUNT; d++) {
+                Parse_Difficulty(ini, s_DiffNames[d], Difficulty[d]);
             }
         }
-
-        token = strtok(NULL, ",");
+    }
+    {
+        CCINIClass ini;
+        if (Load_INI(PROC_TEAMS_INI, ini)) {
+            TeamCount = Load_Presets(ini, "Teams", Teams, PROC_MAX_TEAM_PRESETS, Parse_Team);
+        }
+    }
+    {
+        CCINIClass ini;
+        if (Load_INI(PROC_BASES_INI, ini)) {
+            BaseCount = Load_Presets(ini, "Bases", Bases, PROC_MAX_BASE_PRESETS, Parse_Base);
+        }
+    }
+    {
+        CCINIClass ini;
+        if (Load_INI(PROC_OBJECTIVES_INI, ini)) {
+            ObjectiveCount = Load_Presets(ini, "Objectives", Objectives, PROC_MAX_OBJECTIVE_PRESETS, Parse_Objective);
+        }
     }
 
-    return count > 0;
+    sprintf(buf, "ProcINI: loaded %d teams, %d bases, %d objectives", TeamCount, BaseCount, ObjectiveCount);
+    GlyphX_Debug_Print(buf);
+
+    return BaseCount > 0;
 }
 
 
 /*******************************************************************************
- * MAP POOL LOADING
+ * PRESET SELECTION
  ******************************************************************************/
 
-bool ProcMissionINIClass::Load_Map_Pool(CCINIClass& ini)
+static bool Side_Matches(ProcSideType preset, ProcSideType wanted)
 {
-    char sectionName[32];
+    return preset == PROC_SIDE_ANY || wanted == PROC_SIDE_ANY || preset == wanted;
+}
 
-    // Clear existing maps
-    ProcMapPool.Clear();
-
-    // Look for Map1, Map2, etc. sections
-    for (int i = 1; i <= PROC_MAX_MAPS; i++) {
-        sprintf(sectionName, "%s%d", PROC_INI_MAP, i);
-
-        if (!ini.Is_Present(sectionName)) {
-            continue;
-        }
-
-        ProcMapEntry map;
-        if (Parse_Map_Entry(ini, sectionName, map)) {
-            ProcMapPool.Add_Map(map);
-        }
+/*
+**	Weighted random pick over the presets accepted by the filter.
+*/
+template<class T, class F>
+static T const * Weighted_Pick(T const * presets, int count, F accept)
+{
+    int total = 0;
+    for (int i = 0; i < count; i++) {
+        if (accept(presets[i])) total += max(1, presets[i].Weight);
     }
+    if (total == 0) return NULL;
 
-    return true;
-}
-
-bool ProcMissionINIClass::Parse_Map_Entry(CCINIClass& ini, const char* section, ProcMapEntry& map)
-{
-    char buffer[256];
-
-    // Filename (required)
-    ini.Get_String(section, "Filename", "", buffer, sizeof(buffer));
-    if (buffer[0] == '\0') return false;
-    strncpy(map.Filename, buffer, sizeof(map.Filename) - 1);
-
-    // Display name
-    ini.Get_String(section, "Name", buffer, buffer, sizeof(buffer));
-    strncpy(map.DisplayName, buffer, PROC_MAP_NAME_LEN - 1);
-
-    // Description
-    ini.Get_String(section, "Description", "", buffer, sizeof(buffer));
-    strncpy(map.Description, buffer, PROC_MAP_DESC_LEN - 1);
-
-    // Properties
-    map.MaxPlayers = ini.Get_Int(section, "MaxPlayers", 2);
-    map.HasNaval = ini.Get_Bool(section, "Naval", false);
-    map.IsSymmetrical = ini.Get_Bool(section, "Symmetrical", false);
-
-    return true;
-}
-
-
-/*******************************************************************************
- * MENU MISSION LOADING
- ******************************************************************************/
-
-bool ProcMissionINIClass::Load_Menu_Missions(CCINIClass& ini)
-{
-    char sectionName[32];
-
-    // Clear existing missions
-    ProcMissionMenu.Clear();
-
-    // Look for MenuMission1, MenuMission2, etc. sections
-    for (int i = 1; i <= PROC_MAX_MENU_MISSIONS; i++) {
-        sprintf(sectionName, "%s%d", PROC_INI_MENU_MISSION, i);
-
-        if (!ini.Is_Present(sectionName)) {
-            continue;
-        }
-
-        ProcMenuMission mission;
-        if (Parse_Menu_Mission(ini, sectionName, mission)) {
-            ProcMissionMenu.Add_Mission(mission);
-        }
+    int roll = Random_Pick(0, total - 1);
+    for (int i = 0; i < count; i++) {
+        if (!accept(presets[i])) continue;
+        roll -= max(1, presets[i].Weight);
+        if (roll < 0) return &presets[i];
     }
-
-    return true;
+    return NULL;
 }
 
-bool ProcMissionINIClass::Parse_Menu_Mission(CCINIClass& ini, const char* section, ProcMenuMission& mission)
+struct TeamFilter {
+    ProcSideType Side;
+    ProcTeamRoleType Role;
+    ProcThreatType MinThreat;
+    ProcThreatType MaxThreat;
+    int Tech;
+
+    bool operator()(ProcTeamPreset const & team) const {
+        if (!Side_Matches(team.Side, Side) || team.Role != Role) return false;
+        if (team.Threat < MinThreat || team.Threat > MaxThreat) return false;
+
+        // Every member must exist at this tech level.
+        for (int i = 0; i < team.MemberCount; i++) {
+            int level = (int)team.Members[i].Type->Level;
+            if (level < 0 || level > Tech) return false;
+        }
+        return true;
+    }
+};
+
+ProcTeamPreset const * ProcPresetLibrary::Pick_Team(ProcSideType side, ProcTeamRoleType role, ProcThreatType minthreat, ProcThreatType maxthreat, int tech) const
 {
-    char buffer[256];
+    TeamFilter filter = {side, role, minthreat, maxthreat, tech};
+    ProcTeamPreset const * team = Weighted_Pick(Teams, TeamCount, filter);
 
-    // ID (required)
-    ini.Get_String(section, "ID", "", buffer, sizeof(buffer));
-    if (buffer[0] == '\0') return false;
-    strncpy(mission.ID, buffer, PROC_MISSION_ID_LEN - 1);
+    // Nothing fits the threat window at this tech level; take the strongest team that does fit.
+    while (team == NULL && filter.MinThreat > PROC_THREAT_SCOUT) {
+        filter.MinThreat = (ProcThreatType)(filter.MinThreat - 1);
+        team = Weighted_Pick(Teams, TeamCount, filter);
+    }
+    return team;
+}
 
-    // Display name
-    ini.Get_String(section, "Name", buffer, buffer, sizeof(buffer));
-    strncpy(mission.DisplayName, buffer, PROC_MAP_NAME_LEN - 1);
+ProcTeamPreset const * ProcPresetLibrary::Find_Team(char const * name) const
+{
+    for (int i = 0; i < TeamCount; i++) {
+        if (stricmp(Teams[i].Name, name) == 0) return &Teams[i];
+    }
+    return NULL;
+}
 
-    // Description
-    ini.Get_String(section, "Description", "", buffer, sizeof(buffer));
-    strncpy(mission.Description, buffer, PROC_MAP_DESC_LEN - 1);
+struct BaseFilter {
+    ProcSideType Side;
+    ProcBaseRoleType Role;
+    int Tech;
 
-    // INI file containing mission definition
-    ini.Get_String(section, "INIFile", "", buffer, sizeof(buffer));
-    strncpy(mission.INIFile, buffer, sizeof(mission.INIFile) - 1);
+    bool operator()(ProcBasePreset const & base) const {
+        return Side_Matches(base.Side, Side) && base.Role == Role && base.MinTech <= Tech;
+    }
+};
 
-    // Player faction
-    ini.Get_String(section, "Faction", "Greece", buffer, sizeof(buffer));
-    mission.PlayerFaction = House_From_Name(buffer);
+ProcBasePreset const * ProcPresetLibrary::Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech) const
+{
+    BaseFilter filter = {side, role, tech};
+    ProcBasePreset const * base = Weighted_Pick(Bases, BaseCount, filter);
 
-    // Enabled state
-    mission.IsEnabled = ini.Get_Bool(section, "Enabled", true);
+    // Below every preset's MinTech: ignore the tech requirement; the builder skips what isn't available.
+    if (base == NULL) {
+        filter.Tech = 99;
+        base = Weighted_Pick(Bases, BaseCount, filter);
+    }
+    return base;
+}
 
-    return true;
+ProcBasePreset const * ProcPresetLibrary::Find_Base(char const * name) const
+{
+    for (int i = 0; i < BaseCount; i++) {
+        if (stricmp(Bases[i].Name, name) == 0) return &Bases[i];
+    }
+    return NULL;
+}
+
+struct ObjectiveFilter {
+    ProcSideType PlayerSide;
+    bool IsPrimary;
+    int Tech;
+    ProcObjectivePreset const * const * Exclude;
+    int ExcludeCount;
+
+    bool operator()(ProcObjectivePreset const & obj) const {
+        if (!Side_Matches(obj.PlayerSide, PlayerSide) || obj.MinTech > Tech) return false;
+        if (IsPrimary && obj.Slot == PROC_SLOT_SECONDARY) return false;
+        if (!IsPrimary && obj.Slot == PROC_SLOT_PRIMARY) return false;
+
+        // Secondary objectives never end the game by themselves, so these kinds make no sense there.
+        if (!IsPrimary && (obj.Kind == PROC_OBJ_DESTROY_BASES || obj.Kind == PROC_OBJ_SURVIVE)) return false;
+
+        for (int i = 0; i < ExcludeCount; i++) {
+            if (Exclude[i] == &obj) return false;
+        }
+        return true;
+    }
+};
+
+ProcObjectivePreset const * ProcPresetLibrary::Pick_Objective(ProcSideType playerside, bool primary, int tech, ProcObjectivePreset const * const * exclude, int excludecount) const
+{
+    ObjectiveFilter filter = {playerside, primary, tech, exclude, excludecount};
+    return Weighted_Pick(Objectives, ObjectiveCount, filter);
+}
+
+ProcObjectivePreset const * ProcPresetLibrary::Find_Objective(char const * name) const
+{
+    for (int i = 0; i < ObjectiveCount; i++) {
+        if (stricmp(Objectives[i].Name, name) == 0) return &Objectives[i];
+    }
+    return NULL;
 }

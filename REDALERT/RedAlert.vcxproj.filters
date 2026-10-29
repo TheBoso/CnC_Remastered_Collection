@@ -528,6 +528,12 @@
     <ClCompile Include="POWER.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PROCINI.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PROCMISSION.CPP">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="PROFILE.CPP">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1353,6 +1359,12 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="POWER.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PROCINI.H">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PROCMISSION.H">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="QUEUE.H">

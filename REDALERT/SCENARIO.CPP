@@ -2356,8 +2356,6 @@ bool Read_Scenario_INI(char * fname, bool )
 	Scen.IsTruckCrate = ini.Get_Bool(BASIC, "TruckCrate", Scen.IsTruckCrate);
 	Scen.IsMoneyTiberium = ini.Get_Bool(BASIC, "FillSilos", Scen.IsMoneyTiberium);
 	Scen.IsProcedural = ini.Get_Bool(BASIC, "Procedural", false);
-	Scen.ProceduralTheme = ini.Get_Int(BASIC, "ProceduralTheme", -1);  // -1 = randomly chosen
-	Scen.SurvivalTime = ini.Get_Int(BASIC, "SurvivalTime", 0);         // 0 = use default
 	Scen.Percent = ini.Get_Int(BASIC, "Percent", Scen.Percent);
 
 	/*
@@ -2666,12 +2664,14 @@ bool Read_Scenario_INI(char * fname, bool )
 	Call_Back();
 
 	/*
-	**	If this is a procedural mission, initialize the procedural mission system.
-	**	This loads the mission rules from the scenario INI and injects dynamic
-	**	content (teams, triggers, objectives) at runtime.
+	**	Procedural skirmish missions: build enemy bases, objectives and attack waves from
+	**	the preset library, using the lobby's sides, teams and tech level.
 	*/
-	if (Scen.IsProcedural && Session.Type == GAME_NORMAL) {
-		ProcMission.Auto_Generate_And_Inject(Scen.Difficulty);
+	ProcMission.Reset();
+	if (Scen.IsProcedural && Session.Type == GAME_GLYPHX_MULTIPLAYER && !Debug_Map) {
+		if (!ProcMission.Generate(ini)) {
+			Scen.IsProcedural = false;
+		}
 	}
 
 	/*

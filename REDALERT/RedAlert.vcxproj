@@ -336,6 +336,8 @@
     <ClCompile Include="PKPIPE.CPP" />
     <ClCompile Include="PKSTRAW.CPP" />
     <ClCompile Include="POWER.CPP" />
+    <ClCompile Include="PROCINI.CPP" />
+    <ClCompile Include="PROCMISSION.CPP" />
     <ClCompile Include="PROFILE.CPP" />
     <ClCompile Include="QUEUE.CPP" />
     <ClCompile Include="RADAR.CPP" />
@@ -612,6 +614,8 @@
     <ClInclude Include="PKPIPE.H" />
     <ClInclude Include="PKSTRAW.H" />
     <ClInclude Include="POWER.H" />
+    <ClInclude Include="PROCINI.H" />
+    <ClInclude Include="PROCMISSION.H" />
     <ClInclude Include="QUEUE.H" />
     <ClInclude Include="RADAR.H" />
     <ClInclude Include="RADIO.H" />
