@@ -2668,10 +2668,10 @@ bool Read_Scenario_INI(char * fname, bool )
 	**	the preset library, using the lobby's sides, teams and tech level.
 	*/
 	ProcMission.Reset();
-	if (Scen.IsProcedural && Session.Type == GAME_GLYPHX_MULTIPLAYER && !Debug_Map) {
-		if (!ProcMission.Generate(ini)) {
-			Scen.IsProcedural = false;
-		}
+	if (Session.Type == GAME_GLYPHX_MULTIPLAYER && !Debug_Map) {
+		Scen.IsProcedural = ProcMission.Generate(ini);	// Also honours [Generator] AllMaps=yes
+	} else {
+		Scen.IsProcedural = false;
 	}
 
 	/*

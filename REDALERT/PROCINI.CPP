@@ -89,7 +89,7 @@ ProcDifficultyPreset::ProcDifficultyPreset() :
 
 ProcSettings::ProcSettings() :
     Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true),
-    IsKeepStartUnits(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
+    IsKeepStartUnits(false), IsAllMaps(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
     PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
     strcpy(Primary, "RANDOM");
@@ -449,6 +449,7 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.TechLevel = ini.Get_Int(section, "TechLevel", settings.TechLevel);
     settings.IsWaves = ini.Get_Bool(section, "Waves", settings.IsWaves);
     settings.IsKeepStartUnits = ini.Get_Bool(section, "KeepStartUnits", settings.IsKeepStartUnits);
+    settings.IsAllMaps = ini.Get_Bool(section, "AllMaps", settings.IsAllMaps);
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
     settings.WaveMaxSeconds = max(settings.WaveMinSeconds, ini.Get_Int(section, "WaveMaxSeconds", settings.WaveMaxSeconds));
     settings.SpawnMode = (ProcSpawnModeType)Get_Enum(ini, section, "SpawnMode", s_SpawnNames, PROC_SPAWN_COUNT, settings.SpawnMode);

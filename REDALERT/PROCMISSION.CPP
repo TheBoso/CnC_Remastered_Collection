@@ -142,15 +142,38 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
     char buf[200];
 
     Reset();
-    GlyphX_Debug_Print("ProcMission: generating procedural mission");
+
+    /*
+    **	A map opts in with Procedural=yes. With AllMaps=yes every map is procedural unless it
+    **	says Procedural=no.
+    */
+    bool flagged = scenario_ini.Get_Bool("Basic", "Procedural", false);
+    if (!flagged && scenario_ini.Is_Present("Basic", "Procedural")) return false;
 
     if (!ProcPresets.Load()) {
-        GlyphX_Debug_Print("ProcMission: no base presets loaded (is PROCBASES.INI available?), mission not generated");
+        if (flagged) GlyphX_Debug_Print("ProcMission: no base presets loaded (is PROCBASES.INI available?), mission not generated");
         return false;
     }
 
     Settings = ProcPresets.Settings;
     ProcPresets.Read_Settings(scenario_ini, PROC_OVERRIDE_SECTION, Settings);
+
+    if (!flagged) {
+        if (!Settings.IsAllMaps) return false;
+
+        // AllMaps is a local INI switch; with several humans the other machines may not have it set.
+        int humans = 0;
+        for (int i = 0; i < Session.Players.Count(); i++) {
+            HouseClass * house = HouseClass::As_Pointer(Session.Players[i]->Player.ID);
+            if (house && house->IsHuman) humans++;
+        }
+        if (humans != 1) {
+            GlyphX_Debug_Print("ProcMission: AllMaps only applies to games with one human player");
+            return false;
+        }
+    }
+
+    GlyphX_Debug_Print("ProcMission: generating procedural mission");
 
     Difficulty = (Settings.Difficulty < 0) ? (DiffType)Random_Pick(0, DIFF_COUNT - 1) : (DiffType)Bound(Settings.Difficulty, 0, DIFF_COUNT - 1);
     Diff = ProcPresets.Difficulty[Difficulty];

@@ -251,6 +251,7 @@ struct ProcSettings {
     int                     TechLevel;          // 0 = use the lobby tech level
     bool                    IsWaves;
     bool                    IsKeepStartUnits;   // Keep the lobby's starting units for enemies
+    bool                    IsAllMaps;          // Every single-human skirmish map is procedural, flagged or not
     int                     WaveMinSeconds;
     int                     WaveMaxSeconds;
     ProcSpawnModeType       SpawnMode;
