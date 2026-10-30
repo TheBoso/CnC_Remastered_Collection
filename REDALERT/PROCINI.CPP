@@ -18,7 +18,7 @@ extern void GlyphX_Debug_Print(const char *debug_text);
 static char const * s_SideNames[PROC_SIDE_COUNT] = {"Any", "Allied", "Soviet"};
 static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Medium", "Heavy", "Overwhelming"};
 static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad"};
-static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend"};
+static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend", "Camp"};
 static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect"};
 static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
 static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player", "Outpost"};
@@ -74,12 +74,14 @@ ProcObjectivePreset::ProcObjectivePreset() :
     Kind(PROC_OBJ_DESTROY_BASES), Slot(PROC_SLOT_EITHER), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10),
     MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0),
     IsSquadStart(false), SquadCount(0), PlayerCredits(-1), WavesOverride(-1), WaveDelaySeconds(0),
-    IsEnemyProduction(true), Patrols(0)
+    EnemyProductionOverride(-1), Patrols(0), PatrolThreat(PROC_THREAT_OVERWHELMING)
 {
     Name[0] = '\0';
     Guard[0] = '\0';
     PlayerBase[0] = '\0';
     OutpostBase[0] = '\0';
+    TargetStrength = 100;
+    IsAbandoned = false;
     Bonus[0] = '\0';
     Text[0] = '\0';
 }
@@ -92,7 +94,7 @@ ProcDifficultyPreset::ProcDifficultyPreset() :
 }
 
 ProcSettings::ProcSettings() :
-    Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true),
+    Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true), IsEnemyProduction(false),
     IsKeepStartUnits(false), IsAllMaps(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
     PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
@@ -404,6 +406,13 @@ static void Target_Callback(char ** fields, int, void * context)
         GlyphX_Debug_Print(buf);
         return;
     }
+    // An objective nobody can complete is worse than none (e.g. BIO is not Capturable in the rules).
+    if (obj.Kind == PROC_OBJ_CAPTURE && !BuildingTypeClass::As_Reference(type).IsCaptureable) {
+        char buf[128];
+        sprintf(buf, "ProcINI: [%s] target '%s' cannot be captured, skipped", ctx->Section, fields[0]);
+        GlyphX_Debug_Print(buf);
+        return;
+    }
     obj.Targets[obj.TargetCount++] = type;
 }
 
@@ -421,6 +430,8 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     obj.MinMinutes = ini.Get_Int(section, "MinMinutes", 0);
     obj.MaxMinutes = max(obj.MinMinutes, ini.Get_Int(section, "MaxMinutes", obj.MinMinutes));
     obj.RewardCredits = ini.Get_Int(section, "RewardCredits", 0);
+    obj.TargetStrength = Bound(ini.Get_Int(section, "TargetStrength", 100), 1, 100);
+    obj.IsAbandoned = ini.Get_Bool(section, "Abandoned", false);
 
     Parse_Name(ini, section, "Guard", obj.Guard, sizeof(obj.Guard));
     Parse_Name(ini, section, "PlayerBase", obj.PlayerBase, sizeof(obj.PlayerBase));
@@ -444,8 +455,9 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     obj.PlayerCredits = ini.Get_Int(section, "PlayerCredits", -1);
     if (ini.Is_Present(section, "Waves")) obj.WavesOverride = ini.Get_Bool(section, "Waves", true) ? 1 : 0;
     obj.WaveDelaySeconds = ini.Get_Int(section, "WaveDelaySeconds", 0);
-    obj.IsEnemyProduction = ini.Get_Bool(section, "EnemyProduction", true);
+    if (ini.Is_Present(section, "EnemyProduction")) obj.EnemyProductionOverride = ini.Get_Bool(section, "EnemyProduction", false) ? 1 : 0;
     obj.Patrols = Bound(ini.Get_Int(section, "Patrols", 0), 0, PROC_MAX_PATROLS);
+    obj.PatrolThreat = (ProcThreatType)Get_Enum(ini, section, "PatrolThreat", s_ThreatNames, PROC_THREAT_COUNT, PROC_THREAT_OVERWHELMING);
     Parse_Techno_List(ini, section, "RewardUnits", obj.RewardUnits, PROC_MAX_MEMBERS, obj.RewardUnitCount);
 
     if (ini.Get_String(section, "Targets", "", buffer, sizeof(buffer)) > 0) {
@@ -493,6 +505,7 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.SecondaryMax = max(settings.SecondaryMin, ini.Get_Int(section, "SecondaryMax", settings.SecondaryMax));
     settings.TechLevel = ini.Get_Int(section, "TechLevel", settings.TechLevel);
     settings.IsWaves = ini.Get_Bool(section, "Waves", settings.IsWaves);
+    settings.IsEnemyProduction = ini.Get_Bool(section, "EnemyProduction", settings.IsEnemyProduction);
     settings.IsKeepStartUnits = ini.Get_Bool(section, "KeepStartUnits", settings.IsKeepStartUnits);
     settings.IsAllMaps = ini.Get_Bool(section, "AllMaps", settings.IsAllMaps);
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
@@ -572,7 +585,8 @@ static T const * Weighted_Pick(T const * presets, int count, F accept)
     }
     if (total == 0) return NULL;
 
-    int roll = Random_Pick(0, total - 1);
+    // Random_Pick only has 15 significant bits; build a wider roll for big weight totals.
+    int roll = (total <= 0x7FFF) ? Random_Pick(0, total - 1) : (Random_Pick(0, 0x7FFF) * 0x8000 + Random_Pick(0, 0x7FFF)) % total;
     for (int i = 0; i < count; i++) {
         if (!accept(presets[i])) continue;
         roll -= max(1, presets[i].Weight);

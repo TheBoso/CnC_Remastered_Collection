@@ -11,6 +11,7 @@
 //   MSG  <frame> <text>      on-screen message to the player
 //   OVER <frame> <win|lose>  game over for the human player
 //   END  <frame> <reason>    harness finished (frames | gameover | startfail | crash)
+//   TEST <frame> <cmd> <objective> <value> -> <result>   a --do action (ProcMission_Test)
 //
 
 #include <windows.h>
@@ -32,6 +33,19 @@ typedef void (__cdecl * CNC_Add_Mod_Path_Type)(const char *);
 typedef bool (__cdecl * CNC_Set_Multiplayer_Data_Type)(int, CNCMultiplayerOptionsStruct &, int, CNCPlayerInfoStruct *, int);
 typedef bool (__cdecl * CNC_Start_Instance_Variation_Type)(int, int, int, int, const char *, const char *, const char *, int, const char *);
 typedef bool (__cdecl * CNC_Advance_Instance_Type)(unsigned __int64);
+typedef int (__cdecl * ProcMission_Test_Type)(const char *, const char *, int);
+
+// --do frame[+every]:command[:objective[:value]] - see ProcMission_Test in PROCMISSION.CPP
+struct TestAction {
+    long Frame;
+    long Every;         // 0 = once
+    char Command[32];
+    char Objective[48];
+    int Value;
+};
+static TestAction s_Actions[32];
+static int s_ActionCount = 0;
+static ProcMission_Test_Type s_Test = NULL;
 
 // HousesType values (DEFINES.H)
 static const char * s_Countries[] = {"Spain", "Greece", "USSR", "England", "Ukraine", "Germany", "France", "Turkey"};
@@ -153,6 +167,40 @@ static int Country_From_Name(const char * name)
     return -1;
 }
 
+static bool Parse_Action(const char * text, TestAction & action)
+{
+    memset(&action, 0, sizeof(action));
+    char buf[160];
+    strncpy(buf, text, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    char * fields[4] = {NULL, NULL, NULL, NULL};
+    int count = 0;
+    for (char * tok = strtok(buf, ":"); tok != NULL && count < 4; tok = strtok(NULL, ":")) fields[count++] = tok;
+    if (count < 2) return false;
+
+    action.Frame = atol(fields[0]);
+    char * plus = strchr(fields[0], '+');
+    if (plus != NULL) action.Every = atol(plus + 1);
+    strncpy(action.Command, fields[1], sizeof(action.Command) - 1);
+    if (count > 2) strncpy(action.Objective, fields[2], sizeof(action.Objective) - 1);
+    if (count > 3) action.Value = atoi(fields[3]);
+    return true;
+}
+
+static void Run_Actions()
+{
+    for (int i = 0; i < s_ActionCount; i++) {
+        TestAction & a = s_Actions[i];
+        if (s_Frame < a.Frame) continue;
+        if (a.Every > 0 ? ((s_Frame - a.Frame) % a.Every) != 0 : s_Frame != a.Frame) continue;
+        int result = s_Test(a.Command, a.Objective, a.Value);
+        char buf[160];
+        sprintf(buf, "%s %s %d -> %d", a.Command, a.Objective[0] ? a.Objective : "-", a.Value, result);
+        Out("TEST", buf);
+    }
+}
+
 static void Split(const std::string & text, std::vector<std::string> & out)
 {
     size_t start = 0;
@@ -171,6 +219,7 @@ static const char * Run_Frames(CNC_Advance_Instance_Type advance, long frames)
     __try {
         for (s_Frame = 0; s_Frame < frames; s_Frame++) {
             if (!advance(HUMAN_ID) || s_GameOver) return "gameover";
+            if (s_ActionCount > 0) Run_Actions();
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         char buf[64];
@@ -191,6 +240,8 @@ static void Usage()
            "  --allies <list>      AI countries on the human's team, e.g. England\n"
            "  --enemies <list>     AI countries on other teams, default USSR\n"
            "  --ffa                each enemy on its own team (default: enemies share a team)\n"
+           "  --no-early-win       houses only lose when everything is dead (default: like the\n"
+           "                       real client, a house with no structures or MCV is blown up)\n"
            "  --tech <1-10>        lobby tech level, default 10\n"
            "  --credits <n>        starting credits, default 10000\n"
            "  --frames <n>         frames to run, default 27000 (30 min at 15 fps)\n"
@@ -204,6 +255,7 @@ int main(int argc, char ** argv)
     int scenario = 1, tech = 10, credits = 10000;
     long frames = 27000;
     bool ffa = false;
+    bool earlywin = true;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -217,10 +269,16 @@ int main(int argc, char ** argv)
         else if (a == "--allies") { allies = v; i++; }
         else if (a == "--enemies") { enemies = v; i++; }
         else if (a == "--ffa") { ffa = true; }
+        else if (a == "--no-early-win") { earlywin = false; }
         else if (a == "--tech") { tech = atoi(v.c_str()); i++; }
         else if (a == "--credits") { credits = atoi(v.c_str()); i++; }
         else if (a == "--frames") { frames = atol(v.c_str()); i++; }
         else if (a == "--log") { logfile = v; i++; }
+        else if (a == "--do") {
+            if (s_ActionCount >= 32 || !Parse_Action(v.c_str(), s_Actions[s_ActionCount])) { Usage(); return 2; }
+            s_ActionCount++;
+            i++;
+        }
         else { Usage(); return 2; }
     }
     if (dll.empty() || content.empty()) { Usage(); return 2; }
@@ -257,6 +315,11 @@ int main(int argc, char ** argv)
     CNC_Advance_Instance_Type advance = (CNC_Advance_Instance_Type)GetProcAddress(module, "CNC_Advance_Instance");
     if (!version || !init || !config || !add_mod_path || !set_mp || !start || !advance) {
         Out("END", "missing DLL exports");
+        return 3;
+    }
+    s_Test = (ProcMission_Test_Type)GetProcAddress(module, "ProcMission_Test");
+    if (s_ActionCount > 0 && s_Test == NULL) {
+        Out("END", "--do needs the ProcMission_Test export");
         return 3;
     }
 
@@ -345,7 +408,7 @@ int main(int argc, char ** argv)
     options.EnableSuperweapons = true;
     options.MPlayerShadowRegrow = false;
     options.MPlayerAftermathUnits = false;
-    options.DestroyStructures = false;
+    options.DestroyStructures = earlywin;     // Like the real client's lobby: a house with no structures or MCV is blown up
     options.ModernBalance = false;
 
     if (!set_mp(scenario, options, (int)players.size(), &players[0], 8)) {

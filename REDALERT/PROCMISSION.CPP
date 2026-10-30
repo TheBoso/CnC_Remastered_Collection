@@ -25,6 +25,8 @@ ProcMissionManager ProcMission;
 #define PROC_MESSAGE_SECONDS        20.0f
 #define PROC_WAVE_ACTIVE_TIME       (TICKS_PER_MINUTE * 4)  // After this a wave no longer blocks new ones
 #define PROC_STATUS_RATE            TICKS_PER_MINUTE    // Debug status line (also read by tools/ProcTest)
+#define PROC_TARGET_REACH           3                   // How far a crowded area may push an objective target out
+#define PROC_NEUTRAL_CLEARANCE      20                  // Camps / outposts / neutral targets keep this far from enemy buildings
 
 
 /*******************************************************************************
@@ -236,16 +238,21 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
         if (primary->WavesOverride >= 0) Settings.IsWaves = (primary->WavesOverride != 0);
         if (primary->WaveDelaySeconds > 0) firstwave = primary->WaveDelaySeconds;
 
-        if (!primary->IsEnemyProduction) {
-            // Below IQProduction the AI never builds or expands; units still guard and fight back.
-            for (int i = 0; i < EnemyCount; i++) {
-                HouseClass * house = Enemies[i].House;
-                house->IsBaseBuilding = false;
-                house->IQ = min(house->IQ, Rule.IQProduction - 1);
-            }
-            GlyphX_Debug_Print("ProcMission: enemy production disabled");
-        }
-        Spawn_Patrols(primary->Patrols);
+        if (primary->EnemyProductionOverride >= 0) Settings.IsEnemyProduction = (primary->EnemyProductionOverride != 0);
+    }
+
+    /*
+    **	Skirmish AIs run at full IQ: left alone they build, expand and attack on their own,
+    **	whatever the mission is. By default they only hold their generated bases and the
+    **	director sends every attack, so the presets and difficulty tables decide how hard it is.
+    */
+    if (!Settings.IsEnemyProduction) {
+        Disable_Enemy_Production();
+        GlyphX_Debug_Print("ProcMission: enemy production disabled");
+    }
+
+    if (primary != NULL) {
+        Spawn_Patrols(primary->Patrols, primary->PatrolThreat);
     }
 
     ScenarioInit = save_init;
@@ -493,7 +500,7 @@ void ProcMissionManager::Build_Squads(ProcObjectivePreset const * primary)
             house->Credits = primary->PlayerCredits;
         }
 
-        sprintf(buf, "ProcMission: player %s starts with squad '%s' (%d units, %ld credits)", house->IniName, squad->Name, count, house->Credits);
+        sprintf(buf, "ProcMission: player %s starts with squad '%s' (%d units, %ld credits) at cell %d", house->IniName, squad->Name, count, house->Credits, (int)home);
         GlyphX_Debug_Print(buf);
     }
 }
@@ -508,21 +515,19 @@ ProcTeamPreset const * ProcMissionManager::Find_Squad(ProcObjectivePreset const 
 }
 
 /*
-**	A small enemy outpost away from every base, for Owner=Outpost objectives. It never gets a
-**	construction yard of its own: if one is wanted, it is the objective target (capture it to
-**	start building).
+**	A small enemy outpost around an Owner=Outpost objective's target (placed first, so the
+**	outpost can never crowd it out). It never gets a construction yard of its own: if one is
+**	wanted, it is the objective target (capture it to start building).
 */
-CELL ProcMissionManager::Build_Outpost(HouseClass * house, ProcObjectivePreset const * preset)
+void ProcMissionManager::Build_Outpost(HouseClass * house, ProcObjectivePreset const * preset, CELL center)
 {
-    CELL center = Find_Neutral_Location(20);
-    if (center == -1) return -1;
-
     ProcBasePreset const * base = NULL;
-    if (preset->OutpostBase[0] != '\0' && stricmp(preset->OutpostBase, "AUTO") != 0) {
+    bool camp = (stricmp(preset->OutpostBase, "CAMP") == 0);
+    if (preset->OutpostBase[0] != '\0' && stricmp(preset->OutpostBase, "AUTO") != 0 && !camp) {
         base = ProcPresets.Find_Base(preset->OutpostBase);
     }
     if (base == NULL) {
-        base = ProcPresets.Pick_Base(Proc_Side_Of(house), PROC_BASE_OUTPOST, house->Control.TechLevel);
+        base = ProcPresets.Pick_Base(Proc_Side_Of(house), camp ? PROC_BASE_CAMP : PROC_BASE_OUTPOST, house->Control.TechLevel);
     }
     if (base != NULL) {
         Build_Base(house, base, false, center, true);
@@ -531,7 +536,6 @@ CELL ProcMissionManager::Build_Outpost(HouseClass * house, ProcObjectivePreset c
     char buf[128];
     sprintf(buf, "ProcMission: outpost '%s' for %s at cell %d", base ? base->Name : "-", preset->Name, (int)center);
     GlyphX_Debug_Print(buf);
-    return center;
 }
 
 void ProcMissionManager::Add_Anchor(CELL cell, HouseClass * owner)
@@ -563,21 +567,24 @@ int ProcMissionManager::Claim_Waypoint(CELL cell)
 **	Patrols walk a loop of three points around the anchors (objective targets and outposts
 **	first, then the enemy bases), attacking whatever they see on the way.
 */
-void ProcMissionManager::Spawn_Patrols(int count)
+void ProcMissionManager::Spawn_Patrols(int count, ProcThreatType maxthreat)
 {
     char buf[128];
 
+    int firsthome = AnchorCount;
     for (int i = 0; i < EnemyCount; i++) {
         Add_Anchor(Enemies[i].Home, Enemies[i].House);
     }
 
     for (int p = 0; p < count && AnchorCount > 0; p++) {
-        CELL anchor = Anchors[p % AnchorCount];
-        HouseClass * owner = AnchorOwners[p % AnchorCount];
+        // One patrol per objective / outpost; any extra patrols guard the enemy bases.
+        int a = (p < AnchorCount || firsthome >= AnchorCount) ? p % AnchorCount : firsthome + (p - AnchorCount) % (AnchorCount - firsthome);
+        CELL anchor = Anchors[a];
+        HouseClass * owner = AnchorOwners[a];
         if (!Is_Alive(owner)) continue;
 
         ProcTeamPreset const * preset = ProcPresets.Pick_Team(Proc_Side_Of(owner), PROC_TEAM_PATROL, PROC_THREAT_SCOUT,
-            Diff.MaxThreat, owner->Control.TechLevel);
+            (ProcThreatType)min((int)Diff.MaxThreat, (int)maxthreat), owner->Control.TechLevel);
         if (preset == NULL) continue;
 
         // Three points spread around the anchor.
@@ -592,6 +599,13 @@ void ProcMissionManager::Spawn_Patrols(int count)
             CELL cell = Clamp_To_Map(Cell_X(anchor) + dx[dir] * radius, Cell_Y(anchor) + dy[dir] * radius);
             cell = Map.Nearby_Location(cell, SPEED_TRACK);
             if (cell <= 0) continue;
+
+            // Never through the player's starting area.
+            bool tooclose = false;
+            for (int h = 0; h < PlayerTeamCount; h++) {
+                if (Cell_Dist(cell, Home_Cell(PlayerTeam[h])) < PROC_PATROL_CLEARANCE) tooclose = true;
+            }
+            if (tooclose) continue;
             int waypoint = Claim_Waypoint(cell);
             if (waypoint < 0) break;
             points[pointcount++] = waypoint;
@@ -680,14 +694,19 @@ bool ProcMissionManager::Can_Place_Building(StructType type, CELL cell) const
     return true;
 }
 
-bool ProcMissionManager::Place_Building(HouseClass * house, StructType type, CELL center, int minradius, int maxradius, TARGET * placed)
+/*
+**	'reach' is how far past maxradius a crowded area may push the building. Bases use a lot,
+**	objective targets little: a target far outside its base (or camp) is misleading, and its
+**	patrols would follow it into the open.
+*/
+bool ProcMissionManager::Place_Building(HouseClass * house, StructType type, CELL center, int minradius, int maxradius, TARGET * placed, int reach)
 {
     if (type == STRUCT_NONE || center == -1) return false;
 
     // Random spots first, so layouts differ every game.
     for (int attempt = 0; attempt < 80; attempt++) {
         // Widen the search when the preferred ring is crowded.
-        int widen = (attempt / 20) * 3;
+        int widen = min((attempt / 20) * 3, reach);
         CELL cell = (attempt == 0 && minradius == 0) ? center : Random_Cell_Around(center, minradius, maxradius + widen);
         if (Try_Place_Building(house, type, cell, placed)) return true;
     }
@@ -696,7 +715,7 @@ bool ProcMissionManager::Place_Building(HouseClass * house, StructType type, CEL
     **	Crowded base: scan every ring outwards (from a random start on each ring) so a free
     **	spot is found whenever one exists within reach.
     */
-    for (int radius = minradius; radius <= maxradius + 12; radius++) {
+    for (int radius = minradius; radius <= maxradius + reach; radius++) {
         int perimeter = max(1, radius * 8);
         int offset = Random_Pick(0, perimeter - 1);
         for (int step = 0; step < perimeter; step++) {
@@ -817,18 +836,38 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
             count = (count * Diff.DefenseScalePct + 50) / 100;
         }
         for (int n = 0; n < count; n++) {
-            if (Place_Building(house, entry.Type, center, entry.MinRadius, entry.MaxRadius) && entry.Type == STRUCT_REFINERY) {
-                refinery = true;
-            }
-        }
-    }
+            TARGET placed = TARGET_NONE;
+            if (!Place_Building(house, entry.Type, center, entry.MinRadius, entry.MaxRadius, &placed)) continue;
 
-    if (preset->IsAutoPower) {
-        Add_Power(house, center);
+            // Keep power up as the base grows. When a crowded base has no room left for the
+            // power plant a building needs, the building goes instead (the base starts powered).
+            if (preset->IsAutoPower) {
+                Add_Power(house, center);
+                BuildingClass * building = As_Building(placed);
+                if (house->Power < house->Drain && building != NULL && building->Class->Drain > 0 && entry.Type != STRUCT_CONST) {
+                    building->Limbo();
+                    delete building;
+                    continue;
+                }
+            }
+            if (entry.Type == STRUCT_REFINERY) refinery = true;
+        }
     }
 
     if (preset->IsNaval) {
         Place_Naval_Yard(house, center);
+    }
+
+    if (preset->IsAutoPower) {
+        Add_Power(house, center);
+
+        // Still short (no room for another plant): drop the newest power users until it isn't.
+        for (int i = Buildings.Count() - 1; i >= 0 && house->Power < house->Drain; i--) {
+            BuildingClass * building = Buildings.Ptr(i);
+            if ((HouseClass *)building->House != house || building->Class->Drain <= 0 || *building == STRUCT_CONST) continue;
+            building->Limbo();
+            delete building;
+        }
     }
 
     // Only bases that got their own refinery (an outpost may share a house with a main base).
@@ -860,10 +899,53 @@ void ProcMissionManager::Add_Power(HouseClass * house, CELL center)
     }
 }
 
-CELL ProcMissionManager::Find_Neutral_Location(int mindistance) const
+/*
+**	A building of this type the house already owns near 'center' that no other objective uses.
+*/
+TARGET ProcMissionManager::Find_Existing_Target(HouseClass * house, StructType type, CELL center, int maxdistance) const
 {
+    if (house == NULL || center == -1) return TARGET_NONE;
+
+    BuildingClass * best = NULL;
+    int bestdist = 0;
+    for (int i = 0; i < Buildings.Count(); i++) {
+        BuildingClass * building = Buildings.Ptr(i);
+        if ((HouseClass *)building->House != house || building->Class->Type != type || building->IsInLimbo) continue;
+
+        TARGET target = building->As_Target();
+        bool taken = false;
+        for (int o = 0; o < ObjectiveCount; o++) {
+            if (Objectives[o].Target == target) taken = true;
+        }
+        if (taken) continue;
+
+        int dist = Cell_Dist(Coord_Cell(building->Center_Coord()), center);
+        if (dist > maxdistance) continue;
+        if (best == NULL || dist < bestdist) {
+            best = building;
+            bestdist = dist;
+        }
+    }
+    return best ? best->As_Target() : TARGET_NONE;
+}
+
+/*
+**	Somewhere away from every base. Bases spread well past their centre (defence rings reach
+**	~13 cells out), so the enemies' actual buildings must be clear too: a camp or outpost
+**	under a main base's turrets is a death trap for a squad.
+*/
+CELL ProcMissionManager::Find_Neutral_Location(int mindistance, HouseClass const * nearto) const
+{
+    // With 'nearto', the suitable spot closest to that house (e.g. a squad's foothold).
+    CELL best = -1;
+    int bestdist = 0;
+    CELL home = (nearto != NULL) ? Home_Cell(nearto) : -1;
+
     for (int attempt = 0; attempt < 300; attempt++) {
-        int needed = mindistance - (attempt / 60) * 4;     // Relax the distance on crowded maps
+        if (best != -1 && (attempt % 60) == 0) break;      // Keep the best spot of the strictest tier that had one
+        int relax = (attempt / 60) * 4;                     // Relax the distances on crowded maps
+        int needed = mindistance - relax;
+        int clearance = max(8, PROC_NEUTRAL_CLEARANCE - relax / 2);
         CELL cell = Clamp_To_Map(Map.MapCellX + Random_Pick(2, Map.MapCellWidth - 3), Map.MapCellY + Random_Pick(2, Map.MapCellHeight - 3));
         if (!Map[cell].Is_Clear_To_Build(SPEED_NONE)) continue;
 
@@ -874,9 +956,22 @@ CELL ProcMissionManager::Find_Neutral_Location(int mindistance) const
         for (int i = 0; i < EnemyCount && ok; i++) {
             if (Cell_Dist(cell, Enemies[i].Home) < needed) ok = false;
         }
-        if (ok) return cell;
+        for (int i = 0; i < Buildings.Count() && ok; i++) {
+            BuildingClass const * building = Buildings.Ptr(i);
+            HouseClass const * house = building->House;
+            if (building->IsInLimbo || house == NULL || Is_Player_Team(house) || house->Class->House == HOUSE_NEUTRAL) continue;
+            if (Cell_Dist(cell, Coord_Cell(building->Center_Coord())) < clearance) ok = false;
+        }
+        if (!ok) continue;
+        if (home == -1) return cell;
+
+        int dist = Cell_Dist(cell, home);
+        if (best == -1 || dist < bestdist) {
+            best = cell;
+            bestdist = dist;
+        }
     }
-    return -1;
+    return best;
 }
 
 
@@ -910,9 +1005,21 @@ void ProcMissionManager::Place_Objective_Targets()
         CELL center = -1;
         int minradius = 3;
         int maxradius = 10;
+        int enemyindex = 0;
+
+        // A squad mission's own bonus (e.g. the construction yard to capture) is the squad's
+        // foothold: as close to the squad as is safe, not across the map past the patrols.
+        ProcObjectivePreset const * primary = Objectives[0].Preset;
+        bool foothold = IsSquad && !obj.IsPrimary && primary->Bonus[0] != '\0' && stricmp(primary->Bonus, preset->Name) == 0;
+        HouseClass const * nearto = foothold ? Commander : NULL;
+
+        // Any other target in a squad mission is the far end of the trip, well away from where
+        // the squad starts (its patrols would otherwise be on the squad straight away).
+        int faraway = (IsSquad && nearto == NULL) ? 20 : 0;
         switch (preset->Owner) {
             case PROC_OWNER_ENEMY: {
-                ProcHouseInfo const & enemy = Enemies[Random_Pick(0, EnemyCount - 1)];
+                enemyindex = Random_Pick(0, EnemyCount - 1);
+                ProcHouseInfo const & enemy = Enemies[enemyindex];
                 owner = enemy.House;
                 center = enemy.Home;
                 minradius = 4;
@@ -921,7 +1028,7 @@ void ProcMissionManager::Place_Objective_Targets()
             }
             case PROC_OWNER_NEUTRAL:
                 owner = HouseClass::As_Pointer(HOUSE_NEUTRAL);
-                center = Find_Neutral_Location(22);
+                center = Find_Neutral_Location(22 + faraway, nearto);
                 minradius = 0;
                 maxradius = 6;
                 break;
@@ -933,7 +1040,7 @@ void ProcMissionManager::Place_Objective_Targets()
                 break;
             case PROC_OWNER_OUTPOST:
                 owner = Enemies[Random_Pick(0, EnemyCount - 1)].House;
-                center = Build_Outpost(owner, preset);
+                center = Find_Neutral_Location(20 + faraway, nearto);
                 minradius = 0;
                 maxradius = 5;
                 break;
@@ -958,7 +1065,39 @@ void ProcMissionManager::Place_Objective_Targets()
         }
         obj.TargetType = candidates[Random_Pick(0, candidatecount - 1)];
 
-        if (owner == NULL || center == -1 || !Place_Building(owner, obj.TargetType, center, minradius, maxradius, &obj.Target)) {
+        // An enemy base target is the base's own building when it has one ("destroy their
+        // refinery"); a new one is only added when it doesn't (crowded bases may have no room).
+        bool existing = false;
+        if (preset->Owner == PROC_OWNER_ENEMY) {
+            // Any of the base's own buildings: a crowded base spreads up to 12 cells further out.
+            obj.Target = Find_Existing_Target(owner, obj.TargetType, center, maxradius + 12);
+            existing = (obj.Target != TARGET_NONE);
+        }
+
+        // Away from the bases a blocked spot (cliffs, water, trees) just means trying elsewhere.
+        bool placed = existing;
+        bool elsewhere = (preset->Owner == PROC_OWNER_NEUTRAL || preset->Owner == PROC_OWNER_OUTPOST);
+        for (int attempt = 0; !placed && owner != NULL && center != -1 && attempt < 5; attempt++) {
+            // An abandoned target belongs to no one: the AI neither repairs nor defends it, and
+            // units only shoot it when told to (an attack-moving squad would otherwise lock on to it).
+            HouseClass * builder = preset->IsAbandoned ? HouseClass::As_Pointer(HOUSE_NEUTRAL) : owner;
+            placed = Place_Building(builder, obj.TargetType, center, minradius, maxradius, &obj.Target, PROC_TARGET_REACH);
+            if (placed) break;
+            if (elsewhere) {
+                center = Find_Neutral_Location((preset->Owner == PROC_OWNER_NEUTRAL ? 22 : 20) + faraway, nearto);
+            } else if (preset->Owner == PROC_OWNER_ENEMY && attempt + 1 < EnemyCount) {
+                // No room in this enemy's base (or its building is taken): try the next enemy.
+                enemyindex = (enemyindex + 1) % EnemyCount;
+                owner = Enemies[enemyindex].House;
+                center = Enemies[enemyindex].Home;
+                obj.Target = Find_Existing_Target(owner, obj.TargetType, center, maxradius + 12);
+                placed = existing = (obj.Target != TARGET_NONE);
+            } else {
+                break;
+            }
+        }
+
+        if (!placed) {
             sprintf(buf, "ProcMission: could not place target for objective %s", preset->Name);
             GlyphX_Debug_Print(buf);
             obj.State = PROC_STATE_FAILED;
@@ -966,9 +1105,21 @@ void ProcMissionManager::Place_Objective_Targets()
             continue;
         }
 
-        // A target in our own base must not leave it short of power.
-        if (preset->Owner == PROC_OWNER_PLAYER) {
+        if (preset->Owner == PROC_OWNER_OUTPOST) {
+            Build_Outpost(owner, preset, center);
+        }
+
+        // A target added to a base must not leave it short of power.
+        if (!existing && (preset->Owner == PROC_OWNER_PLAYER || preset->Owner == PROC_OWNER_ENEMY)) {
             Add_Power(owner, center);
+        }
+
+        // A damaged target (e.g. a construction yard one engineer can capture).
+        if (preset->TargetStrength < 100) {
+            BuildingClass * building = As_Building(obj.Target);
+            if (building != NULL) {
+                building->Strength = max(1, (int)building->Class->MaxStrength * preset->TargetStrength / 100);
+            }
         }
 
         /*
@@ -987,14 +1138,16 @@ void ProcMissionManager::Place_Objective_Targets()
             }
         }
 
-        // Patrols (squad missions) guard the enemy and neutral targets.
-        if (preset->Owner != PROC_OWNER_PLAYER) {
+        // Patrols (squad missions) guard the enemy and neutral targets, but not a capture target:
+        // once captured it is the player's, and a patrol looping through it would wreck it.
+        if (preset->Owner != PROC_OWNER_PLAYER && preset->Kind != PROC_OBJ_CAPTURE) {
             HouseClass * patroller = (preset->Owner == PROC_OWNER_NEUTRAL) ? Enemies[Random_Pick(0, EnemyCount - 1)].House : owner;
             Add_Anchor(As_Cell(obj.Target), patroller);
         }
 
-        sprintf(buf, "ProcMission: objective %s target %s at cell %d", preset->Name,
-            BuildingTypeClass::As_Reference(obj.TargetType).IniName, (int)As_Cell(obj.Target));
+        sprintf(buf, "ProcMission: objective %s target %s at cell %d (%d cells from the area centre, radius %d%s)", preset->Name,
+            BuildingTypeClass::As_Reference(obj.TargetType).IniName, (int)As_Cell(obj.Target),
+            Cell_Dist(As_Cell(obj.Target), center), maxradius + (existing ? 12 : PROC_TARGET_REACH), existing ? ", existing building" : "");
         GlyphX_Debug_Print(buf);
     }
 
@@ -1104,7 +1257,11 @@ void ProcMissionManager::Update_Objectives()
 
             case PROC_OBJ_CAPTURE:
                 if (target == NULL) Fail_Objective(obj);
-                else if (Is_Player_Team(target->House)) Complete_Objective(obj);
+                else if (Is_Player_Team(target->House)) {
+                    // The damage was only there so one engineer could take it.
+                    if (obj.Preset->TargetStrength < 100) target->Strength = target->Class->MaxStrength;
+                    Complete_Objective(obj);
+                }
                 else if (timeup) Fail_Objective(obj);
                 break;
 
@@ -1115,6 +1272,38 @@ void ProcMissionManager::Update_Objectives()
 
             default:
                 break;
+        }
+    }
+}
+
+/*
+**	A capture target placed damaged (TargetStrength) is held at that strength until it is
+**	captured: its owner would repair it, and stray fire (the player's own attack-moving
+**	squad included) would wreck the one building the mission needs.
+**
+**	In squad missions the enemy doesn't repair objective targets either: a squad without a
+**	commando can't out-damage the AI's repairs, which would make the target unkillable.
+*/
+void ProcMissionManager::Hold_Targets()
+{
+    for (int i = 0; i < ObjectiveCount; i++) {
+        ProcObjective & obj = Objectives[i];
+        if (obj.State != PROC_STATE_ACTIVE) continue;
+        bool hold = (obj.Preset->Kind == PROC_OBJ_CAPTURE && obj.Preset->TargetStrength < 100);
+        bool norepair = hold || (IsSquad && obj.Preset->Kind == PROC_OBJ_DESTROY);
+        if (!norepair) continue;
+
+        BuildingClass * target = (obj.Target != TARGET_NONE) ? As_Building(obj.Target, false) : NULL;
+        if (target == NULL || !target->IsActive || target->IsInLimbo || target->Class->Type != obj.TargetType) continue;
+        if (target->Strength <= 0 || Is_Player_Team(target->House)) continue;
+
+        if (target->IsRepairing) target->Repair(0);
+        if (hold) {
+            target->Strength = max(1, (int)target->Class->MaxStrength * obj.Preset->TargetStrength / 100);
+        } else {
+            // The AI restarts repairs every frame; just never let the strength go back up.
+            if (obj.HeldStrength > 0 && target->Strength > obj.HeldStrength) target->Strength = obj.HeldStrength;
+            obj.HeldStrength = target->Strength;
         }
     }
 }
@@ -1159,10 +1348,15 @@ void ProcMissionManager::Give_Reward(ProcObjectivePreset const * preset)
 
     if (preset->RewardUnitCount > 0) {
         CELL home = Home_Cell(Commander);
+        int before = Commander->CurInfantry + Commander->CurUnits;
         for (int i = 0; i < preset->RewardUnitCount; i++) {
             Place_Units(Commander, preset->RewardUnits[i].Type, preset->RewardUnits[i].Count, home, MISSION_GUARD);
         }
         Speak(VOX_REINFORCEMENTS, Commander, Cell_Coord(home));
+
+        char buf[128];
+        sprintf(buf, "ProcMission: reward for %s: %d units at cell %d", preset->Name, Commander->CurInfantry + Commander->CurUnits - before, (int)home);
+        GlyphX_Debug_Print(buf);
     }
 }
 
@@ -1479,6 +1673,8 @@ void ProcMissionManager::AI()
         Announce_Objectives();
     }
 
+    Hold_Targets();
+
     if ((Elapsed % PROC_OBJECTIVE_CHECK_RATE) == 0) {
         Update_Objectives();
     }
@@ -1531,6 +1727,20 @@ void ProcMissionManager::Print_Status() const
     GlyphX_Debug_Print(buf);
 }
 
+/*
+**	Below IQProduction the AI never builds, expands or sends out attack teams. Everything else
+**	stays (all other IQ gates are lower): units guard and fight back, harvesters harvest and
+**	damaged buildings get repaired.
+*/
+void ProcMissionManager::Disable_Enemy_Production()
+{
+    for (int i = 0; i < EnemyCount; i++) {
+        HouseClass * house = Enemies[i].House;
+        house->IsBaseBuilding = false;
+        house->IQ = min(house->IQ, Rule.IQProduction - 1);
+    }
+}
+
 bool ProcMissionManager::Is_Player_Team(HouseClass const * house) const
 {
     if (house == NULL || Commander == NULL) return false;
@@ -1547,6 +1757,23 @@ CELL ProcMissionManager::Home_Cell(HouseClass const * house) const
     for (int i = 0; i < EnemyCount; i++) {
         if (Enemies[i].House == house) return Enemies[i].Home;
     }
+    if (house->CurBuildings > 0) return Coord_Cell(house->Center);
+
+    // No base (squad missions, or an MCV not deployed yet): Center only follows buildings,
+    // so use the middle of the house's units instead.
+    long x = 0;
+    long y = 0;
+    int count = 0;
+    for (int layer = 0; layer < LAYER_COUNT; layer++) {
+        for (int i = 0; i < Map.Layer[layer].Count(); i++) {
+            ObjectClass * obj = Map.Layer[layer][i];
+            if (!obj->Is_Foot() || ((TechnoClass *)obj)->House != house) continue;
+            x += Coord_X(obj->Center_Coord());
+            y += Coord_Y(obj->Center_Coord());
+            count++;
+        }
+    }
+    if (count > 0) return Map.Nearby_Location(Coord_Cell(XY_Coord(x / count, y / count)), SPEED_FOOT);
     return Coord_Cell(house->Center);
 }
 
@@ -1557,4 +1784,314 @@ void ProcMissionManager::Message(char const * text) const
 
     Logic_Switch_Player_Context(Commander);
     On_Message(text, PROC_MESSAGE_SECONDS, -1);
+}
+
+
+/*******************************************************************************
+ * TEST HOOK
+ *
+ * Lets the headless harness (tools/ProcTest) play out objectives. The game engine
+ * never calls it. Objectives are named by preset (PRIMARY = the primary objective).
+ *
+ *   damage   <objective> <pct>   damage the target by pct % of its maximum strength
+ *   capture  <objective> <n>     spawn n player engineers beside the target, ordered to capture it
+ *   clear    <objective> <r>     destroy every enemy unit within r cells of the target (its guards)
+ *   advance  <objective>         like a player would: attack-move (guard area) the commander's
+ *                                units to the target, fighting whatever they meet; engineers
+ *                                stop 12 cells short (out of the guards' reach) and wait
+ *   engineer <objective>         send one of the commander's own engineers to capture the target
+ *   attack   <objective> [r]     order the commander's units (all but the engineers) to attack the
+ *                                target; with r, only the units within r cells of it
+ *   fight    <objective>         like a player: every unit attacks the nearest enemy soldier or
+ *                                vehicle within 10 cells (focus on what shoots back, not on
+ *                                buildings); the rest advance as above
+ *   assault  <objective>         fight while enemy units are within 8 cells of the target, then
+ *                                attack the target itself
+ *   near     <objective> <r>     returns the enemy units (and defensive structures x100) within r cells
+ *   distance <objective>         returns the commander's closest unit's distance to the target
+ *   list     <objective> <r>     prints every object within r cells of the target (debugging)
+ *   wipe     PLAYER|ENEMY        destroy every object of the human players / the enemies
+ *   credits                      returns the commander's money
+ *   units                        returns the commander's unit count (infantry, vehicles, ships, aircraft)
+ *   buildings                    returns the commander's building count
+ *   owner    <objective>         returns 1 if the target belongs to the player's team, 0 if not, -1 if gone
+ *
+ * Returns -1 for an unknown command or objective.
+ ******************************************************************************/
+
+int ProcMissionManager::Test_Command(char const * command, char const * objective, int value)
+{
+    if (!IsActive || command == NULL || Commander == NULL) return -1;
+    if (objective == NULL) objective = "";
+
+    if (stricmp(command, "credits") == 0) return (int)Commander->Available_Money();
+    if (stricmp(command, "units") == 0) return Commander->CurInfantry + Commander->CurUnits + Commander->CurVessels + Commander->CurAircraft;
+    if (stricmp(command, "buildings") == 0) return Commander->CurBuildings;
+
+    if (stricmp(command, "wipe") == 0) {
+        bool player = (stricmp(objective, "PLAYER") == 0);
+        TARGET victims[1000];
+        int count = 0;
+        for (int layer = 0; layer < LAYER_COUNT; layer++) {
+            for (int i = 0; i < Map.Layer[layer].Count() && count < ARRAY_SIZE(victims); i++) {
+                ObjectClass * obj = Map.Layer[layer][i];
+                if (!obj->Is_Techno()) continue;
+                HouseClass * house = ((TechnoClass *)obj)->House;
+                bool match = player ? (house->IsHuman && Is_Player_Team(house)) : !Is_Player_Team(house) && house->Class->House != HOUSE_NEUTRAL;
+                if (match) victims[count++] = obj->As_Target();
+            }
+        }
+        for (int i = 0; i < count; i++) {
+            TechnoClass * techno = As_Techno(victims[i]);
+            if (techno == NULL || !techno->IsActive || techno->IsInLimbo || techno->Strength <= 0) continue;
+            int damage = techno->Strength;
+            techno->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+        }
+        return count;
+    }
+
+    ProcObjective * obj = NULL;
+    for (int i = 0; i < ObjectiveCount; i++) {
+        if ((stricmp(objective, "PRIMARY") == 0 && Objectives[i].IsPrimary) || stricmp(objective, Objectives[i].Preset->Name) == 0) {
+            obj = &Objectives[i];
+            break;
+        }
+    }
+    if (obj == NULL) return -1;
+    BuildingClass * target = (obj->Target != TARGET_NONE) ? As_Building(obj->Target) : NULL;
+    if (target != NULL && (!target->IsActive || target->IsInLimbo || target->Class->Type != obj->TargetType)) target = NULL;
+
+    if (stricmp(command, "owner") == 0) {
+        if (target == NULL) return -1;
+        return Is_Player_Team(target->House) ? 1 : 0;
+    }
+
+    if (stricmp(command, "damage") == 0) {
+        if (target == NULL) return -1;
+        int damage = max(1, (int)target->Class->MaxStrength * value / 100);
+        target->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+        return target->IsActive ? (int)target->Strength : 0;
+    }
+
+    if (stricmp(command, "clear") == 0) {
+        if (target == NULL) return -1;
+        CELL center = Coord_Cell(target->Center_Coord());
+        TARGET victims[200];
+        int count = 0;
+        for (int layer = 0; layer < LAYER_COUNT; layer++) {
+            for (int i = 0; i < Map.Layer[layer].Count() && count < ARRAY_SIZE(victims); i++) {
+                ObjectClass * object = Map.Layer[layer][i];
+                if (!object->Is_Foot()) continue;
+                HouseClass * house = ((TechnoClass *)object)->House;
+                if (Is_Player_Team(house) || house->Class->House == HOUSE_NEUTRAL) continue;
+                if (Cell_Dist(Coord_Cell(object->Center_Coord()), center) <= value) victims[count++] = object->As_Target();
+            }
+        }
+        for (int i = 0; i < count; i++) {
+            TechnoClass * techno = As_Techno(victims[i]);
+            if (techno == NULL || !techno->IsActive || techno->IsInLimbo || techno->Strength <= 0) continue;
+            int damage = techno->Strength;
+            techno->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+        }
+        return count;
+    }
+
+    if (stricmp(command, "list") == 0) {
+        if (target == NULL) return -1;
+        CELL center = Coord_Cell(target->Center_Coord());
+        int count = 0;
+        for (int layer = 0; layer < LAYER_COUNT; layer++) {
+            for (int i = 0; i < Map.Layer[layer].Count(); i++) {
+                ObjectClass * object = Map.Layer[layer][i];
+                if (!object->Is_Techno()) continue;
+                TechnoClass * techno = (TechnoClass *)object;
+                int dist = Cell_Dist(Coord_Cell(object->Center_Coord()), center);
+                if (dist > value) continue;
+                char buf[128];
+                sprintf(buf, "ProcTest: %s %s hp=%d dist=%d mission=%s", techno->House->IniName, techno->Techno_Type_Class()->IniName,
+                    (int)techno->Strength, dist, MissionClass::Mission_Name(techno->Get_Mission()));
+                GlyphX_Debug_Print(buf);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    if (stricmp(command, "near") == 0 || stricmp(command, "distance") == 0) {
+        if (target == NULL) return -1;
+        CELL center = Coord_Cell(target->Center_Coord());
+        if (stricmp(command, "distance") == 0) {
+            int best = -1;
+            for (int layer = 0; layer < LAYER_COUNT; layer++) {
+                for (int i = 0; i < Map.Layer[layer].Count(); i++) {
+                    ObjectClass * object = Map.Layer[layer][i];
+                    if (!object->Is_Foot() || (HouseClass *)((TechnoClass *)object)->House != Commander) continue;
+                    int dist = Cell_Dist(Coord_Cell(object->Center_Coord()), center);
+                    if (best < 0 || dist < best) best = dist;
+                }
+            }
+            return best;
+        }
+        int units = 0;
+        int defenses = 0;
+        for (int layer = 0; layer < LAYER_COUNT; layer++) {
+            for (int i = 0; i < Map.Layer[layer].Count(); i++) {
+                ObjectClass * object = Map.Layer[layer][i];
+                if (!object->Is_Techno()) continue;
+                HouseClass * house = ((TechnoClass *)object)->House;
+                if (Is_Player_Team(house) || house->Class->House == HOUSE_NEUTRAL) continue;
+                if (Cell_Dist(Coord_Cell(object->Center_Coord()), center) > value) continue;
+                if (object->Is_Foot()) units++;
+                else if (((TechnoClass *)object)->Is_Weapon_Equipped()) defenses++;
+            }
+        }
+        return units + defenses * 100;
+    }
+
+    if (stricmp(command, "fight") == 0) {
+        if (target == NULL) return -1;
+        int engaged = 0;
+        for (int i = 0; i < Infantry.Count(); i++) {
+            InfantryClass * infantry = Infantry.Ptr(i);
+            if ((HouseClass *)infantry->House != Commander || infantry->IsInLimbo || !infantry->IsActive || !infantry->Is_Weapon_Equipped()) continue;
+            if (*infantry == INFANTRY_RENOVATOR) continue;
+
+            // Keep shooting a soldier / vehicle it already has.
+            TechnoClass const * current = As_Techno(infantry->TarCom);
+            if (current != NULL && current->IsActive && current->Is_Foot() && current->Strength > 0) continue;
+
+            FootClass * nearest = NULL;
+            int best = 0;
+            CELL here = Coord_Cell(infantry->Center_Coord());
+            for (int layer = 0; layer < LAYER_COUNT; layer++) {
+                for (int o = 0; o < Map.Layer[layer].Count(); o++) {
+                    ObjectClass * object = Map.Layer[layer][o];
+                    if (!object->Is_Foot() || object->IsInLimbo || object->Strength <= 0) continue;
+                    HouseClass * house = ((TechnoClass *)object)->House;
+                    if (Is_Player_Team(house) || house->Class->House == HOUSE_NEUTRAL) continue;
+                    int dist = Cell_Dist(here, Coord_Cell(object->Center_Coord()));
+                    if (dist <= 10 && (nearest == NULL || dist < best)) {
+                        nearest = (FootClass *)object;
+                        best = dist;
+                    }
+                }
+            }
+            if (nearest == NULL) continue;
+            infantry->Assign_Mission(MISSION_ATTACK);
+            infantry->Assign_Target(nearest->As_Target());
+            infantry->Commence();
+            engaged++;
+        }
+        return engaged + Test_Command("advance", objective, 0);
+    }
+
+    if (stricmp(command, "assault") == 0) {
+        // Clear the guards first, then demolish.
+        if (target == NULL) return -1;
+        if (Test_Command("near", objective, 8) % 100 > 0) return Test_Command("fight", objective, 0);
+        return Test_Command("attack", objective, 0);
+    }
+
+    if (stricmp(command, "attack") == 0) {
+        if (target == NULL) return -1;
+        CELL center = Coord_Cell(target->Center_Coord());
+        int ordered = 0;
+        for (int i = 0; i < Infantry.Count(); i++) {
+            InfantryClass * infantry = Infantry.Ptr(i);
+            if ((HouseClass *)infantry->House != Commander || infantry->IsInLimbo || !infantry->IsActive || *infantry == INFANTRY_RENOVATOR) continue;
+            if (!infantry->Is_Weapon_Equipped()) continue;
+            if (value > 0 && Cell_Dist(Coord_Cell(infantry->Center_Coord()), center) > value) continue;
+            if (infantry->Get_Mission() == MISSION_ATTACK && infantry->TarCom == target->As_Target()) continue;
+            infantry->Assign_Mission(MISSION_ATTACK);
+            infantry->Assign_Target(target->As_Target());
+            infantry->Commence();
+            ordered++;
+        }
+        for (int i = 0; i < Units.Count(); i++) {
+            UnitClass * unit = Units.Ptr(i);
+            if ((HouseClass *)unit->House != Commander || unit->IsInLimbo || !unit->IsActive || !unit->Is_Weapon_Equipped()) continue;
+            if (value > 0 && Cell_Dist(Coord_Cell(unit->Center_Coord()), center) > value) continue;
+            unit->Assign_Mission(MISSION_ATTACK);
+            unit->Assign_Target(target->As_Target());
+            unit->Commence();
+            ordered++;
+        }
+        return ordered;
+    }
+
+    if (stricmp(command, "advance") == 0 || stricmp(command, "engineer") == 0) {
+        if (target == NULL) return -1;
+        bool engineers = (stricmp(command, "engineer") == 0);
+        if (engineers && Is_Player_Team(target->House)) return 0;     // Already ours
+        CELL center = Coord_Cell(target->Center_Coord());
+        int ordered = 0;
+        for (int i = 0; i < Infantry.Count() && !(engineers && ordered > 0); i++) {
+            InfantryClass * infantry = Infantry.Ptr(i);
+            if ((HouseClass *)infantry->House != Commander || infantry->IsInLimbo || !infantry->IsActive) continue;
+            bool isengineer = (*infantry == INFANTRY_RENOVATOR);
+            if (engineers && !isengineer) continue;
+            if (engineers) {
+                infantry->Assign_Mission(MISSION_CAPTURE);
+                infantry->Assign_Target(TARGET_NONE);
+                infantry->Assign_Destination(target->As_Target());
+            } else if (isengineer) {
+                CELL wait = Toward(center, Coord_Cell(infantry->Center_Coord()), 12);
+                infantry->Assign_Mission(MISSION_MOVE);
+                infantry->Assign_Target(TARGET_NONE);
+                infantry->Assign_Destination(::As_Target(Map.Nearby_Location(wait, SPEED_FOOT)));
+            } else {
+                // Already attack-moving / attacking: re-ordering would make it drop its target.
+                if (infantry->Get_Mission() == MISSION_GUARD_AREA || infantry->Get_Mission() == MISSION_ATTACK) continue;
+
+                // Guard area, set up the way a player's order is (EventClass MEGAMISSION).
+                TARGET spot = ::As_Target(Map.Nearby_Location(center, SPEED_FOOT));
+                infantry->Assign_Mission(MISSION_GUARD_AREA);
+                infantry->Assign_Target(TARGET_NONE);
+                infantry->Assign_Destination(spot);
+                infantry->ArchiveTarget = spot;
+            }
+            infantry->Commence();
+            ordered++;
+        }
+        for (int i = 0; i < Units.Count() && !engineers; i++) {
+            UnitClass * unit = Units.Ptr(i);
+            if ((HouseClass *)unit->House != Commander || unit->IsInLimbo || !unit->IsActive) continue;
+            if (unit->Get_Mission() == MISSION_GUARD_AREA || unit->Get_Mission() == MISSION_ATTACK) continue;
+            TARGET spot = ::As_Target(Map.Nearby_Location(center, SPEED_TRACK));
+            unit->Assign_Mission(MISSION_GUARD_AREA);
+            unit->Assign_Target(TARGET_NONE);
+            unit->Assign_Destination(spot);
+            unit->ArchiveTarget = spot;
+            unit->Commence();
+            ordered++;
+        }
+        return ordered;
+    }
+
+    if (stricmp(command, "capture") == 0) {
+        if (target == NULL) return -1;
+        int spawned = 0;
+        for (int i = 0; i < max(1, value); i++) {
+            CELL cell = Map.Nearby_Location(Coord_Cell(target->Center_Coord()), SPEED_FOOT);
+            InfantryClass * engineer = new InfantryClass(INFANTRY_RENOVATOR, Commander->Class->House);
+            if (engineer == NULL) break;
+            if (!engineer->Unlimbo(Cell_Coord(cell), DIR_N)) {
+                delete engineer;
+                continue;
+            }
+            engineer->Assign_Mission(MISSION_CAPTURE);
+            engineer->Assign_Target(TARGET_NONE);
+            engineer->Assign_Destination(target->As_Target());
+            engineer->Commence();
+            spawned++;
+        }
+        return spawned;
+    }
+
+    return -1;
+}
+
+extern "C" __declspec(dllexport) int __cdecl ProcMission_Test(char const * command, char const * objective, int value)
+{
+    return ProcMission.Test_Command(command, objective, value);
 }

@@ -53,6 +53,8 @@
 #define PROC_MAX_PATROLS             8       // Patrol teams per mission
 #define PROC_MAX_ANCHORS             12      // Places patrols guard (targets, outposts, enemy bases)
 #define PROC_FIRST_WAYPOINT          60      // Waypoints 60-97 are used for generated patrol routes
+#define PROC_RESCUE_RANGE            12      // AI units only rush to defend buildings this close (TechnoClass::Base_Is_Attacked)
+#define PROC_PATROL_CLEARANCE        14      // Patrol routes keep this far from where the player's team starts
 
 
 /*******************************************************************************
@@ -88,6 +90,7 @@ typedef enum ProcBaseRoleType : unsigned char {
     PROC_BASE_MAIN = 0,             // Full enemy base
     PROC_BASE_OUTPOST,              // Smaller enemy base
     PROC_BASE_DEFEND,               // Pre-built base for the player (survival style objectives)
+    PROC_BASE_CAMP,                 // Lightly held enemy camp, only for objectives with OutpostBase=CAMP
     PROC_BASE_ROLE_COUNT
 } ProcBaseRoleType;
 
@@ -225,7 +228,9 @@ struct ProcObjectivePreset {
 
     char                    PlayerBase[PROC_NAME_LEN];  // Primary only: DEFEND base given to the player instead of an MCV
 
-    char                    OutpostBase[PROC_NAME_LEN]; // Owner=Outpost: outpost base preset (AUTO = random Outpost)
+    char                    OutpostBase[PROC_NAME_LEN]; // Owner=Outpost: outpost base preset (AUTO = random Outpost, CAMP = random Camp)
+    int                     TargetStrength;             // Target starts at this % of its strength (100 = undamaged)
+    bool                    IsAbandoned;                // Target belongs to no one (the owner's camp is built around it)
 
     long                    RewardCredits;
     ProcTechnoCount         RewardUnits[PROC_MAX_MEMBERS];
@@ -241,8 +246,9 @@ struct ProcObjectivePreset {
     long                    PlayerCredits;              // -1 = keep the lobby credits
     int                     WavesOverride;              // -1 = generator setting, 0 = no waves, 1 = waves
     int                     WaveDelaySeconds;           // 0 = difficulty FirstWaveSeconds
-    bool                    IsEnemyProduction;          // no = enemies never build (static bases, like campaign maps)
+    int                     EnemyProductionOverride;    // -1 = generator setting, 0 = static enemy bases, 1 = skirmish AI builds
     int                     Patrols;                    // Patrol teams to generate
+    ProcThreatType          PatrolThreat;               // Strongest patrol teams allowed (e.g. Light = no tanks for a Tanya squad)
     char                    Bonus[PROC_NAME_LEN];       // Secondary objective always added with this primary
 
     char                    Text[PROC_TEXT_LEN];        // Shown to the player; %d is replaced by minutes
@@ -273,6 +279,7 @@ struct ProcSettings {
     int                     SecondaryMax;
     int                     TechLevel;          // 0 = use the lobby tech level
     bool                    IsWaves;
+    bool                    IsEnemyProduction;  // yes = enemies run the full skirmish AI (build, expand, attack on their own)
     bool                    IsKeepStartUnits;   // Keep the lobby's starting units for enemies
     bool                    IsAllMaps;          // Every single-human skirmish map is procedural, flagged or not
     int                     WaveMinSeconds;
@@ -335,9 +342,10 @@ struct ProcObjective {
     StructType              TargetType;
     long                    EndFrame;       // Timer end (0 = no timer)
     int                     Minutes;
+    int                     HeldStrength;   // Squad missions: the target's strength may only go down (no repairs)
 
     ProcObjective() : Preset(NULL), IsPrimary(false), State(PROC_STATE_ACTIVE), Target(TARGET_NONE),
-        TargetType(STRUCT_NONE), EndFrame(0), Minutes(0) {}
+        TargetType(STRUCT_NONE), EndFrame(0), Minutes(0), HeldStrength(0) {}
 };
 
 struct ProcHouseInfo {
@@ -362,6 +370,12 @@ public:
 
     bool Is_Active() const { return IsActive; }
 
+    // A human on the player's team in a squad mission (started with no base or MCV).
+    bool Is_Squad_Player(HouseClass const * house) const { return IsActive && IsSquad && house->IsHuman && Is_Player_Team(house); }
+
+    // tools/ProcTest only (exported as ProcMission_Test). See the function for the commands.
+    int Test_Command(char const * command, char const * objective, int value);
+
 private:
     // Setup
     void Classify_Houses();
@@ -376,22 +390,24 @@ private:
     bool Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer, CELL center = -1, bool skipconst = false);
     void Build_Squads(ProcObjectivePreset const * primary);
     ProcTeamPreset const * Find_Squad(ProcObjectivePreset const * primary, ProcSideType side) const;
-    CELL Build_Outpost(HouseClass * house, ProcObjectivePreset const * preset);
-    void Spawn_Patrols(int count);
+    void Build_Outpost(HouseClass * house, ProcObjectivePreset const * preset, CELL center);
+    void Spawn_Patrols(int count, ProcThreatType maxthreat);
     int Claim_Waypoint(CELL cell);
     void Add_Anchor(CELL cell, HouseClass * owner);
     void Clear_Start_Units(HouseClass * house, bool keepcombat);
-    bool Place_Building(HouseClass * house, StructType type, CELL center, int minradius, int maxradius, TARGET * placed = NULL);
+    bool Place_Building(HouseClass * house, StructType type, CELL center, int minradius, int maxradius, TARGET * placed = NULL, int reach = 12);
     bool Can_Place_Building(StructType type, CELL cell) const;
     bool Try_Place_Building(HouseClass * house, StructType type, CELL cell, TARGET * placed);
     void Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission, int minradius = 2, int maxradius = 7);
     void Place_Naval_Yard(HouseClass * house, CELL center);
     void Add_Power(HouseClass * house, CELL center);
-    CELL Find_Neutral_Location(int mindistance) const;
+    CELL Find_Neutral_Location(int mindistance, HouseClass const * nearto = NULL) const;
+    TARGET Find_Existing_Target(HouseClass * house, StructType type, CELL center, int maxdistance) const;
 
     // Objectives
     void Update_Objectives();
     void Complete_Objective(ProcObjective & objective);
+    void Hold_Targets();
     void Fail_Objective(ProcObjective & objective);
     void Give_Reward(ProcObjectivePreset const * preset);
     void Player_Wins();
@@ -414,6 +430,7 @@ private:
     CELL Home_Cell(HouseClass const * house) const;
     void Message(char const * text) const;
     void Print_Status() const;
+    void Disable_Enemy_Production();
     void Objective_Text(ProcObjective const & objective, char * buffer, int size) const;
 
     bool                    IsActive;

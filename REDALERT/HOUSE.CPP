@@ -132,6 +132,7 @@
 
 #include	"function.h"
 #include	"vortex.h"
+#include	"procmission.h"
 
 //#include "WolDebug.h"
 
@@ -8064,6 +8065,11 @@ void HouseClass::Check_Pertinent_Structures(void)
 	// Per https://jaas.ea.com/browse/TDRA-7433
 	//
 	if (IsDefeated) {
+		return;
+	}
+
+	// Procedural squad missions start the humans with no base: they only lose when the whole squad is gone.
+	if (Scen.IsProcedural && ProcMission.Is_Squad_Player(this)) {
 		return;
 	}
 

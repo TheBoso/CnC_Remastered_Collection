@@ -131,6 +131,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"procmission.h"
 
 
 /***************************************************************************
@@ -5091,6 +5092,11 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 			if (Map[infantry->Center_Coord()].Zones[infantry->Class->MZone] != Map[Center_Coord()].Zones[infantry->Class->MZone]) continue;
 
 			/*
+			**	Procedural missions: a remote camp or outpost doesn't pull in the main base's garrison.
+			*/
+			if (Scen.IsProcedural && Distance(infantry) > PROC_RESCUE_RANGE * CELL_LEPTON_W) continue;
+
+			/*
 			** Find the amount of threat that this unit can apply to the
 			** enemy.
 			*/
@@ -5173,6 +5179,11 @@ void TechnoClass::Base_Is_Attacked(TechnoClass const * enemy)
 			**	Don't try to help if the building is on another planet.
 			*/
 			if (Map[unit->Center_Coord()].Zones[unit->Class->MZone] != Map[Center_Coord()].Zones[unit->Class->MZone]) continue;
+
+			/*
+			**	Procedural missions: a remote camp or outpost doesn't pull in the main base's garrison.
+			*/
+			if (Scen.IsProcedural && Distance(unit) > PROC_RESCUE_RANGE * CELL_LEPTON_W) continue;
 
 			/*
 			** Find the amount of threat that this unit can apply to the
