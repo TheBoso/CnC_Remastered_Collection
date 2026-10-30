@@ -17,11 +17,11 @@ extern void GlyphX_Debug_Print(const char *debug_text);
 
 static char const * s_SideNames[PROC_SIDE_COUNT] = {"Any", "Allied", "Soviet"};
 static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Medium", "Heavy", "Overwhelming"};
-static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense"};
+static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad"};
 static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend"};
 static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect"};
 static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
-static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player"};
+static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player", "Outpost"};
 static char const * s_SpawnNames[PROC_SPAWN_COUNT] = {"Base", "Edge"};
 static char const * s_StartNames[PROC_START_COUNT] = {"MCV", "Base", "Random", "Same"};
 static char const * s_DiffNames[DIFF_COUNT] = {"Easy", "Normal", "Hard"};
@@ -72,11 +72,15 @@ ProcBasePreset::ProcBasePreset() :
 
 ProcObjectivePreset::ProcObjectivePreset() :
     Kind(PROC_OBJ_DESTROY_BASES), Slot(PROC_SLOT_EITHER), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10),
-    MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0)
+    MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0),
+    IsSquadStart(false), SquadCount(0), PlayerCredits(-1), WavesOverride(-1), WaveDelaySeconds(0),
+    IsEnemyProduction(true), Patrols(0)
 {
     Name[0] = '\0';
     Guard[0] = '\0';
     PlayerBase[0] = '\0';
+    OutpostBase[0] = '\0';
+    Bonus[0] = '\0';
     Text[0] = '\0';
 }
 
@@ -420,7 +424,28 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
 
     Parse_Name(ini, section, "Guard", obj.Guard, sizeof(obj.Guard));
     Parse_Name(ini, section, "PlayerBase", obj.PlayerBase, sizeof(obj.PlayerBase));
+    Parse_Name(ini, section, "OutpostBase", obj.OutpostBase, sizeof(obj.OutpostBase));
+    Parse_Name(ini, section, "Bonus", obj.Bonus, sizeof(obj.Bonus));
     Parse_Name(ini, section, "Text", obj.Text, sizeof(obj.Text));
+
+    // Squad missions
+    ini.Get_String(section, "PlayerStart", "", buffer, sizeof(buffer));
+    obj.IsSquadStart = (stricmp(buffer, "Squad") == 0);
+    if (ini.Get_String(section, "Squad", "", buffer, sizeof(buffer)) > 0) {
+        char * name = strtok(buffer, ",");
+        while (name != NULL && obj.SquadCount < PROC_MAX_SQUAD_CHOICES) {
+            while (*name == ' ') name++;
+            strncpy(obj.Squads[obj.SquadCount], name, PROC_NAME_LEN - 1);
+            obj.Squads[obj.SquadCount][PROC_NAME_LEN - 1] = '\0';
+            obj.SquadCount++;
+            name = strtok(NULL, ",");
+        }
+    }
+    obj.PlayerCredits = ini.Get_Int(section, "PlayerCredits", -1);
+    if (ini.Is_Present(section, "Waves")) obj.WavesOverride = ini.Get_Bool(section, "Waves", true) ? 1 : 0;
+    obj.WaveDelaySeconds = ini.Get_Int(section, "WaveDelaySeconds", 0);
+    obj.IsEnemyProduction = ini.Get_Bool(section, "EnemyProduction", true);
+    obj.Patrols = Bound(ini.Get_Int(section, "Patrols", 0), 0, PROC_MAX_PATROLS);
     Parse_Techno_List(ini, section, "RewardUnits", obj.RewardUnits, PROC_MAX_MEMBERS, obj.RewardUnitCount);
 
     if (ini.Get_String(section, "Targets", "", buffer, sizeof(buffer)) > 0) {
@@ -433,6 +458,7 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     bool needstime = (obj.Kind == PROC_OBJ_SURVIVE || obj.Kind == PROC_OBJ_PROTECT);
     if (needstarget && obj.TargetCount == 0) return false;
     if (needstime && obj.MinMinutes <= 0) return false;
+    if (obj.IsSquadStart && obj.SquadCount == 0) return false;
     return true;
 }
 
@@ -632,6 +658,7 @@ struct ObjectiveFilter {
     bool IsPrimary;
     int Tech;
     bool IsPlayerBase;
+    bool CanCapture;
     ProcObjectivePreset const * const * Exclude;
     int ExcludeCount;
 
@@ -643,6 +670,9 @@ struct ObjectiveFilter {
         // A structure "in the player's base" needs a base; with an MCV start it would sit alone.
         if (!IsPlayerBase && obj.Owner == PROC_OWNER_PLAYER && obj.TargetCount > 0) return false;
 
+        // Squad missions without an engineer can't capture anything.
+        if (!CanCapture && obj.Kind == PROC_OBJ_CAPTURE) return false;
+
         // Secondary objectives never end the game by themselves, so these kinds make no sense there.
         if (!IsPrimary && (obj.Kind == PROC_OBJ_DESTROY_BASES || obj.Kind == PROC_OBJ_SURVIVE)) return false;
 
@@ -653,9 +683,9 @@ struct ObjectiveFilter {
     }
 };
 
-ProcObjectivePreset const * ProcPresetLibrary::Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, ProcObjectivePreset const * const * exclude, int excludecount) const
+ProcObjectivePreset const * ProcPresetLibrary::Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, bool cancapture, ProcObjectivePreset const * const * exclude, int excludecount) const
 {
-    ObjectiveFilter filter = {playerside, primary, tech, playerbase, exclude, excludecount};
+    ObjectiveFilter filter = {playerside, primary, tech, playerbase, cancapture, exclude, excludecount};
     return Weighted_Pick(Objectives, ObjectiveCount, filter);
 }
 

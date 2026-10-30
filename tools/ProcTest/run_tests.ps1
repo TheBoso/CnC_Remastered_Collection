@@ -64,7 +64,7 @@ function Set-IniValue([string]$Path, [string]$Section, [string]$Key, [string]$Va
 function Get-Status($Lines) {
     # "ProcMission: status t=120s threat=1 waves=1/2 types=2 enemies=[18,9] player=12 objectives=[A,C]"
     foreach ($l in $Lines) {
-        if ($l -match "status t=(\d+)s threat=(\d+) waves=(\d+)/(\d+) types=(\d+) enemies=\[([^\]]*)\] player=(-?\d+) objectives=\[([^\]]*)\]") {
+        if ($l -match "status t=(\d+)s threat=(\d+) waves=(\d+)/(\d+) types=(\d+) enemies=\[([^\]]*)\] player=(-?\d+)(?: patrols=\S+ moved=\d+)? objectives=\[([^\]]*)\]") {
             [pscustomobject]@{
                 Seconds = [int]$Matches[1]; Threat = [int]$Matches[2]; Waves = [int]$Matches[3]
                 Enemies = $Matches[6]; Player = [int]$Matches[7]; Objectives = $Matches[8]
@@ -202,6 +202,59 @@ $Tests = [ordered]@{
             $f = @()
             if ($r.Lines -match "objective BONUS_PROTECT_SILOS") { $f += "player-base objective offered with an MCV start" }
             if ($r.Lines -match "player Tester starts with base") { $f += "MCV start produced a base" }
+            $f
+        }
+    }
+
+    commando_raid = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "4500")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "COMMANDO_RAID"
+            # Plenty of bonus draws, with capture bonuses heavily weighted, to exercise the engineer filter.
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMin" "3"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMax" "3"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "BONUS_HOSPITAL" "Weight" "100000"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "BONUS_OIL" "Weight" "100000"
+        }
+        Check = { param($r)
+            $f = @()
+            $squad = $r.Lines | Select-String "player \S+ starts with squad '([^']+)' \((\d+) units, (-?\d+) credits\)" | Select-Object -First 1
+            if (-not $squad) { $f += "no squad start" }
+            else {
+                if ($squad.Matches[0].Groups[1].Value -ne "ALL_SQUAD_TANYA") { $f += "Allied player got squad '$($squad.Matches[0].Groups[1].Value)'" }
+                if ([int]$squad.Matches[0].Groups[2].Value -lt 4) { $f += "squad only has $($squad.Matches[0].Groups[2].Value) units" }
+                if ([int]$squad.Matches[0].Groups[3].Value -ne 0) { $f += "squad start credits are $($squad.Matches[0].Groups[3].Value), expected 0" }
+            }
+            if ($r.Lines -match "player .* starts with base") { $f += "squad mission also handed out a base" }
+            if (-not ($r.Lines -match "outpost '[^']+' for COMMANDO_RAID at cell")) { $f += "no outpost built for the raid target" }
+            if (-not ($r.Lines -match "enemy production disabled")) { $f += "enemy production not disabled" }
+            $patrols = @($r.Lines -match "ProcMission: patrol PROCP").Count
+            if ($patrols -ne 4) { $f += "$patrols patrols spawned, expected 4" }
+            # Patrols must actually walk their loops, not stand at their first point.
+            $walked = @($r.Lines | Select-String "patrols=\d+/\d+ moved=(\d+)" | ForEach-Object { [int]$_.Matches[0].Groups[1].Value } | Measure-Object -Maximum).Maximum
+            if (-not $walked -or $walked -lt 2) { $f += "patrols are not moving (max moved=$walked)" }
+            if ($r.Waves.Count -gt 0) { $f += "waves sent in a Waves=no mission" }
+            $capture = @($r.Lines | Select-String "objective (\S+) \(Capture" | ForEach-Object { $_.Matches[0].Groups[1].Value })
+            if ($capture.Count -gt 0) { $f += "capture objective $($capture -join ', ') given to a squad without engineers" }
+            if (-not ($r.Lines -match "^MSG .*Slip past the patrols")) { $f += "raid objective not announced" }
+            $f
+        }
+    }
+
+    commando_forward_base = @{
+        Args = @("--player", "USSR", "--enemies", "Greece", "--frames", "9600")
+        Patch = { param($d) Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "COMMANDO_FORWARD_BASE" }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "starts with squad 'SOV_SQUAD_ENGINEERS'")) { $f += "Soviet player did not get the engineer squad" }
+            if (-not ($r.Lines -match "secondary objective BONUS_CAPTURE_OUTPOST")) { $f += "forced capture bonus missing" }
+            if (-not ($r.Lines -match "objective BONUS_CAPTURE_OUTPOST target FACT at cell")) { $f += "capturable construction yard not placed" }
+            if (-not ($r.Lines -match "outpost '[^']+' for BONUS_CAPTURE_OUTPOST")) { $f += "no outpost for the capture bonus" }
+            if ($r.Lines -match "enemy production disabled") { $f += "enemy production should stay on" }
+            $patrols = @($r.Lines -match "ProcMission: patrol PROCP").Count
+            if ($patrols -ne 3) { $f += "$patrols patrols spawned, expected 3" }
+            $early = @($r.Lines | Select-String "^DBG (\d+) ProcMission: wave \S+ \(sent" | Where-Object { [int]$_.Matches[0].Groups[1].Value -lt 9000 })
+            if ($early.Count -gt 0) { $f += "wave sent at frame $($early[0].Matches[0].Groups[1].Value), before the 10 minute delay" }
             $f
         }
     }

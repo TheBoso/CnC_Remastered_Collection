@@ -122,8 +122,12 @@ void ProcMissionManager::Reset()
     IsActive = false;
     IsAnnounced = false;
     IsFinished = false;
+    IsSquad = false;
     IsPlayerBase = false;
     IsAllyBase = false;
+    AnchorCount = 0;
+    PatrolCount = 0;
+    NextWaypoint = PROC_FIRST_WAYPOINT;
     Settings = ProcSettings();
     Difficulty = DIFF_NORMAL;
     Diff = ProcDifficultyPreset();
@@ -218,7 +222,31 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
     Pick_Objectives();
     Build_Enemy_Bases();
     Build_Player_Bases();
+
+    /*
+    **	The primary objective can reshape the mission (squad missions): waves on/off or later,
+    **	passive enemies, patrols around the targets. Read before placing targets, which may
+    **	swap an unplaceable primary for "destroy all" (the squad has already been handed out).
+    */
+    ProcObjectivePreset const * primary = (ObjectiveCount > 0) ? Objectives[0].Preset : NULL;
     Place_Objective_Targets();
+
+    int firstwave = Diff.FirstWaveSeconds;
+    if (primary != NULL) {
+        if (primary->WavesOverride >= 0) Settings.IsWaves = (primary->WavesOverride != 0);
+        if (primary->WaveDelaySeconds > 0) firstwave = primary->WaveDelaySeconds;
+
+        if (!primary->IsEnemyProduction) {
+            // Below IQProduction the AI never builds or expands; units still guard and fight back.
+            for (int i = 0; i < EnemyCount; i++) {
+                HouseClass * house = Enemies[i].House;
+                house->IsBaseBuilding = false;
+                house->IQ = min(house->IQ, Rule.IQProduction - 1);
+            }
+            GlyphX_Debug_Print("ProcMission: enemy production disabled");
+        }
+        Spawn_Patrols(primary->Patrols);
+    }
 
     ScenarioInit = save_init;
 
@@ -227,7 +255,7 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
     }
 
     StartFrame = Elapsed;
-    NextWaveFrame = Elapsed + (Diff.FirstWaveSeconds * TICKS_PER_SECOND * Diff.WaveIntervalPct) / 100;
+    NextWaveFrame = Elapsed + (firstwave * TICKS_PER_SECOND * Diff.WaveIntervalPct) / 100;
     IsActive = true;
 
     GlyphX_Debug_Print("ProcMission: generation complete");
@@ -283,7 +311,7 @@ void ProcMissionManager::Pick_Objectives()
             GlyphX_Debug_Print(buf);
         }
     }
-    if (primary == NULL) primary = ProcPresets.Pick_Objective(PlayerSide, true, TechLevel, true, NULL, 0);
+    if (primary == NULL) primary = ProcPresets.Pick_Objective(PlayerSide, true, TechLevel, true, true, NULL, 0);
     if (primary == NULL) primary = &s_Fallback;
 
     /*
@@ -292,9 +320,11 @@ void ProcMissionManager::Pick_Objectives()
     **  for a base, or targets a player structure, always gets one. One roll covers all the
     **  humans, so co-op players start alike.
     */
+    // A squad mission starts with neither an MCV nor a base.
+    IsSquad = primary->IsSquadStart;
     bool forced = primary->PlayerBase[0] != '\0' || (primary->Owner == PROC_OWNER_PLAYER && primary->TargetCount > 0);
-    IsPlayerBase = forced || Settings.PlayerStart == PROC_START_BASE ||
-        (Settings.PlayerStart == PROC_START_RANDOM && Random_Pick(0, 99) < Settings.PlayerBaseChance);
+    IsPlayerBase = !IsSquad && (forced || Settings.PlayerStart == PROC_START_BASE ||
+        (Settings.PlayerStart == PROC_START_RANDOM && Random_Pick(0, 99) < Settings.PlayerBaseChance));
     switch (Settings.AllyStart) {
         case PROC_START_BASE:   IsAllyBase = true; break;
         case PROC_START_RANDOM: IsAllyBase = Random_Pick(0, 99) < Settings.PlayerBaseChance; break;
@@ -302,25 +332,58 @@ void ProcMissionManager::Pick_Objectives()
         default:                IsAllyBase = false; break;
     }
 
+    // In a squad mission only an engineer in the squad can capture.
+    bool cancapture = true;
+    if (IsSquad) {
+        cancapture = false;
+        ProcTeamPreset const * squad = Find_Squad(primary, PlayerSide);
+        for (int m = 0; squad != NULL && m < squad->MemberCount; m++) {
+            if (squad->Members[m].Type == &InfantryTypeClass::As_Reference(INFANTRY_RENOVATOR)) cancapture = true;
+        }
+    }
+
     int secondaries = Random_Pick(Settings.SecondaryMin, Settings.SecondaryMax);
     secondaries = Bound(secondaries, 0, PROC_MAX_OBJECTIVES - 1);
 
-    for (int i = 0; i <= secondaries; i++) {
-        ProcObjectivePreset const * preset = (i == 0) ? primary : ProcPresets.Pick_Objective(PlayerSide, false, TechLevel, IsPlayerBase, chosen, ObjectiveCount);
-        if (preset == NULL) break;
+    Add_Objective(primary, true, chosen);
 
-        ProcObjective & obj = Objectives[ObjectiveCount];
-        obj = ProcObjective();
-        obj.Preset = preset;
-        obj.IsPrimary = (i == 0);
-        obj.Minutes = Random_Pick(preset->MinMinutes, preset->MaxMinutes);
-        chosen[ObjectiveCount++] = preset;
-
-        char buf[120];
-        sprintf(buf, "ProcMission: %s objective %s (%s, %d min)", obj.IsPrimary ? "primary" : "secondary",
-            preset->Name, Proc_Objective_Kind_Name(preset->Kind), obj.Minutes);
-        GlyphX_Debug_Print(buf);
+    // A primary can bring a fixed bonus with it (e.g. squad missions: capture a forward base).
+    if (primary->Bonus[0] != '\0') {
+        ProcObjectivePreset const * bonus = ProcPresets.Find_Objective(primary->Bonus);
+        if (bonus != NULL && bonus->Kind == PROC_OBJ_CAPTURE && !cancapture) {
+            char buf[100];
+            sprintf(buf, "ProcMission: bonus '%s' needs an engineer the squad doesn't have", primary->Bonus);
+            GlyphX_Debug_Print(buf);
+        } else if (bonus != NULL && bonus != primary) {
+            Add_Objective(bonus, false, chosen);
+            secondaries = max(secondaries, 1);
+        } else {
+            char buf[100];
+            sprintf(buf, "ProcMission: bonus objective '%s' not found", primary->Bonus);
+            GlyphX_Debug_Print(buf);
+        }
     }
+
+    while (ObjectiveCount <= secondaries && ObjectiveCount < PROC_MAX_OBJECTIVES) {
+        ProcObjectivePreset const * preset = ProcPresets.Pick_Objective(PlayerSide, false, TechLevel, IsPlayerBase, cancapture, chosen, ObjectiveCount);
+        if (preset == NULL) break;
+        Add_Objective(preset, false, chosen);
+    }
+}
+
+void ProcMissionManager::Add_Objective(ProcObjectivePreset const * preset, bool primary, ProcObjectivePreset const ** chosen)
+{
+    ProcObjective & obj = Objectives[ObjectiveCount];
+    obj = ProcObjective();
+    obj.Preset = preset;
+    obj.IsPrimary = primary;
+    obj.Minutes = Random_Pick(preset->MinMinutes, preset->MaxMinutes);
+    chosen[ObjectiveCount++] = preset;
+
+    char buf[120];
+    sprintf(buf, "ProcMission: %s objective %s (%s, %d min)", primary ? "primary" : "secondary",
+        preset->Name, Proc_Objective_Kind_Name(preset->Kind), obj.Minutes);
+    GlyphX_Debug_Print(buf);
 }
 
 void ProcMissionManager::Build_Enemy_Bases()
@@ -368,6 +431,10 @@ void ProcMissionManager::Build_Player_Bases()
     ProcObjectivePreset const * primary = (ObjectiveCount > 0) ? Objectives[0].Preset : NULL;
     bool named = (primary != NULL && primary->PlayerBase[0] != '\0' && stricmp(primary->PlayerBase, "AUTO") != 0);
 
+    if (IsSquad && primary != NULL) {
+        Build_Squads(primary);
+    }
+
     for (int i = 0; i < PlayerTeamCount; i++) {
         HouseClass * house = PlayerTeam[i];
         if (!(house->IsHuman ? IsPlayerBase : IsAllyBase)) continue;
@@ -390,6 +457,180 @@ void ProcMissionManager::Build_Player_Bases()
 
         sprintf(buf, "ProcMission: %s %s starts with base '%s' (power %d/%d)", house->IsHuman ? "player" : "ally",
             house->IniName, preset->Name, house->Power, house->Drain);
+        GlyphX_Debug_Print(buf);
+    }
+}
+
+/*
+**	Squad missions: every human loses the MCV and lobby units and gets the first Squad= preset
+**	that suits their side instead. Squads are special forces, so the tech level is ignored.
+*/
+void ProcMissionManager::Build_Squads(ProcObjectivePreset const * primary)
+{
+    char buf[128];
+
+    for (int i = 0; i < PlayerTeamCount; i++) {
+        HouseClass * house = PlayerTeam[i];
+        if (!house->IsHuman) continue;
+
+        ProcSideType side = Proc_Side_Of(house);
+        ProcTeamPreset const * squad = Find_Squad(primary, side);
+        if (squad == NULL) {
+            sprintf(buf, "ProcMission: no %s squad in '%s', keeping the lobby start", Proc_Side_Name(side), primary->Name);
+            GlyphX_Debug_Print(buf);
+            continue;
+        }
+
+        Clear_Start_Units(house, false);
+        CELL home = Home_Cell(house);
+        int count = 0;
+        for (int m = 0; m < squad->MemberCount; m++) {
+            int before = house->CurUnits + house->CurInfantry;
+            Place_Units(house, squad->Members[m].Type, squad->Members[m].Count, home, MISSION_GUARD, 0, 2);   // Keep the squad together
+            count += house->CurUnits + house->CurInfantry - before;
+        }
+        if (primary->PlayerCredits >= 0) {
+            house->Credits = primary->PlayerCredits;
+        }
+
+        sprintf(buf, "ProcMission: player %s starts with squad '%s' (%d units, %ld credits)", house->IniName, squad->Name, count, house->Credits);
+        GlyphX_Debug_Print(buf);
+    }
+}
+
+ProcTeamPreset const * ProcMissionManager::Find_Squad(ProcObjectivePreset const * primary, ProcSideType side) const
+{
+    for (int s = 0; s < primary->SquadCount; s++) {
+        ProcTeamPreset const * candidate = ProcPresets.Find_Team(primary->Squads[s]);
+        if (candidate != NULL && (candidate->Side == PROC_SIDE_ANY || candidate->Side == side)) return candidate;
+    }
+    return NULL;
+}
+
+/*
+**	A small enemy outpost away from every base, for Owner=Outpost objectives. It never gets a
+**	construction yard of its own: if one is wanted, it is the objective target (capture it to
+**	start building).
+*/
+CELL ProcMissionManager::Build_Outpost(HouseClass * house, ProcObjectivePreset const * preset)
+{
+    CELL center = Find_Neutral_Location(20);
+    if (center == -1) return -1;
+
+    ProcBasePreset const * base = NULL;
+    if (preset->OutpostBase[0] != '\0' && stricmp(preset->OutpostBase, "AUTO") != 0) {
+        base = ProcPresets.Find_Base(preset->OutpostBase);
+    }
+    if (base == NULL) {
+        base = ProcPresets.Pick_Base(Proc_Side_Of(house), PROC_BASE_OUTPOST, house->Control.TechLevel);
+    }
+    if (base != NULL) {
+        Build_Base(house, base, false, center, true);
+    }
+
+    char buf[128];
+    sprintf(buf, "ProcMission: outpost '%s' for %s at cell %d", base ? base->Name : "-", preset->Name, (int)center);
+    GlyphX_Debug_Print(buf);
+    return center;
+}
+
+void ProcMissionManager::Add_Anchor(CELL cell, HouseClass * owner)
+{
+    if (cell == -1 || owner == NULL || AnchorCount >= PROC_MAX_ANCHORS) return;
+    for (int i = 0; i < AnchorCount; i++) {
+        if (Cell_Dist(Anchors[i], cell) < 6) return;      // Already covered
+    }
+    Anchors[AnchorCount] = cell;
+    AnchorOwners[AnchorCount] = owner;
+    AnchorCount++;
+}
+
+/*
+**	Generated patrol routes use waypoints from PROC_FIRST_WAYPOINT up, skipping any the map uses.
+*/
+int ProcMissionManager::Claim_Waypoint(CELL cell)
+{
+    for (; NextWaypoint < WAYPT_HOME; NextWaypoint++) {
+        if (Scen.Waypoint[NextWaypoint] == -1) {
+            Scen.Waypoint[NextWaypoint] = cell;
+            return NextWaypoint++;
+        }
+    }
+    return -1;
+}
+
+/*
+**	Patrols walk a loop of three points around the anchors (objective targets and outposts
+**	first, then the enemy bases), attacking whatever they see on the way.
+*/
+void ProcMissionManager::Spawn_Patrols(int count)
+{
+    char buf[128];
+
+    for (int i = 0; i < EnemyCount; i++) {
+        Add_Anchor(Enemies[i].Home, Enemies[i].House);
+    }
+
+    for (int p = 0; p < count && AnchorCount > 0; p++) {
+        CELL anchor = Anchors[p % AnchorCount];
+        HouseClass * owner = AnchorOwners[p % AnchorCount];
+        if (!Is_Alive(owner)) continue;
+
+        ProcTeamPreset const * preset = ProcPresets.Pick_Team(Proc_Side_Of(owner), PROC_TEAM_PATROL, PROC_THREAT_SCOUT,
+            Diff.MaxThreat, owner->Control.TechLevel);
+        if (preset == NULL) continue;
+
+        // Three points spread around the anchor.
+        int points[3];
+        int pointcount = 0;
+        int start = Random_Pick(0, 7);
+        static int const dx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+        static int const dy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+        for (int k = 0; k < 3; k++) {
+            int dir = (start + k * 3) % 8;
+            int radius = Random_Pick(6, 11);
+            CELL cell = Clamp_To_Map(Cell_X(anchor) + dx[dir] * radius, Cell_Y(anchor) + dy[dir] * radius);
+            cell = Map.Nearby_Location(cell, SPEED_TRACK);
+            if (cell <= 0) continue;
+            int waypoint = Claim_Waypoint(cell);
+            if (waypoint < 0) break;
+            points[pointcount++] = waypoint;
+        }
+        if (pointcount < 2 || TeamTypes.Count() >= TeamTypes.Length()) continue;
+
+        TeamTypeClass * tt = new TeamTypeClass();
+        if (tt == NULL) continue;
+        sprintf((char *)tt->IniName, "PROCP%02d", p);
+        tt->House = owner->Class->House;
+        tt->IsAutocreate = false;
+        tt->IsPrebuilt = false;
+        tt->IsReinforcable = false;
+        tt->RecruitPriority = 7;
+        tt->MaxAllowed = 1;
+        tt->ClassCount = 0;
+        for (int m = 0; m < preset->MemberCount && tt->ClassCount < TeamTypeClass::MAX_TEAM_CLASSCOUNT; m++) {
+            tt->Members[tt->ClassCount].Class = preset->Members[m].Type;
+            tt->Members[tt->ClassCount].Quantity = max(1, (preset->Members[m].Count * Diff.GuardScalePct + 50) / 100);
+            tt->ClassCount++;
+        }
+        int m = 0;
+        for (int k = 0; k < pointcount; k++) {
+            tt->MissionList[m].Mission = TMISSION_PATROL;
+            tt->MissionList[m++].Data.Value = points[k];
+        }
+        tt->MissionList[m].Mission = TMISSION_LOOP;
+        tt->MissionList[m++].Data.Value = 0;
+        tt->MissionCount = m;
+
+        if (!Spawn_Team(tt, Scen.Waypoint[points[0]], 0, 3)) {
+            delete tt;
+            continue;
+        }
+        PatrolTypes[PatrolCount] = tt;
+        PatrolStart[PatrolCount] = Scen.Waypoint[points[0]];
+        PatrolCount++;
+
+        sprintf(buf, "ProcMission: patrol %s (%s) around cell %d, %d points", tt->IniName, preset->Name, (int)anchor, pointcount);
         GlyphX_Debug_Print(buf);
     }
 }
@@ -508,7 +749,7 @@ bool ProcMissionManager::Try_Place_Building(HouseClass * house, StructType type,
     return true;
 }
 
-void ProcMissionManager::Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission)
+void ProcMissionManager::Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission, int minradius, int maxradius)
 {
     if (type == NULL || center == -1) return;
 
@@ -516,7 +757,7 @@ void ProcMissionManager::Place_Units(HouseClass * house, TechnoTypeClass const *
     if (type->What_Am_I() == RTTI_AIRCRAFTTYPE) return;     // Aircraft need a helipad / airfield; never placed loose
 
     for (int i = 0; i < count; i++) {
-        CELL cell = isvessel ? Find_Water_Near(center, 24) : Random_Cell_Around(center, 2, 7);
+        CELL cell = isvessel ? Find_Water_Near(center, 24) : Random_Cell_Around(center, minradius, maxradius);
         if (cell == -1) return;
 
         TechnoClass * obj = (TechnoClass *)type->Create_One_Of(house);
@@ -557,14 +798,16 @@ void ProcMissionManager::Place_Naval_Yard(HouseClass * house, CELL center)
 /*
 **	'isplayer' means the base belongs to the player's team: no difficulty scaling.
 */
-bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer)
+bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer, CELL center, bool skipconst)
 {
-    CELL center = Coord_Cell(house->Center);
+    if (center == -1) center = Coord_Cell(house->Center);
     if (!Map.In_Radar(center)) return false;
 
+    bool refinery = false;
     for (int e = 0; e < preset->EntryCount; e++) {
         ProcBaseEntry const & entry = preset->Entries[e];
         BuildingTypeClass const & btype = BuildingTypeClass::As_Reference(entry.Type);
+        if (entry.Type == STRUCT_CONST && skipconst) continue;
 
         // The tech level and side decide what actually exists in this base.
         if (entry.Type != STRUCT_CONST && !Is_Allowed(btype, house)) continue;
@@ -574,7 +817,9 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
             count = (count * Diff.DefenseScalePct + 50) / 100;
         }
         for (int n = 0; n < count; n++) {
-            Place_Building(house, entry.Type, center, entry.MinRadius, entry.MaxRadius);
+            if (Place_Building(house, entry.Type, center, entry.MinRadius, entry.MaxRadius) && entry.Type == STRUCT_REFINERY) {
+                refinery = true;
+            }
         }
     }
 
@@ -586,7 +831,8 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
         Place_Naval_Yard(house, center);
     }
 
-    if (house->ActiveBScan & STRUCTF_REFINERY) {
+    // Only bases that got their own refinery (an outpost may share a house with a main base).
+    if (refinery) {
         Place_Units(house, &UnitTypeClass::As_Reference(UNIT_HARVESTER), preset->Harvesters, center, MISSION_HARVEST);
     }
 
@@ -685,6 +931,12 @@ void ProcMissionManager::Place_Objective_Targets()
                 minradius = 3;
                 maxradius = 9;
                 break;
+            case PROC_OWNER_OUTPOST:
+                owner = Enemies[Random_Pick(0, EnemyCount - 1)].House;
+                center = Build_Outpost(owner, preset);
+                minradius = 0;
+                maxradius = 5;
+                break;
             default:
                 break;
         }
@@ -733,6 +985,12 @@ void ProcMissionManager::Place_Objective_Targets()
                 if (guardhouse != Commander) count = max(1, (count * Diff.GuardScalePct + 50) / 100);
                 Place_Units(guardhouse, guard->Members[m].Type, count, targetcell, mission);
             }
+        }
+
+        // Patrols (squad missions) guard the enemy and neutral targets.
+        if (preset->Owner != PROC_OWNER_PLAYER) {
+            HouseClass * patroller = (preset->Owner == PROC_OWNER_NEUTRAL) ? Enemies[Random_Pick(0, EnemyCount - 1)].House : owner;
+            Add_Anchor(As_Cell(obj.Target), patroller);
         }
 
         sprintf(buf, "ProcMission: objective %s target %s at cell %d", preset->Name,
@@ -1050,9 +1308,18 @@ bool ProcMissionManager::Deliver_Wave(TeamTypeClass * teamtype, CELL home)
         return ok;
     }
 
-    /*
-    **	BASE mode: the team rolls out from next to the owning base.
-    */
+    // BASE mode: the team rolls out from next to the owning base.
+    return Spawn_Team(teamtype, home, 3, 7);
+}
+
+/*
+**	Creates a team of this type with its members placed around 'center' and sets it going.
+*/
+bool ProcMissionManager::Spawn_Team(TeamTypeClass * teamtype, CELL center, int minradius, int maxradius)
+{
+    HouseClass * house = HouseClass::As_Pointer(teamtype->House);
+    if (house == NULL || center == -1) return false;
+
     TeamClass * team = new TeamClass(teamtype);
     if (team == NULL) return false;
     team->Force_Active();
@@ -1064,7 +1331,7 @@ bool ProcMissionManager::Deliver_Wave(TeamTypeClass * teamtype, CELL home)
         if (rtti == RTTI_AIRCRAFTTYPE) continue;
 
         for (int q = 0; q < teamtype->Members[i].Quantity; q++) {
-            CELL cell = (rtti == RTTI_VESSELTYPE) ? Find_Water_Near(home, 24) : Random_Cell_Around(home, 3, 7);
+            CELL cell = (rtti == RTTI_VESSELTYPE) ? Find_Water_Near(center, 24) : Random_Cell_Around(center, minradius, maxradius);
             if (cell == -1) break;
 
             FootClass * obj = (FootClass *)type->Create_One_Of(house);
@@ -1237,7 +1504,25 @@ void ProcMissionManager::Print_Status() const
     for (int i = 0; i < EnemyCount && len < 200; i++) {
         len += sprintf(buf + len, "%s%d%s", i ? "," : "", Enemies[i].House->CurBuildings, Is_Alive(Enemies[i].House) ? "" : "x");
     }
-    len += sprintf(buf + len, "] player=%d objectives=[", Commander ? (int)Commander->CurBuildings : -1);
+    len += sprintf(buf + len, "] player=%d", Commander ? (int)Commander->CurBuildings : -1);
+
+    // Patrols still alive, and how many have walked away from where they started.
+    if (PatrolCount > 0) {
+        int alive = 0;
+        int moved = 0;
+        for (int i = 0; i < Teams.Count(); i++) {
+            TeamClass * team = Teams.Ptr(i);
+            if (!team->Class.Is_Valid() || team->Total == 0) continue;
+            TeamTypeClass * tt = team->Class;
+            for (int p = 0; p < PatrolCount; p++) {
+                if (PatrolTypes[p] != tt) continue;
+                alive++;
+                if (team->Zone != TARGET_NONE && Cell_Dist(As_Cell(team->Zone), PatrolStart[p]) > 4) moved++;
+            }
+        }
+        len += sprintf(buf + len, " patrols=%d/%d moved=%d", alive, PatrolCount, moved);
+    }
+    len += sprintf(buf + len, " objectives=[");
     static char const s_State[] = {'A', 'C', 'F'};
     for (int i = 0; i < ObjectiveCount && len < 240; i++) {
         len += sprintf(buf + len, "%s%c", i ? "," : "", s_State[Objectives[i].State]);

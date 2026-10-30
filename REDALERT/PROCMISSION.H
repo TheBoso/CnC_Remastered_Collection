@@ -49,6 +49,10 @@
 #define PROC_MAX_HOUSES              MAX_PLAYERS
 #define PROC_MAX_OBJECTIVES          4       // Active objectives per mission (1 primary + secondaries)
 #define PROC_MAX_WAVE_TYPES          24      // TeamTypes the director may own at once
+#define PROC_MAX_SQUAD_CHOICES       4       // Squad= presets per objective (one per side is typical)
+#define PROC_MAX_PATROLS             8       // Patrol teams per mission
+#define PROC_MAX_ANCHORS             12      // Places patrols guard (targets, outposts, enemy bases)
+#define PROC_FIRST_WAYPOINT          60      // Waypoints 60-97 are used for generated patrol routes
 
 
 /*******************************************************************************
@@ -75,6 +79,8 @@ typedef enum ProcThreatType : unsigned char {
 typedef enum ProcTeamRoleType : unsigned char {
     PROC_TEAM_ATTACK = 0,           // Director attack waves
     PROC_TEAM_DEFENSE,              // Garrisons for objectives
+    PROC_TEAM_PATROL,               // Walk a loop around targets / outposts / bases (squad missions)
+    PROC_TEAM_SQUAD,                // The player's starting squad in squad missions
     PROC_TEAM_ROLE_COUNT
 } ProcTeamRoleType;
 
@@ -106,6 +112,7 @@ typedef enum ProcOwnerType : unsigned char {
     PROC_OWNER_ENEMY = 0,           // Placed inside an enemy base
     PROC_OWNER_NEUTRAL,             // Placed somewhere neutral, away from all bases
     PROC_OWNER_PLAYER,              // Placed in the player's base
+    PROC_OWNER_OUTPOST,             // Placed in a small enemy outpost generated away from all bases
     PROC_OWNER_COUNT
 } ProcOwnerType;
 
@@ -218,9 +225,25 @@ struct ProcObjectivePreset {
 
     char                    PlayerBase[PROC_NAME_LEN];  // Primary only: DEFEND base given to the player instead of an MCV
 
+    char                    OutpostBase[PROC_NAME_LEN]; // Owner=Outpost: outpost base preset (AUTO = random Outpost)
+
     long                    RewardCredits;
     ProcTechnoCount         RewardUnits[PROC_MAX_MEMBERS];
     int                     RewardUnitCount;
+
+    /*
+    **	Squad missions (primary only). The humans start with a small squad instead of an MCV
+    **	or base, enemies can be made passive, and patrols guard the targets.
+    */
+    bool                    IsSquadStart;               // PlayerStart=Squad
+    char                    Squads[PROC_MAX_SQUAD_CHOICES][PROC_NAME_LEN];  // Squad presets; the first for the player's side is used
+    int                     SquadCount;
+    long                    PlayerCredits;              // -1 = keep the lobby credits
+    int                     WavesOverride;              // -1 = generator setting, 0 = no waves, 1 = waves
+    int                     WaveDelaySeconds;           // 0 = difficulty FirstWaveSeconds
+    bool                    IsEnemyProduction;          // no = enemies never build (static bases, like campaign maps)
+    int                     Patrols;                    // Patrol teams to generate
+    char                    Bonus[PROC_NAME_LEN];       // Secondary objective always added with this primary
 
     char                    Text[PROC_TEXT_LEN];        // Shown to the player; %d is replaced by minutes
 
@@ -283,7 +306,7 @@ public:
     ProcBasePreset const * Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech) const;
     ProcBasePreset const * Find_Base(char const * name) const;
 
-    ProcObjectivePreset const * Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, ProcObjectivePreset const * const * exclude, int excludecount) const;
+    ProcObjectivePreset const * Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, bool cancapture, ProcObjectivePreset const * const * exclude, int excludecount) const;
     ProcObjectivePreset const * Find_Objective(char const * name) const;
 
     ProcSettings            Settings;
@@ -343,18 +366,25 @@ private:
     // Setup
     void Classify_Houses();
     void Pick_Objectives();
+    void Add_Objective(ProcObjectivePreset const * preset, bool primary, ProcObjectivePreset const ** chosen);
     void Build_Enemy_Bases();
     void Build_Player_Bases();
     void Place_Objective_Targets();
     void Announce_Objectives();
 
     // Base building
-    bool Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer);
+    bool Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer, CELL center = -1, bool skipconst = false);
+    void Build_Squads(ProcObjectivePreset const * primary);
+    ProcTeamPreset const * Find_Squad(ProcObjectivePreset const * primary, ProcSideType side) const;
+    CELL Build_Outpost(HouseClass * house, ProcObjectivePreset const * preset);
+    void Spawn_Patrols(int count);
+    int Claim_Waypoint(CELL cell);
+    void Add_Anchor(CELL cell, HouseClass * owner);
     void Clear_Start_Units(HouseClass * house, bool keepcombat);
     bool Place_Building(HouseClass * house, StructType type, CELL center, int minradius, int maxradius, TARGET * placed = NULL);
     bool Can_Place_Building(StructType type, CELL cell) const;
     bool Try_Place_Building(HouseClass * house, StructType type, CELL cell, TARGET * placed);
-    void Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission);
+    void Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission, int minradius = 2, int maxradius = 7);
     void Place_Naval_Yard(HouseClass * house, CELL center);
     void Add_Power(HouseClass * house, CELL center);
     CELL Find_Neutral_Location(int mindistance) const;
@@ -372,6 +402,7 @@ private:
     void Spawn_Wave(HouseClass * house);
     TeamTypeClass * Make_Wave_Type(ProcTeamPreset const * preset, HouseClass * house, HouseClass * victim, CELL home);
     bool Deliver_Wave(TeamTypeClass * teamtype, CELL home);
+    bool Spawn_Team(TeamTypeClass * teamtype, CELL center, int minradius, int maxradius);
     int Active_Waves() const;
     void Collect_Wave_Types();
     ProcThreatType Current_Threat() const;
@@ -388,6 +419,7 @@ private:
     bool                    IsActive;
     bool                    IsAnnounced;
     bool                    IsFinished;
+    bool                    IsSquad;        // Squad mission: humans start with a squad, see ProcObjectivePreset
     bool                    IsPlayerBase;   // Humans on the player's team start with a Defend base
     bool                    IsAllyBase;     // AI allies start with a Defend base
 
@@ -411,6 +443,14 @@ private:
     long                    NextWaveFrame;
     int                     NextAttacker;
     int                     WaveCounter;
+    CELL                    Anchors[PROC_MAX_ANCHORS];          // Patrol centres
+    HouseClass *            AnchorOwners[PROC_MAX_ANCHORS];
+    int                     AnchorCount;
+    int                     PatrolCount;
+    TeamTypeClass *         PatrolTypes[PROC_MAX_PATROLS];
+    CELL                    PatrolStart[PROC_MAX_PATROLS];
+    int                     NextWaypoint;
+
     TeamTypeClass *         WaveTypes[PROC_MAX_WAVE_TYPES];
     long                    WaveStart[PROC_MAX_WAVE_TYPES];   // Elapsed when each wave was sent
     int                     WaveTypeCount;
