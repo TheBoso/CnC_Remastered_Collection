@@ -353,6 +353,7 @@ private:
     void Clear_Start_Units(HouseClass * house, bool keepcombat);
     bool Place_Building(HouseClass * house, StructType type, CELL center, int minradius, int maxradius, TARGET * placed = NULL);
     bool Can_Place_Building(StructType type, CELL cell) const;
+    bool Try_Place_Building(HouseClass * house, StructType type, CELL cell, TARGET * placed);
     void Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission);
     void Place_Naval_Yard(HouseClass * house, CELL center);
     CELL Find_Neutral_Location(int mindistance) const;
@@ -380,6 +381,7 @@ private:
     bool Is_Alive(HouseClass const * house) const;
     CELL Home_Cell(HouseClass const * house) const;
     void Message(char const * text) const;
+    void Print_Status() const;
     void Objective_Text(ProcObjective const & objective, char * buffer, int size) const;
 
     bool                    IsActive;
@@ -407,6 +409,7 @@ private:
     int                     NextAttacker;
     int                     WaveCounter;
     TeamTypeClass *         WaveTypes[PROC_MAX_WAVE_TYPES];
+    long                    WaveStart[PROC_MAX_WAVE_TYPES];   // Elapsed when each wave was sent
     int                     WaveTypeCount;
 };
 

@@ -23,6 +23,8 @@ ProcMissionManager ProcMission;
 #define PROC_OBJECTIVE_CHECK_RATE   (TICKS_PER_SECOND / 2)
 #define PROC_ANNOUNCE_DELAY         (TICKS_PER_SECOND * 3)
 #define PROC_MESSAGE_SECONDS        20.0f
+#define PROC_WAVE_ACTIVE_TIME       (TICKS_PER_MINUTE * 4)  // After this a wave no longer blocks new ones
+#define PROC_STATUS_RATE            TICKS_PER_MINUTE    // Debug status line (also read by tools/ProcTest)
 
 
 /*******************************************************************************
@@ -433,28 +435,58 @@ bool ProcMissionManager::Place_Building(HouseClass * house, StructType type, CEL
 {
     if (type == STRUCT_NONE || center == -1) return false;
 
-    BuildingTypeClass const & btype = BuildingTypeClass::As_Reference(type);
+    // Random spots first, so layouts differ every game.
     for (int attempt = 0; attempt < 80; attempt++) {
         // Widen the search when the preferred ring is crowded.
         int widen = (attempt / 20) * 3;
         CELL cell = (attempt == 0 && minradius == 0) ? center : Random_Cell_Around(center, minradius, maxradius + widen);
+        if (Try_Place_Building(house, type, cell, placed)) return true;
+    }
 
-        if (!Can_Place_Building(type, cell)) continue;
-
-        BuildingClass * building = (BuildingClass *)btype.Create_One_Of(house);
-        if (building == NULL) return false;
-
-        // Placed as a pre-existing structure: no build-up animation, no free refinery harvester.
-        ScenarioInit++;
-        bool ok = building->Unlimbo(Cell_Coord(cell), DIR_N);
-        ScenarioInit--;
-        if (ok) {
-            if (placed) *placed = building->As_Target();
-            return true;
+    /*
+    **	Crowded base: scan every ring outwards (from a random start on each ring) so a free
+    **	spot is found whenever one exists within reach.
+    */
+    for (int radius = minradius; radius <= maxradius + 12; radius++) {
+        int perimeter = max(1, radius * 8);
+        int offset = Random_Pick(0, perimeter - 1);
+        for (int step = 0; step < perimeter; step++) {
+            int pos = (step + offset) % perimeter;
+            int side = pos / max(1, radius * 2);
+            int along = pos % max(1, radius * 2) - radius;
+            int dx = 0, dy = 0;
+            switch (side) {
+                case 0:  dx = along;   dy = -radius; break;
+                case 1:  dx = radius;  dy = along;   break;
+                case 2:  dx = -along;  dy = radius;  break;
+                default: dx = -radius; dy = -along;  break;
+            }
+            int x = Cell_X(center) + dx;
+            int y = Cell_Y(center) + dy;
+            if (x < Map.MapCellX || y < Map.MapCellY || x >= Map.MapCellX + Map.MapCellWidth || y >= Map.MapCellY + Map.MapCellHeight) continue;
+            if (Try_Place_Building(house, type, XY_Cell(x, y), placed)) return true;
         }
-        delete building;
     }
     return false;
+}
+
+bool ProcMissionManager::Try_Place_Building(HouseClass * house, StructType type, CELL cell, TARGET * placed)
+{
+    if (!Can_Place_Building(type, cell)) return false;
+
+    BuildingClass * building = (BuildingClass *)BuildingTypeClass::As_Reference(type).Create_One_Of(house);
+    if (building == NULL) return false;
+
+    // Placed as a pre-existing structure: no build-up animation, no free refinery harvester.
+    ScenarioInit++;
+    bool ok = building->Unlimbo(Cell_Coord(cell), DIR_N);
+    ScenarioInit--;
+    if (!ok) {
+        delete building;
+        return false;
+    }
+    if (placed) *placed = building->As_Target();
+    return true;
 }
 
 void ProcMissionManager::Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission)
@@ -729,9 +761,16 @@ void ProcMissionManager::Announce_Objectives()
 static BuildingClass * Live_Target(ProcObjective const & obj)
 {
     if (obj.Target == TARGET_NONE) return NULL;
-    BuildingClass * building = As_Building(obj.Target);
-    if (building == NULL || !building->IsActive || building->IsInLimbo || building->Strength <= 0) return NULL;
-    if (building->Class->Type != obj.TargetType) return NULL;
+    BuildingClass * building = As_Building(obj.Target, false);
+    char dbg[160];
+    if (building == NULL) { GlyphX_Debug_Print("ProcMission: target gone (no object)"); return NULL; }
+    if (!building->IsActive || building->IsInLimbo || building->Strength <= 0 || building->Class->Type != obj.TargetType) {
+        sprintf(dbg, "ProcMission: target gone active=%d limbo=%d strength=%d type=%d want=%d house=%s mission=%d",
+            (int)building->IsActive, (int)building->IsInLimbo, (int)building->Strength, (int)building->Class->Type, (int)obj.TargetType,
+            building->House ? building->House->IniName : "?", (int)building->Mission);
+        GlyphX_Debug_Print(dbg);
+        return NULL;
+    }
     return building;
 }
 
@@ -937,12 +976,19 @@ TeamTypeClass * ProcMissionManager::Make_Wave_Type(ProcTeamPreset const * preset
         tt->MissionList[m].Mission = preset->Missions[i].Mission;
         tt->MissionList[m++].Data.Value = preset->Missions[i].Data;
     }
-    if (m == 0) {
-        tt->MissionList[m].Mission = TMISSION_ATTACK;
-        tt->MissionList[m++].Data.Value = QUARRY_ANYTHING;
+    /*
+    **	Finish with Hunt. An Attack mission that finds no target ends the team's mission list,
+    **	which disbands the team and leaves the units idling outside the victim's base. Hunt
+    **	(a Do mission) never ends, so the wave keeps fighting and stays counted as active.
+    */
+    bool open_ended = (m > 0 && (tt->MissionList[m - 1].Mission == TMISSION_LOOP || tt->MissionList[m - 1].Mission == TMISSION_DO));
+    if (!open_ended && m < TeamTypeClass::MAX_TEAM_MISSIONS) {
+        tt->MissionList[m].Mission = TMISSION_DO;
+        tt->MissionList[m++].Data.Value = MISSION_HUNT;
     }
     tt->MissionCount = m;
 
+    WaveStart[WaveTypeCount] = Elapsed;
     WaveTypes[WaveTypeCount++] = tt;
     return tt;
 }
@@ -982,12 +1028,21 @@ bool ProcMissionManager::Deliver_Wave(TeamTypeClass * teamtype, CELL home)
             FootClass * obj = (FootClass *)type->Create_One_Of(house);
             if (obj == NULL) break;
 
-            if (!Scan_Place_Object(obj, cell)) {
+            // Join the team while still in limbo, as _Create_Group does. Once placed, the
+            // unit idles in Guard Area, which teams refuse to recruit.
+            ScenarioInit++;
+            bool added = team->Add(obj);
+            ScenarioInit--;
+            if (!added) {
                 delete obj;
                 continue;
             }
-            team->Add(obj);
             obj->IsInitiated = true;
+
+            if (!Scan_Place_Object(obj, cell)) {
+                delete obj;         // Also takes it back out of the team
+                continue;
+            }
             obj->Assign_Mission(MISSION_GUARD);
             placed++;
         }
@@ -1009,7 +1064,9 @@ int ProcMissionManager::Active_Waves() const
         TeamTypeClass * tt = team->Class;
         for (int w = 0; w < WaveTypeCount; w++) {
             if (WaveTypes[w] == tt) {
-                count++;
+                // Old waves keep fighting (they end in Hunt) but stop holding a slot, so a wave
+                // stuck somewhere can't stall the director.
+                if (Elapsed - WaveStart[w] < PROC_WAVE_ACTIVE_TIME) count++;
                 break;
             }
         }
@@ -1031,8 +1088,14 @@ void ProcMissionManager::Collect_Wave_Types()
             if (team->Class.Is_Valid() && (TeamTypeClass *)team->Class == tt) used = true;
         }
         if (!used) {
+            char buf[80];
+            sprintf(buf, "ProcMission: wave %s over after %lds", tt->IniName, (Elapsed - WaveStart[w]) / TICKS_PER_SECOND);
+            GlyphX_Debug_Print(buf);
             delete tt;
-            WaveTypes[w] = WaveTypes[--WaveTypeCount];
+
+            --WaveTypeCount;
+            WaveTypes[w] = WaveTypes[WaveTypeCount];
+            WaveStart[w] = WaveStart[WaveTypeCount];
             w--;
         }
     }
@@ -1068,9 +1131,12 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
 
 void ProcMissionManager::Director_AI()
 {
-    if (!Settings.IsWaves || Elapsed < NextWaveFrame) return;
+    // Frequent, so "wave ... over after" reports the real lifetime.
+    if ((Elapsed % (TICKS_PER_SECOND * 2)) == 0) {
+        Collect_Wave_Types();
+    }
 
-    Collect_Wave_Types();
+    if (!Settings.IsWaves || Elapsed < NextWaveFrame) return;
 
     if (Active_Waves() < Diff.MaxActiveWaves) {
         for (int tries = 0; tries < EnemyCount; tries++) {
@@ -1111,6 +1177,31 @@ void ProcMissionManager::AI()
     if (!IsFinished) {
         Director_AI();
     }
+
+    if ((Elapsed % PROC_STATUS_RATE) == 0) {
+        Print_Status();
+    }
+}
+
+/*
+**	One line summary of the mission state, e.g.
+**	"ProcMission: status t=120s threat=1 waves=1/2 types=2 enemies=[18,9] player=12 objectives=[A,C]"
+*/
+void ProcMissionManager::Print_Status() const
+{
+    char buf[256];
+    int len = sprintf(buf, "ProcMission: status t=%lds threat=%d waves=%d/%d types=%d enemies=[",
+        Elapsed / TICKS_PER_SECOND, (int)Current_Threat(), Active_Waves(), Diff.MaxActiveWaves, WaveTypeCount);
+    for (int i = 0; i < EnemyCount && len < 200; i++) {
+        len += sprintf(buf + len, "%s%d%s", i ? "," : "", Enemies[i].House->CurBuildings, Is_Alive(Enemies[i].House) ? "" : "x");
+    }
+    len += sprintf(buf + len, "] player=%d objectives=[", Commander ? (int)Commander->CurBuildings : -1);
+    static char const s_State[] = {'A', 'C', 'F'};
+    for (int i = 0; i < ObjectiveCount && len < 240; i++) {
+        len += sprintf(buf + len, "%s%c", i ? "," : "", s_State[Objectives[i].State]);
+    }
+    strcpy(buf + len, "]");
+    GlyphX_Debug_Print(buf);
 }
 
 bool ProcMissionManager::Is_Player_Team(HouseClass const * house) const

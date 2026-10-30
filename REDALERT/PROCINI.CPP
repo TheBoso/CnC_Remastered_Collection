@@ -286,12 +286,31 @@ static int Get_Enum(CCINIClass & ini, char const * section, char const * entry, 
  * FILE LOADING
  ******************************************************************************/
 
+extern HINSTANCE ProgramInstance;     // This DLL (set in DllMain)
+
+/*
+**	The client loads a mod's RedAlert.dll from the mod's Data folder but does not put that
+**	folder on the CCFileClass search path, so look next to the DLL first. Fall back to the
+**	normal search (mod paths, content directory), which is what the ProcTest harness uses.
+*/
 static bool Load_INI(char const * filename, CCINIClass & ini)
 {
+    char path[_MAX_PATH];
+    if (GetModuleFileNameA(ProgramInstance, path, sizeof(path)) > 0) {
+        char * slash = strrchr(path, '\\');
+        if (slash != NULL && (slash - path) + 1 + strlen(filename) < sizeof(path)) {
+            strcpy(slash + 1, filename);
+            RawFileClass local(path);
+            if (local.Is_Available()) {
+                return ini.Load(local, false);
+            }
+        }
+    }
+
     CCFileClass file(filename);
     if (!file.Is_Available()) {
         char buf[128];
-        sprintf(buf, "ProcINI: %s not found", filename);
+        sprintf(buf, "ProcINI: %s not found (next to RedAlert.dll or on the mod search path)", filename);
         GlyphX_Debug_Print(buf);
         return false;
     }
