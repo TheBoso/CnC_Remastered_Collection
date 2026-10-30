@@ -122,6 +122,8 @@ void ProcMissionManager::Reset()
     IsActive = false;
     IsAnnounced = false;
     IsFinished = false;
+    IsPlayerBase = false;
+    IsAllyBase = false;
     Settings = ProcSettings();
     Difficulty = DIFF_NORMAL;
     Diff = ProcDifficultyPreset();
@@ -281,14 +283,30 @@ void ProcMissionManager::Pick_Objectives()
             GlyphX_Debug_Print(buf);
         }
     }
-    if (primary == NULL) primary = ProcPresets.Pick_Objective(PlayerSide, true, TechLevel, NULL, 0);
+    if (primary == NULL) primary = ProcPresets.Pick_Objective(PlayerSide, true, TechLevel, true, NULL, 0);
     if (primary == NULL) primary = &s_Fallback;
+
+    /*
+    **  Decide now whether the player's team starts with a base: bonus objectives that put a
+    **  structure in the player's base only make sense when there is one. A primary that asks
+    **  for a base, or targets a player structure, always gets one. One roll covers all the
+    **  humans, so co-op players start alike.
+    */
+    bool forced = primary->PlayerBase[0] != '\0' || (primary->Owner == PROC_OWNER_PLAYER && primary->TargetCount > 0);
+    IsPlayerBase = forced || Settings.PlayerStart == PROC_START_BASE ||
+        (Settings.PlayerStart == PROC_START_RANDOM && Random_Pick(0, 99) < Settings.PlayerBaseChance);
+    switch (Settings.AllyStart) {
+        case PROC_START_BASE:   IsAllyBase = true; break;
+        case PROC_START_RANDOM: IsAllyBase = Random_Pick(0, 99) < Settings.PlayerBaseChance; break;
+        case PROC_START_SAME:   IsAllyBase = IsPlayerBase; break;
+        default:                IsAllyBase = false; break;
+    }
 
     int secondaries = Random_Pick(Settings.SecondaryMin, Settings.SecondaryMax);
     secondaries = Bound(secondaries, 0, PROC_MAX_OBJECTIVES - 1);
 
     for (int i = 0; i <= secondaries; i++) {
-        ProcObjectivePreset const * preset = (i == 0) ? primary : ProcPresets.Pick_Objective(PlayerSide, false, TechLevel, chosen, ObjectiveCount);
+        ProcObjectivePreset const * preset = (i == 0) ? primary : ProcPresets.Pick_Objective(PlayerSide, false, TechLevel, IsPlayerBase, chosen, ObjectiveCount);
         if (preset == NULL) break;
 
         ProcObjective & obj = Objectives[ObjectiveCount];
@@ -331,7 +349,8 @@ void ProcMissionManager::Build_Enemy_Bases()
         house->Credits += (preset->Credits * Diff.EnemyCreditsPct) / 100;
         house->IsBaseBuilding = true;
 
-        sprintf(buf, "ProcMission: enemy %d (%s) base '%s', %d buildings", i, Proc_Side_Name(side), preset->Name, house->CurBuildings);
+        sprintf(buf, "ProcMission: enemy %d (%s) base '%s', %d buildings (power %d/%d)", i, Proc_Side_Name(side), preset->Name,
+            house->CurBuildings, house->Power, house->Drain);
         GlyphX_Debug_Print(buf);
     }
 }
@@ -345,27 +364,16 @@ void ProcMissionManager::Build_Player_Bases()
 {
     char buf[120];
 
+    // Pick_Objectives has already decided who starts with a base (IsPlayerBase / IsAllyBase).
     ProcObjectivePreset const * primary = (ObjectiveCount > 0) ? Objectives[0].Preset : NULL;
-    bool forced = (primary != NULL && primary->PlayerBase[0] != '\0');
-
-    // One roll for all the humans, so co-op players start alike.
-    bool playerbase = forced || Settings.PlayerStart == PROC_START_BASE ||
-        (Settings.PlayerStart == PROC_START_RANDOM && Random_Pick(0, 99) < Settings.PlayerBaseChance);
-
-    bool allybase;
-    switch (Settings.AllyStart) {
-        case PROC_START_BASE:   allybase = true; break;
-        case PROC_START_RANDOM: allybase = Random_Pick(0, 99) < Settings.PlayerBaseChance; break;
-        case PROC_START_SAME:   allybase = playerbase; break;
-        default:                allybase = false; break;
-    }
+    bool named = (primary != NULL && primary->PlayerBase[0] != '\0' && stricmp(primary->PlayerBase, "AUTO") != 0);
 
     for (int i = 0; i < PlayerTeamCount; i++) {
         HouseClass * house = PlayerTeam[i];
-        if (!(house->IsHuman ? playerbase : allybase)) continue;
+        if (!(house->IsHuman ? IsPlayerBase : IsAllyBase)) continue;
 
         ProcBasePreset const * preset = NULL;
-        if (house->IsHuman && forced && stricmp(primary->PlayerBase, "AUTO") != 0) {
+        if (house->IsHuman && named) {
             preset = ProcPresets.Find_Base(primary->PlayerBase);
         }
         if (preset == NULL) {
@@ -380,8 +388,8 @@ void ProcMissionManager::Build_Player_Bases()
             house->IsBaseBuilding = true;
         }
 
-        sprintf(buf, "ProcMission: %s %s starts with base '%s'", house->IsHuman ? "player" : "ally",
-            house->IniName, preset->Name);
+        sprintf(buf, "ProcMission: %s %s starts with base '%s' (power %d/%d)", house->IsHuman ? "player" : "ally",
+            house->IniName, preset->Name, house->Power, house->Drain);
         GlyphX_Debug_Print(buf);
     }
 }
@@ -485,6 +493,17 @@ bool ProcMissionManager::Try_Place_Building(HouseClass * house, StructType type,
         delete building;
         return false;
     }
+
+    /*
+    **	A building only adds its power output on its first AI tick (when Strength != LastStrength).
+    **	Do that update now, exactly as BuildingClass::AI would, so the house's Power is right
+    **	while the base is still being generated (auto power, objective targets) and the player
+    **	doesn't get a low power warning on the first frame.
+    */
+    int oldpower = building->Power_Output();
+    building->LastStrength = building->Strength;
+    house->Adjust_Power(building->Power_Output() - oldpower);
+
     if (placed) *placed = building->As_Target();
     return true;
 }
@@ -560,10 +579,7 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
     }
 
     if (preset->IsAutoPower) {
-        StructType power = Is_Allowed(BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER), house) ? STRUCT_ADVANCED_POWER : STRUCT_POWER;
-        for (int n = 0; n < 12 && house->Power < house->Drain + 50; n++) {
-            if (!Place_Building(house, power, center, 3, 11)) break;
-        }
+        Add_Power(house, center);
     }
 
     if (preset->IsNaval) {
@@ -584,6 +600,18 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
         Place_Units(house, type, count, center, guard);
     }
     return true;
+}
+
+/*
+**	Adds power plants around 'center' until the house's power covers its drain (with a
+**	small margin), so bases never start with the low power warning.
+*/
+void ProcMissionManager::Add_Power(HouseClass * house, CELL center)
+{
+    StructType power = Is_Allowed(BuildingTypeClass::As_Reference(STRUCT_ADVANCED_POWER), house) ? STRUCT_ADVANCED_POWER : STRUCT_POWER;
+    for (int n = 0; n < 12 && house->Power < house->Drain + 50; n++) {
+        if (!Place_Building(house, power, center, 3, 11)) break;
+    }
 }
 
 CELL ProcMissionManager::Find_Neutral_Location(int mindistance) const
@@ -686,6 +714,11 @@ void ProcMissionManager::Place_Objective_Targets()
             continue;
         }
 
+        // A target in our own base must not leave it short of power.
+        if (preset->Owner == PROC_OWNER_PLAYER) {
+            Add_Power(owner, center);
+        }
+
         /*
         **	Garrison. Neutral targets are guarded by an enemy so the guards actually fight.
         */
@@ -761,13 +794,22 @@ void ProcMissionManager::Announce_Objectives()
 static BuildingClass * Live_Target(ProcObjective const & obj)
 {
     if (obj.Target == TARGET_NONE) return NULL;
+
+    // Fetch without the active check so the log can say why, but never read a deleted
+    // building's fields: its slot is free and Class may no longer be valid.
     BuildingClass * building = As_Building(obj.Target, false);
-    char dbg[160];
-    if (building == NULL) { GlyphX_Debug_Print("ProcMission: target gone (no object)"); return NULL; }
-    if (!building->IsActive || building->IsInLimbo || building->Strength <= 0 || building->Class->Type != obj.TargetType) {
-        sprintf(dbg, "ProcMission: target gone active=%d limbo=%d strength=%d type=%d want=%d house=%s mission=%d",
-            (int)building->IsActive, (int)building->IsInLimbo, (int)building->Strength, (int)building->Class->Type, (int)obj.TargetType,
-            building->House ? building->House->IniName : "?", (int)building->Mission);
+    if (building == NULL || !building->IsActive) {
+        GlyphX_Debug_Print("ProcMission: target gone (destroyed)");
+        return NULL;
+    }
+    if (building->Class->Type != obj.TargetType) {
+        GlyphX_Debug_Print("ProcMission: target gone (slot reused by another building)");
+        return NULL;
+    }
+    if (building->IsInLimbo || building->Strength <= 0) {
+        char dbg[128];
+        sprintf(dbg, "ProcMission: target gone (limbo=%d strength=%d owner=%s)", (int)building->IsInLimbo,
+            (int)building->Strength, building->House ? building->House->IniName : "?");
         GlyphX_Debug_Print(dbg);
         return NULL;
     }

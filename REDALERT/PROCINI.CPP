@@ -631,6 +631,7 @@ struct ObjectiveFilter {
     ProcSideType PlayerSide;
     bool IsPrimary;
     int Tech;
+    bool IsPlayerBase;
     ProcObjectivePreset const * const * Exclude;
     int ExcludeCount;
 
@@ -638,6 +639,9 @@ struct ObjectiveFilter {
         if (!Side_Matches(obj.PlayerSide, PlayerSide) || obj.MinTech > Tech) return false;
         if (IsPrimary && obj.Slot == PROC_SLOT_SECONDARY) return false;
         if (!IsPrimary && obj.Slot == PROC_SLOT_PRIMARY) return false;
+
+        // A structure "in the player's base" needs a base; with an MCV start it would sit alone.
+        if (!IsPlayerBase && obj.Owner == PROC_OWNER_PLAYER && obj.TargetCount > 0) return false;
 
         // Secondary objectives never end the game by themselves, so these kinds make no sense there.
         if (!IsPrimary && (obj.Kind == PROC_OBJ_DESTROY_BASES || obj.Kind == PROC_OBJ_SURVIVE)) return false;
@@ -649,9 +653,9 @@ struct ObjectiveFilter {
     }
 };
 
-ProcObjectivePreset const * ProcPresetLibrary::Pick_Objective(ProcSideType playerside, bool primary, int tech, ProcObjectivePreset const * const * exclude, int excludecount) const
+ProcObjectivePreset const * ProcPresetLibrary::Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, ProcObjectivePreset const * const * exclude, int excludecount) const
 {
-    ObjectiveFilter filter = {playerside, primary, tech, exclude, excludecount};
+    ObjectiveFilter filter = {playerside, primary, tech, playerbase, exclude, excludecount};
     return Weighted_Pick(Objectives, ObjectiveCount, filter);
 }
 

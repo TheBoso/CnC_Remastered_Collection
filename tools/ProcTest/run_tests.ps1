@@ -171,6 +171,41 @@ $Tests = [ordered]@{
         }
     }
 
+    protect_with_base = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1800")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMin" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMax" "1"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "BONUS_PROTECT_SILOS" "Weight" "100000"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "secondary objective BONUS_PROTECT_SILOS")) { $f += "protect bonus not offered with a base start" }
+            $low = @($r.Lines | Select-String "^MSG (\d+) TEXT_LOW_POWER" | Where-Object { [int]$_.Matches[0].Groups[1].Value -lt 900 })
+            if ($low.Count -gt 0) { $f += "low power warning in the first minute (frame $($low[0].Matches[0].Groups[1].Value))" }
+            $f
+        }
+    }
+
+    protect_needs_base = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "300")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "MCV"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMin" "2"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMax" "2"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "BONUS_PROTECT_SILOS" "Weight" "100000"
+        }
+        Check = { param($r)
+            $f = @()
+            if ($r.Lines -match "objective BONUS_PROTECT_SILOS") { $f += "player-base objective offered with an MCV start" }
+            if ($r.Lines -match "player Tester starts with base") { $f += "MCV start produced a base" }
+            $f
+        }
+    }
+
     presets_beside_dll = @{
         # How the real client runs a mod: RedAlert.dll and the presets share the mod's Data
         # folder, which is not on the engine's file search path.
@@ -261,6 +296,11 @@ foreach ($name in $Tests.Keys) {
         if ($p.ExitCode -ne 0) { $failures += "harness exit code $($p.ExitCode)" }
         if ($lines -match "^END .*crash") { $failures += ($lines | Select-String "^END .*crash").Line }
         if (-not $r.End) { $failures += "no END line (harness died)" }
+        # Every generated base starts with power covering its drain.
+        foreach ($m in ($lines | Select-String "(enemy \d .*|player \S+|ally \S+) .*base '([^']+)'.*\(power (\d+)/(\d+)\)")) {
+            $pw = [int]$m.Matches[0].Groups[3].Value; $dr = [int]$m.Matches[0].Groups[4].Value
+            if ($pw -lt $dr) { $failures += "base '$($m.Matches[0].Groups[2].Value)' starts underpowered ($pw/$dr)" }
+        }
         # Every structure objective must get its target placed.
         foreach ($m in ($lines | Select-String "(primary|secondary) objective (\S+) \((Destroy|Capture|Protect)," )) {
             $obj = $m.Matches[0].Groups[2].Value

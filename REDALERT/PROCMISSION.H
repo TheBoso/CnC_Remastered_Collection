@@ -283,7 +283,7 @@ public:
     ProcBasePreset const * Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech) const;
     ProcBasePreset const * Find_Base(char const * name) const;
 
-    ProcObjectivePreset const * Pick_Objective(ProcSideType playerside, bool primary, int tech, ProcObjectivePreset const * const * exclude, int excludecount) const;
+    ProcObjectivePreset const * Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, ProcObjectivePreset const * const * exclude, int excludecount) const;
     ProcObjectivePreset const * Find_Objective(char const * name) const;
 
     ProcSettings            Settings;
@@ -356,6 +356,7 @@ private:
     bool Try_Place_Building(HouseClass * house, StructType type, CELL cell, TARGET * placed);
     void Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission);
     void Place_Naval_Yard(HouseClass * house, CELL center);
+    void Add_Power(HouseClass * house, CELL center);
     CELL Find_Neutral_Location(int mindistance) const;
 
     // Objectives
@@ -387,6 +388,8 @@ private:
     bool                    IsActive;
     bool                    IsAnnounced;
     bool                    IsFinished;
+    bool                    IsPlayerBase;   // Humans on the player's team start with a Defend base
+    bool                    IsAllyBase;     // AI allies start with a Defend base
 
     ProcSettings            Settings;
     DiffType                Difficulty;
