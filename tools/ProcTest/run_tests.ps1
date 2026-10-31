@@ -287,7 +287,7 @@ $Tests = [ordered]@{
 
     capture_lab_win = @{
         Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1800",
-            "--do", "450:damage:PRIMARY:80", "--do", "455:clear:PRIMARY:10", "--do", "460:capture:PRIMARY:3")
+            "--do", "455:clear:PRIMARY:10", "--do", "460:capture:PRIMARY:3")
         Patch = { param($d)
             Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "CAPTURE_LAB"
             Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
@@ -413,8 +413,8 @@ $Tests = [ordered]@{
     bonus_capture_rewards = @{
         # Abandoned refinery (3000 credits) and field hospital (6 infantry).
         Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1500", "--do", "300+15:credits",
-            "--do", "450:damage:BONUS_ABANDONED_REFINERY:80", "--do", "455:clear:BONUS_ABANDONED_REFINERY:10", "--do", "460:capture:BONUS_ABANDONED_REFINERY:3",
-            "--do", "450:damage:BONUS_HOSPITAL:80", "--do", "455:clear:BONUS_HOSPITAL:10", "--do", "460:capture:BONUS_HOSPITAL:3")
+            "--do", "455:clear:BONUS_ABANDONED_REFINERY:10", "--do", "460:capture:BONUS_ABANDONED_REFINERY:3",
+            "--do", "455:clear:BONUS_HOSPITAL:10", "--do", "460:capture:BONUS_HOSPITAL:3")
         Patch = { param($d)
             Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "SURVIVE_SIEGE"
             Set-Bonuses $d @("BONUS_ABANDONED_REFINERY", "BONUS_HOSPITAL")
@@ -592,6 +592,7 @@ $Tests = [ordered]@{
             # With the full skirmish AI the enemy army found the idle squad within ~3 minutes (seen in
             # the real game). Static enemy bases: only the waves (from 10 minutes) come for it.
             if (-not ($r.Lines -match "enemy production disabled")) { $f += "enemy production not disabled" }
+            if ($r.Lines -match "reinforcements \S+ for Tester") { $f += "a squad mission sent the human reinforcements" }
             $over = Get-Over $r
             if ($over -and $over.Frame -lt 8990) { $f += "the squad's game ended ($($over.Result)) at frame $($over.Frame), before the enemy may build" }
             $patrols = @($r.Lines -match "ProcMission: patrol PROCP").Count
@@ -707,9 +708,72 @@ $Tests = [ordered]@{
         Check = { param($r)
             $f = @()
             if (-not ($r.Lines -match "enemy production disabled")) { $f += "enemy production not disabled by default" }
-            $base = $r.Lines | Select-String "enemy 0 \(\w+\) base '[^']+', (\d+) buildings" | Select-Object -First 1
-            $grew = $r.Status | Where-Object { $base -and [int]($_.Enemies -replace '\D.*$', '') -gt [int]$base.Matches[0].Groups[1].Value }
-            if ($grew) { $f += "enemy base grew to $($grew[0].Enemies) buildings" }
+            # Compared with the first status line: objective buildings and their power plants are
+            # added after the base itself is logged.
+            $first = $r.Status | Select-Object -First 1
+            $grew = $r.Status | Where-Object { $first -and [int]($_.Enemies -replace '\D.*$', '') -gt [int]($first.Enemies -replace '\D.*$', '') }
+            if ($grew) { $f += "enemy base grew from $($first.Enemies) to $($grew[0].Enemies) buildings" }
+            $f
+        }
+    }
+
+    objectives_revealed = @{
+        # Every objective target is revealed when the objectives are announced (frame ~45).
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "120", "--do", "100:revealed:PRIMARY",
+            "--do", "100:revealed:BONUS_HOSPITAL", "--do", "100:revealed:BONUS_RADAR")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "CAPTURE_LAB"
+            Set-Bonuses $d @("BONUS_HOSPITAL", "BONUS_RADAR")
+        }
+        Check = { param($r)
+            $f = @()
+            foreach ($t in (Get-Test $r "revealed")) { if ($t.Result -ne 1) { $f += "an objective target is still shrouded (result $($t.Result))" } }
+            if (@(Get-Test $r "revealed").Count -ne 3) { $f += "reveal checks did not run" }
+            $f
+        }
+    }
+
+    naval_waves = @{
+        # Map 3: the enemy base gets a shipyard on water that reaches the player's base.
+        Args = @("--scenario", "3", "--player", "England", "--enemies", "Greece", "--frames", "6000", "--do", "20:naval", "--do", "20:buildings", "--do", "5990:buildings")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "NavalChance" "100"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "FirstWaveSeconds" "30"
+        }
+        Check = { param($r)
+            $f = @()
+            $reach = Get-Test $r "naval" | Select-Object -First 1
+            if (-not $reach -or $reach.Result -lt 1) { $f += "no enemy naval yard that reaches the player (map changed?)" }
+            $sea = @($r.Lines | Select-String "wave \S+ \(sent, threat \d+, by sea\)").Count
+            if ($sea -lt 1) { $f += "no naval wave sent" }
+            $b = @(Get-Test $r "buildings")
+            if ($b.Count -eq 2 -and $b[1].Result -ge $b[0].Result) { $f += "naval waves did no damage ($($b[0].Result) -> $($b[1].Result) player buildings)" }
+            $f
+        }
+    }
+
+    reinforcements = @{
+        # Every minute: the human, the AI ally and the enemy each get a team from their map edge.
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "2000", "--do", "800:units", "--do", "1990:units")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "PlayerReinforceMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "AllyReinforceMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EnemyReinforceMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            $sent = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(sent\)")
+            $failed = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(failed\)")
+            if ($failed.Count -gt 0) { $f += "$($failed.Count) reinforcements failed: $($failed[0].Line -replace '^DBG\s+\d+ ProcMission: ', '')" }
+            if (-not ($r.Lines -match "reinforcements (ALL|SOV)_REINF_\w+ for Tester \(sent\)")) { $f += "no reinforcements for the human" }
+            if ($sent.Count -lt 6) { $f += "only $($sent.Count) reinforcements in 2 minutes, expected 2 each for 3 houses" }
+            if (-not ($r.Lines -match "^MSG .*Reinforcements have arrived")) { $f += "the human was not told reinforcements arrived" }
+            $units = @(Get-Test $r "units")
+            if ($units.Count -eq 2 -and $units[1].Result -le $units[0].Result) { $f += "the human's units did not grow ($($units[0].Result) -> $($units[1].Result))" }
             $f
         }
     }
@@ -806,6 +870,8 @@ foreach ($name in $Tests.Keys) {
         if ($p.ExitCode -ne 0) { $failures += "harness exit code $($p.ExitCode)" }
         if ($lines -match "^END .*crash") { $failures += ($lines | Select-String "^END .*crash").Line }
         if (-not $r.End) { $failures += "no END line (harness died)" }
+        # A capture target a player couldn't order an engineer into (the UI's What_Action check).
+        foreach ($m in ($lines | Select-String "ProcTest: an engineer can't be ordered")) { $failures += ($m.Line -replace '^DBG\s+\d+ ProcTest: ', '') }
         # Preset data errors (unknown types, uncapturable capture targets, ...).
         foreach ($m in ($lines | Select-String "ProcINI: \[")) { $failures += "preset warning: $($m.Line -replace '^DBG\s+\d+ ', '')" }
         # Every generated base starts with power covering its drain.

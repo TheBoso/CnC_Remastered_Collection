@@ -82,6 +82,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include	"function.h"
+#include	"procmission.h"
 
 /*
 ** New sidebar for GlyphX multiplayer. ST - 8/7/2019 10:10AM
@@ -2919,8 +2920,16 @@ ActionType InfantryClass::What_Action(ObjectClass const * object) const
 	*/
 	if (*this == INFANTRY_RENOVATOR && object->What_Am_I() == RTTI_BUILDING && House->IsPlayerControl) {
 		BuildingClass const * bldg = (BuildingClass *)object;
-		if (bldg->Class->IsRepairable) {
-			if (House->Is_Ally(bldg)) {
+
+		/*
+		**	Procedural missions: every house counts the neutral house as an ally, so a neutral
+		**	objective building (hospital, abandoned construction yard...) would only offer a
+		**	repair. The capture code itself doesn't treat neutral as an ally, so offer the capture.
+		*/
+		bool neutralcapture = Scen.IsProcedural && bldg->House->Class->House == HOUSE_NEUTRAL && bldg->Can_Capture();
+
+		if (bldg->Class->IsRepairable || neutralcapture) {
+			if (House->Is_Ally(bldg) && !neutralcapture) {
 				if (bldg->Health_Ratio() == 1) {
 					return(ACTION_NO_GREPAIR);
 				}

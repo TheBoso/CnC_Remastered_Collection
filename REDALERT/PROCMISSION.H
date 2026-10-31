@@ -49,6 +49,7 @@
 #define PROC_MAX_HOUSES              MAX_PLAYERS
 #define PROC_MAX_OBJECTIVES          4       // Active objectives per mission (1 primary + secondaries)
 #define PROC_MAX_WAVE_TYPES          24      // TeamTypes the director may own at once
+#define PROC_MAX_REINFORCE_TYPES     8       // Reinforcement TeamTypes alive at once
 #define PROC_MAX_SQUAD_CHOICES       4       // Squad= presets per objective (one per side is typical)
 #define PROC_MAX_PATROLS             8       // Patrol teams per mission
 #define PROC_MAX_ANCHORS             12      // Places patrols guard (targets, outposts, enemy bases)
@@ -83,6 +84,7 @@ typedef enum ProcTeamRoleType : unsigned char {
     PROC_TEAM_DEFENSE,              // Garrisons for objectives
     PROC_TEAM_PATROL,               // Walk a loop around targets / outposts / bases (squad missions)
     PROC_TEAM_SQUAD,                // The player's starting squad in squad missions
+    PROC_TEAM_REINFORCE,            // Reinforcements the director sends to any side's base
     PROC_TEAM_ROLE_COUNT
 } ProcTeamRoleType;
 
@@ -173,6 +175,8 @@ struct ProcTeamPreset {
     int                     MissionCount;
 
     bool                    IsGathering;    // Rally at home, then stage outside the target base
+    bool                    IsNaval;        // Has vessels: only sent by a house with a naval yard, by sea
+    bool                    IsShipHunter;   // Naval team that can only fight ships (NavalTarget=Ships)
     bool                    IsSuicide;
     bool                    IsRoundAbout;
 
@@ -268,6 +272,10 @@ struct ProcDifficultyPreset {
     ProcThreatType          StartThreat;
     ProcThreatType          MaxThreat;
     int                     EscalateMinutes;    // Threat rises one step every N minutes
+    int                     NavalChance;        // % of an eligible wave that comes by sea
+    int                     PlayerReinforceMinutes;     // Reinforcements for the humans every N minutes (0 = never)
+    int                     AllyReinforceMinutes;       // ... for AI allies
+    int                     EnemyReinforceMinutes;      // ... for enemies (they join their base's defence)
 
     ProcDifficultyPreset();
 };
@@ -280,6 +288,7 @@ struct ProcSettings {
     int                     TechLevel;          // 0 = use the lobby tech level
     bool                    IsWaves;
     bool                    IsEnemyProduction;  // yes = enemies run the full skirmish AI (build, expand, attack on their own)
+    bool                    IsReinforcements;   // Director sends Role=Reinforce teams (timings in the difficulty tables)
     bool                    IsKeepStartUnits;   // Keep the lobby's starting units for enemies
     bool                    IsAllMaps;          // Every single-human skirmish map is procedural, flagged or not
     int                     WaveMinSeconds;
@@ -307,7 +316,8 @@ public:
     // Applies [Generator] / [Procedural] style overrides from any INI on top of the given settings.
     void Read_Settings(CCINIClass & ini, char const * section, ProcSettings & settings) const;
 
-    ProcTeamPreset const * Pick_Team(ProcSideType side, ProcTeamRoleType role, ProcThreatType minthreat, ProcThreatType maxthreat, int tech) const;
+    // naval: 0 = land teams only, 1 = naval teams only, -1 = either
+    ProcTeamPreset const * Pick_Team(ProcSideType side, ProcTeamRoleType role, ProcThreatType minthreat, ProcThreatType maxthreat, int tech, int naval = 0) const;
     ProcTeamPreset const * Find_Team(char const * name) const;
 
     ProcBasePreset const * Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech) const;
@@ -423,6 +433,14 @@ private:
     void Collect_Wave_Types();
     ProcThreatType Current_Threat() const;
     HouseClass * Pick_Victim(HouseClass * attacker) const;
+    CELL Naval_Yard_Cell(HouseClass const * house) const;
+    bool Can_Reach_By_Sea(CELL yard, HouseClass const * victim) const;
+    ProcTeamPreset const * Pick_Naval_Team(HouseClass * house, HouseClass * victim, CELL yard) const;
+
+    // Reinforcements
+    void Reinforce_AI();
+    bool Send_Reinforcements(HouseClass * house);
+    void Collect_Reinforce_Types();
 
     // Helpers
     bool Is_Player_Team(HouseClass const * house) const;
@@ -467,6 +485,11 @@ private:
     TeamTypeClass *         PatrolTypes[PROC_MAX_PATROLS];
     CELL                    PatrolStart[PROC_MAX_PATROLS];
     int                     NextWaypoint;
+
+    long                    NextReinforce[3];   // Elapsed of the next reinforcements: humans, AI allies, enemies
+    int                     ReinforceCounter;
+    TeamTypeClass *         ReinforceTypes[PROC_MAX_REINFORCE_TYPES];
+    int                     ReinforceTypeCount;
 
     TeamTypeClass *         WaveTypes[PROC_MAX_WAVE_TYPES];
     long                    WaveStart[PROC_MAX_WAVE_TYPES];   // Elapsed when each wave was sent

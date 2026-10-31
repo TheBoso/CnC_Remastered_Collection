@@ -25,6 +25,8 @@ ProcMissionManager ProcMission;
 #define PROC_MESSAGE_SECONDS        20.0f
 #define PROC_WAVE_ACTIVE_TIME       (TICKS_PER_MINUTE * 4)  // After this a wave no longer blocks new ones
 #define PROC_STATUS_RATE            TICKS_PER_MINUTE    // Debug status line (also read by tools/ProcTest)
+#define PROC_NAVAL_REACH            12                  // A naval wave needs water this close to the victim's base
+#define PROC_REVEAL_RADIUS          4                   // Shroud lifted around each objective target when announced
 #define PROC_TARGET_REACH           3                   // How far a crowded area may push an objective target out
 #define PROC_NEUTRAL_CLEARANCE      20                  // Camps / outposts / neutral targets keep this far from enemy buildings
 
@@ -145,6 +147,9 @@ void ProcMissionManager::Reset()
     NextAttacker = 0;
     WaveCounter = 0;
     WaveTypeCount = 0;
+    NextReinforce[0] = NextReinforce[1] = NextReinforce[2] = 0;
+    ReinforceCounter = 0;
+    ReinforceTypeCount = 0;
 }
 
 bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
@@ -1197,6 +1202,10 @@ void ProcMissionManager::Announce_Objectives()
         Message(buf);
 
         if (Objectives[i].Target != TARGET_NONE) {
+            // Show the player where it is: reveal the area around it for every human on the team.
+            for (int h = 0; h < PlayerTeamCount; h++) {
+                if (PlayerTeam[h]->IsHuman) Map.Sight_From(As_Cell(Objectives[i].Target), PROC_REVEAL_RADIUS, PlayerTeam[h], false);
+            }
             On_Ping(Commander, As_Coord(Objectives[i].Target));
         }
     }
@@ -1299,7 +1308,10 @@ void ProcMissionManager::Hold_Targets()
 
         if (target->IsRepairing) target->Repair(0);
         if (hold) {
-            target->Strength = max(1, (int)target->Class->MaxStrength * obj.Preset->TargetStrength / 100);
+            // Never above the starting damage; only topped back up when that is capturable anyway
+            // (so an engineer's damage on a healthier target still counts).
+            int cap = max(1, (int)target->Class->MaxStrength * obj.Preset->TargetStrength / 100);
+            if (target->Strength > cap || fixed(cap, target->Class->MaxStrength) <= EngineerCaptureLevel) target->Strength = cap;
         } else {
             // The AI restarts repairs every frame; just never let the strength go back up.
             if (obj.HeldStrength > 0 && target->Strength > obj.HeldStrength) target->Strength = obj.HeldStrength;
@@ -1609,21 +1621,30 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
     ProcThreatType high = Current_Threat();
     ProcThreatType low = (ProcThreatType)max((int)PROC_THREAT_SCOUT, (int)high - 1);
 
-    ProcTeamPreset const * preset = ProcPresets.Pick_Team(Proc_Side_Of(house), PROC_TEAM_ATTACK, low, high, house->Control.TechLevel);
-    if (preset == NULL) return;
-
     HouseClass * victim = Pick_Victim(house);
     if (victim == NULL) return;
+
+    // Some waves come by sea, from a house that has a naval yard.
+    CELL yard = Naval_Yard_Cell(house);
+    ProcTeamPreset const * preset = NULL;
+    if (yard != -1 && Random_Pick(0, 99) < Diff.NavalChance) {
+        preset = Pick_Naval_Team(house, victim, yard);
+    }
+    bool naval = (preset != NULL);
+    if (preset == NULL) {
+        preset = ProcPresets.Pick_Team(Proc_Side_Of(house), PROC_TEAM_ATTACK, low, high, house->Control.TechLevel);
+    }
+    if (preset == NULL) return;
 
     CELL home = Home_Cell(house);
     TeamTypeClass * tt = Make_Wave_Type(preset, house, victim, home);
     if (tt == NULL) return;
 
-    bool ok = Deliver_Wave(tt, home);
+    bool ok = naval ? Spawn_Team(tt, yard, 0, 0) : Deliver_Wave(tt, home);
 
     char buf[128];
-    sprintf(buf, "ProcMission: wave %s (%s, threat %d) from %s -> %s", preset->Name, ok ? "sent" : "failed",
-        (int)preset->Threat, house->IniName, victim->IniName);
+    sprintf(buf, "ProcMission: wave %s (%s, threat %d%s) from %s -> %s", preset->Name, ok ? "sent" : "failed",
+        (int)preset->Threat, naval ? ", by sea" : "", house->IniName, victim->IniName);
     GlyphX_Debug_Print(buf);
 
     if (!ok) {
@@ -1632,12 +1653,168 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
     }
 }
 
+/*
+**	Naval waves: a house with a shipyard / sub pen can send ships, as long as they can reach the
+**	victim. Ships that only fight ships (submarines) go for a victim that has a navy; the rest
+**	shell a base within reach of the water.
+*/
+CELL ProcMissionManager::Naval_Yard_Cell(HouseClass const * house) const
+{
+    for (int i = 0; i < Buildings.Count(); i++) {
+        BuildingClass const * building = Buildings.Ptr(i);
+        if ((HouseClass const *)building->House != house || building->IsInLimbo || building->Strength <= 0) continue;
+        if (*building == STRUCT_SHIP_YARD || *building == STRUCT_SUB_PEN) return Coord_Cell(building->Center_Coord());
+    }
+    return -1;
+}
+
+bool ProcMissionManager::Can_Reach_By_Sea(CELL yard, HouseClass const * victim) const
+{
+    CELL from = Find_Water_Near(yard, 6);
+    CELL to = Find_Water_Near(Home_Cell(victim), PROC_NAVAL_REACH);
+    if (from == -1 || to == -1) return false;
+    return Map[from].Zones[MZONE_WATER] == Map[to].Zones[MZONE_WATER];
+}
+
+ProcTeamPreset const * ProcMissionManager::Pick_Naval_Team(HouseClass * house, HouseClass * victim, CELL yard) const
+{
+    bool coast = Can_Reach_By_Sea(yard, victim);
+    bool navy = (victim->CurVessels > 0);
+    if (!coast && !navy) return NULL;
+
+    for (int tries = 0; tries < 6; tries++) {
+        ProcTeamPreset const * preset = ProcPresets.Pick_Team(Proc_Side_Of(house), PROC_TEAM_ATTACK, PROC_THREAT_SCOUT,
+            Current_Threat(), house->Control.TechLevel, 1);
+        if (preset == NULL) return NULL;
+        if (preset->IsShipHunter ? navy : coast) return preset;
+    }
+    return NULL;
+}
+
+
+/*******************************************************************************
+ * REINFORCEMENTS
+ *
+ * Every few minutes (difficulty tables) the director sends a Role=Reinforce team to the
+ * humans, to AI allies and to enemies. They drive in from the map edge nearest their base
+ * and move to it; an enemy's reinforcements then strengthen its defence. Squad missions send
+ * none to the humans, and missions without waves (raids) none to the enemy.
+ ******************************************************************************/
+
+void ProcMissionManager::Reinforce_AI()
+{
+    if (!Settings.IsReinforcements) return;
+
+    for (int group = 0; group < 3; group++) {
+        int minutes = (group == 0) ? Diff.PlayerReinforceMinutes : (group == 1) ? Diff.AllyReinforceMinutes : Diff.EnemyReinforceMinutes;
+        if (minutes <= 0) continue;
+        if (group == 0 && IsSquad) continue;
+        if (group == 2 && !Settings.IsWaves) continue;
+
+        if (NextReinforce[group] == 0) NextReinforce[group] = StartFrame + minutes * TICKS_PER_MINUTE;
+        if (Elapsed < NextReinforce[group]) continue;
+        NextReinforce[group] = Elapsed + minutes * TICKS_PER_MINUTE;
+
+        if (group == 2) {
+            for (int i = 0; i < EnemyCount; i++) {
+                if (Is_Alive(Enemies[i].House) && Enemies[i].House->CurBuildings > 0) Send_Reinforcements(Enemies[i].House);
+            }
+        } else {
+            for (int i = 0; i < PlayerTeamCount; i++) {
+                HouseClass * house = PlayerTeam[i];
+                if (house->IsHuman == (group == 0) && Is_Alive(house)) Send_Reinforcements(house);
+            }
+        }
+    }
+}
+
+bool ProcMissionManager::Send_Reinforcements(HouseClass * house)
+{
+    if (ReinforceTypeCount >= PROC_MAX_REINFORCE_TYPES || TeamTypes.Count() >= TeamTypes.Length()) return false;
+
+    ProcTeamPreset const * preset = ProcPresets.Pick_Team(Proc_Side_Of(house), PROC_TEAM_REINFORCE, PROC_THREAT_SCOUT,
+        Current_Threat(), house->Control.TechLevel);
+    if (preset == NULL) return false;
+
+    CELL home = Home_Cell(house);
+    CELL destination = Map.Nearby_Location(home, SPEED_TRACK);
+    if (destination <= 0) return false;
+
+    TeamTypeClass * tt = new TeamTypeClass();
+    if (tt == NULL) return false;
+    sprintf((char *)tt->IniName, "PROCR%02d", ReinforceCounter++ % 100);
+    tt->House = house->Class->House;
+    tt->IsAutocreate = false;
+    tt->IsPrebuilt = false;
+    tt->IsReinforcable = false;
+    tt->IsTransient = true;
+    tt->RecruitPriority = 7;
+    tt->MaxAllowed = 1;
+    tt->ClassCount = 0;
+    bool enemy = !Is_Player_Team(house);
+    for (int i = 0; i < preset->MemberCount && tt->ClassCount < TeamTypeClass::MAX_TEAM_CLASSCOUNT; i++) {
+        tt->Members[tt->ClassCount].Class = preset->Members[i].Type;
+        tt->Members[tt->ClassCount].Quantity = enemy ? max(1, (preset->Members[i].Count * Diff.WaveSizePct + 50) / 100) : preset->Members[i].Count;
+        tt->ClassCount++;
+    }
+
+    // Drive to the base; the team then breaks up and the units guard it.
+    tt->MissionList[0].Mission = TMISSION_MOVECELL;
+    tt->MissionList[0].Data.Value = destination;
+    tt->MissionCount = 1;
+
+    // In from the map edge nearest the base (Do_Reinforcements), or dropped in next to it.
+    CELL saved = Scen.Waypoint[PROC_EDGE_WAYPOINT];
+    Scen.Waypoint[PROC_EDGE_WAYPOINT] = home;
+    tt->Origin = PROC_EDGE_WAYPOINT;
+    bool ok = Do_Reinforcements(tt);
+    tt->Origin = -1;
+    Scen.Waypoint[PROC_EDGE_WAYPOINT] = saved;
+    if (!ok) ok = Spawn_Team(tt, home, 6, 10);
+
+    char buf[128];
+    sprintf(buf, "ProcMission: reinforcements %s for %s (%s)", preset->Name, house->IniName, ok ? "sent" : "failed");
+    GlyphX_Debug_Print(buf);
+
+    if (!ok) {
+        delete tt;
+        return false;
+    }
+    ReinforceTypes[ReinforceTypeCount++] = tt;
+
+    if (house->IsHuman) {
+        Speak(VOX_REINFORCEMENTS, house, Cell_Coord(home));
+        if (house == Commander) Message("Reinforcements have arrived.");
+    }
+    return true;
+}
+
+// Like Collect_Wave_Types: free a reinforcement TeamType once its team has broken up.
+void ProcMissionManager::Collect_Reinforce_Types()
+{
+    for (int r = 0; r < ReinforceTypeCount; r++) {
+        TeamTypeClass * tt = ReinforceTypes[r];
+        bool used = false;
+        for (int i = 0; i < Teams.Count() && !used; i++) {
+            TeamClass * team = Teams.Ptr(i);
+            if (team->Class.Is_Valid() && (TeamTypeClass *)team->Class == tt) used = true;
+        }
+        if (!used) {
+            delete tt;
+            ReinforceTypes[r--] = ReinforceTypes[--ReinforceTypeCount];
+        }
+    }
+}
+
 void ProcMissionManager::Director_AI()
 {
     // Frequent, so "wave ... over after" reports the real lifetime.
     if ((Elapsed % (TICKS_PER_SECOND * 2)) == 0) {
         Collect_Wave_Types();
+        Collect_Reinforce_Types();
     }
+
+    Reinforce_AI();
 
     if (!Settings.IsWaves || Elapsed < NextWaveFrame) return;
 
@@ -1815,6 +1992,10 @@ void ProcMissionManager::Message(char const * text) const
  *   units                        returns the commander's unit count (infantry, vehicles, ships, aircraft)
  *   buildings                    returns the commander's building count
  *   owner    <objective>         returns 1 if the target belongs to the player's team, 0 if not, -1 if gone
+ *   revealed <objective>         returns 1 if the commander can see the target's cell (not shrouded)
+ *   naval                        prints each enemy's naval yard and whether its ships reach the
+ *                                commander's base; returns how many can attack by sea
+ *   fleet                        prints every enemy ship (debugging naval waves)
  *
  * Returns -1 for an unknown command or objective.
  ******************************************************************************/
@@ -1827,6 +2008,34 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
     if (stricmp(command, "credits") == 0) return (int)Commander->Available_Money();
     if (stricmp(command, "units") == 0) return Commander->CurInfantry + Commander->CurUnits + Commander->CurVessels + Commander->CurAircraft;
     if (stricmp(command, "buildings") == 0) return Commander->CurBuildings;
+
+    if (stricmp(command, "fleet") == 0) {
+        CELL home = Home_Cell(Commander);
+        for (int i = 0; i < Vessels.Count(); i++) {
+            VesselClass * vessel = Vessels.Ptr(i);
+            if (vessel->IsInLimbo || Is_Player_Team(vessel->House)) continue;
+            char buf[160];
+            sprintf(buf, "ProcTest: %s %s cell %d dist=%d mission=%s tarcom=%d navcom=%d team=%s", vessel->House->IniName, vessel->Class->IniName,
+                (int)Coord_Cell(vessel->Center_Coord()), Cell_Dist(Coord_Cell(vessel->Center_Coord()), home), MissionClass::Mission_Name(vessel->Get_Mission()),
+                (int)Target_Legal(vessel->TarCom), (int)Target_Legal(vessel->NavCom), vessel->Team.Is_Valid() ? vessel->Team->Class->IniName : "-");
+            GlyphX_Debug_Print(buf);
+        }
+        return Vessels.Count();
+    }
+
+    if (stricmp(command, "naval") == 0) {
+        int count = 0;
+        for (int i = 0; i < EnemyCount; i++) {
+            CELL yard = Naval_Yard_Cell(Enemies[i].House);
+            bool reach = (yard != -1) && Can_Reach_By_Sea(yard, Commander);
+            char buf[128];
+            sprintf(buf, "ProcTest: %s naval yard at %d, reaches the player by sea: %s (player water near base: %d)", Enemies[i].House->IniName,
+                (int)yard, reach ? "yes" : "no", (int)Find_Water_Near(Home_Cell(Commander), PROC_NAVAL_REACH));
+            GlyphX_Debug_Print(buf);
+            if (reach) count++;
+        }
+        return count;
+    }
 
     if (stricmp(command, "wipe") == 0) {
         bool player = (stricmp(objective, "PLAYER") == 0);
@@ -1860,6 +2069,11 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
     if (obj == NULL) return -1;
     BuildingClass * target = (obj->Target != TARGET_NONE) ? As_Building(obj->Target) : NULL;
     if (target != NULL && (!target->IsActive || target->IsInLimbo || target->Class->Type != obj->TargetType)) target = NULL;
+
+    if (stricmp(command, "revealed") == 0) {
+        if (target == NULL) return -1;
+        return Map[Coord_Cell(target->Center_Coord())].Is_Mapped(Commander) ? 1 : 0;
+    }
 
     if (stricmp(command, "owner") == 0) {
         if (target == NULL) return -1;
@@ -2031,6 +2245,13 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
             bool isengineer = (*infantry == INFANTRY_RENOVATOR);
             if (engineers && !isengineer) continue;
             if (engineers) {
+                ActionType action = infantry->What_Action(target);
+                if (action != ACTION_CAPTURE && action != ACTION_DAMAGE) {
+                    char buf[128];
+                    sprintf(buf, "ProcTest: an engineer can't be ordered to capture %s (action %d)", target->Class->IniName, (int)action);
+                    GlyphX_Debug_Print(buf);
+                    return -2;
+                }
                 infantry->Assign_Mission(MISSION_CAPTURE);
                 infantry->Assign_Target(TARGET_NONE);
                 infantry->Assign_Destination(target->As_Target());
@@ -2078,6 +2299,15 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
             if (!engineer->Unlimbo(Cell_Coord(cell), DIR_N)) {
                 delete engineer;
                 continue;
+            }
+
+            // Only what a player could order: the action the cursor would show over the target.
+            ActionType action = engineer->What_Action(target);
+            if (action != ACTION_CAPTURE && action != ACTION_DAMAGE) {
+                char buf[128];
+                sprintf(buf, "ProcTest: an engineer can't be ordered to capture %s (action %d)", target->Class->IniName, (int)action);
+                GlyphX_Debug_Print(buf);
+                return -2;
             }
             engineer->Assign_Mission(MISSION_CAPTURE);
             engineer->Assign_Target(TARGET_NONE);

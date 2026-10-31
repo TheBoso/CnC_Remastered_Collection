@@ -17,7 +17,7 @@ extern void GlyphX_Debug_Print(const char *debug_text);
 
 static char const * s_SideNames[PROC_SIDE_COUNT] = {"Any", "Allied", "Soviet"};
 static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Medium", "Heavy", "Overwhelming"};
-static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad"};
+static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad", "Reinforce"};
 static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend", "Camp"};
 static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect"};
 static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
@@ -58,7 +58,7 @@ char const * Proc_Objective_Kind_Name(ProcObjectiveKindType kind)
 
 ProcTeamPreset::ProcTeamPreset() :
     Side(PROC_SIDE_ANY), Role(PROC_TEAM_ATTACK), Threat(PROC_THREAT_LIGHT), Weight(10),
-    MemberCount(0), MissionCount(0), IsGathering(true), IsSuicide(false), IsRoundAbout(false)
+    MemberCount(0), MissionCount(0), IsGathering(true), IsNaval(false), IsShipHunter(false), IsSuicide(false), IsRoundAbout(false)
 {
     Name[0] = '\0';
 }
@@ -89,12 +89,13 @@ ProcObjectivePreset::ProcObjectivePreset() :
 ProcDifficultyPreset::ProcDifficultyPreset() :
     EnemyCreditsPct(100), DefenseScalePct(100), GuardScalePct(100), WaveSizePct(100), WaveIntervalPct(100),
     MaxActiveWaves(2), OutpostChance(50), FirstWaveSeconds(240), StartThreat(PROC_THREAT_SCOUT),
-    MaxThreat(PROC_THREAT_HEAVY), EscalateMinutes(5)
+    MaxThreat(PROC_THREAT_HEAVY), EscalateMinutes(5), NavalChance(35), PlayerReinforceMinutes(8),
+    AllyReinforceMinutes(8), EnemyReinforceMinutes(10)
 {
 }
 
 ProcSettings::ProcSettings() :
-    Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true), IsEnemyProduction(false),
+    Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true), IsEnemyProduction(false), IsReinforcements(true),
     IsKeepStartUnits(false), IsAllMaps(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
     PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
@@ -362,6 +363,13 @@ static bool Parse_Team(CCINIClass & ini, char const * section, ProcTeamPreset & 
 
     Parse_Techno_List(ini, section, "Members", team.Members, PROC_MAX_MEMBERS, team.MemberCount);
 
+    // Ships make it a naval team: it can only come from a naval yard, by sea, and doesn't gather on land.
+    for (int i = 0; i < team.MemberCount; i++) {
+        if (team.Members[i].Type->What_Am_I() == RTTI_VESSELTYPE) team.IsNaval = true;
+    }
+    if (team.IsNaval) team.IsGathering = false;
+    if (ini.Get_String(section, "NavalTarget", "Coast", buffer, sizeof(buffer)) > 0) team.IsShipHunter = (stricmp(buffer, "Ships") == 0);
+
     if (ini.Get_String(section, "Missions", "Attack:Anything", buffer, sizeof(buffer)) > 0) {
         MissionListContext ctx = {&team, section};
         Parse_List(buffer, Mission_Callback, &ctx);
@@ -487,6 +495,10 @@ static void Parse_Difficulty(CCINIClass & ini, char const * section, ProcDifficu
     diff.StartThreat = (ProcThreatType)Get_Enum(ini, section, "StartThreat", s_ThreatNames, PROC_THREAT_COUNT, diff.StartThreat);
     diff.MaxThreat = (ProcThreatType)Get_Enum(ini, section, "MaxThreat", s_ThreatNames, PROC_THREAT_COUNT, diff.MaxThreat);
     diff.EscalateMinutes = max(1, ini.Get_Int(section, "EscalateMinutes", diff.EscalateMinutes));
+    diff.NavalChance = Bound(ini.Get_Int(section, "NavalChance", diff.NavalChance), 0, 100);
+    diff.PlayerReinforceMinutes = max(0, ini.Get_Int(section, "PlayerReinforceMinutes", diff.PlayerReinforceMinutes));
+    diff.AllyReinforceMinutes = max(0, ini.Get_Int(section, "AllyReinforceMinutes", diff.AllyReinforceMinutes));
+    diff.EnemyReinforceMinutes = max(0, ini.Get_Int(section, "EnemyReinforceMinutes", diff.EnemyReinforceMinutes));
 }
 
 void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, ProcSettings & settings) const
@@ -506,6 +518,7 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.TechLevel = ini.Get_Int(section, "TechLevel", settings.TechLevel);
     settings.IsWaves = ini.Get_Bool(section, "Waves", settings.IsWaves);
     settings.IsEnemyProduction = ini.Get_Bool(section, "EnemyProduction", settings.IsEnemyProduction);
+    settings.IsReinforcements = ini.Get_Bool(section, "Reinforcements", settings.IsReinforcements);
     settings.IsKeepStartUnits = ini.Get_Bool(section, "KeepStartUnits", settings.IsKeepStartUnits);
     settings.IsAllMaps = ini.Get_Bool(section, "AllMaps", settings.IsAllMaps);
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
@@ -601,9 +614,11 @@ struct TeamFilter {
     ProcThreatType MinThreat;
     ProcThreatType MaxThreat;
     int Tech;
+    int Naval;
 
     bool operator()(ProcTeamPreset const & team) const {
         if (!Side_Matches(team.Side, Side) || team.Role != Role) return false;
+        if (Naval >= 0 && team.IsNaval != (Naval != 0)) return false;
         if (team.Threat < MinThreat || team.Threat > MaxThreat) return false;
 
         // Every member must exist at this tech level.
@@ -615,9 +630,9 @@ struct TeamFilter {
     }
 };
 
-ProcTeamPreset const * ProcPresetLibrary::Pick_Team(ProcSideType side, ProcTeamRoleType role, ProcThreatType minthreat, ProcThreatType maxthreat, int tech) const
+ProcTeamPreset const * ProcPresetLibrary::Pick_Team(ProcSideType side, ProcTeamRoleType role, ProcThreatType minthreat, ProcThreatType maxthreat, int tech, int naval) const
 {
-    TeamFilter filter = {side, role, minthreat, maxthreat, tech};
+    TeamFilter filter = {side, role, minthreat, maxthreat, tech, naval};
     ProcTeamPreset const * team = Weighted_Pick(Teams, TeamCount, filter);
 
     // Nothing fits the threat window at this tech level; take the strongest team that does fit.
