@@ -53,6 +53,7 @@
 #define PROC_MAX_SQUAD_CHOICES       4       // Squad= presets per objective (one per side is typical)
 #define PROC_MAX_PATROLS             8       // Patrol teams per mission
 #define PROC_MAX_ANCHORS             12      // Places patrols guard (targets, outposts, enemy bases)
+#define PROC_MAX_SENTRIES            8       // Role=Sentry posts per mission
 #define PROC_FIRST_WAYPOINT          60      // Waypoints 60-97 are used for generated patrol routes
 #define PROC_RESCUE_RANGE            12      // AI units only rush to defend buildings this close (TechnoClass::Base_Is_Attacked)
 #define PROC_PATROL_CLEARANCE        14      // Patrol routes keep this far from where the player's team starts
@@ -93,6 +94,7 @@ typedef enum ProcBaseRoleType : unsigned char {
     PROC_BASE_OUTPOST,              // Smaller enemy base
     PROC_BASE_DEFEND,               // Pre-built base for the player (survival style objectives)
     PROC_BASE_CAMP,                 // Lightly held enemy camp, only for objectives with OutpostBase=CAMP
+    PROC_BASE_SENTRY,               // Small fortified enemy post, scattered across the map (difficulty Sentries)
     PROC_BASE_ROLE_COUNT
 } ProcBaseRoleType;
 
@@ -286,6 +288,17 @@ struct ProcDifficultyPreset {
     int                     FactoryScalePct;    // % of a base preset's factories / refineries built (fraction = chance of one more)
     StructType              Superweapons[4];    // Added to enemy main bases (each house builds what its side may own)
     int                     SuperweaponCount;
+    // When the humans start with a pre-built base they can answer attacks straight away,
+    // so the waves come harder (not for objectives that hand out the base themselves).
+    int                     BaseWaveRatePct;    // Waves come this % as often
+    int                     BaseWaveSizePct;    // % of each enemy team's members, on top of WaveSizePct
+    int                     BaseFirstWavePct;   // % of the quiet period before the first wave
+    int                     BaseThreatSteps;    // Start threat this many steps higher
+    int                     BaseExtraWaves;     // Added to MaxActiveWaves
+    int                     MinConstructionYards;   // Enemy main bases have at least this many construction yards
+    int                     MinRefineries;          // ... and refineries (after FactoryScale)
+    int                     SentriesMin;        // Role=Sentry posts scattered across the map (random in this range)
+    int                     SentriesMax;
 
     ProcDifficultyPreset();
 };
@@ -302,6 +315,7 @@ struct ProcSettings {
     bool                    IsKeepStartUnits;   // Keep the lobby's starting units for enemies
     bool                    IsAllMaps;          // Every single-human skirmish map is procedural, flagged or not
     bool                    IsSpectate;         // The humans get nothing and watch their AI allies fight the enemy
+    bool                    IsSentries;         // Enemies get Role=Sentry posts across the map (count in the difficulty tables)
     int                     WaveMinSeconds;
     int                     WaveMaxSeconds;
     ProcSpawnModeType       SpawnMode;
@@ -409,6 +423,8 @@ private:
     void Build_Enemy_Bases();
     void Build_Player_Bases();
     void Place_Objective_Targets();
+    void Place_Sentries();
+    CELL Find_Sentry_Location(CELL const * taken, int takencount) const;
     void Announce_Objectives();
 
     // Base building
@@ -482,6 +498,7 @@ private:
     int                     ExtraWaves;     // Primary's ExtraWaves: added to MaxActiveWaves
     int                     EnemyReinforceMinutes;  // Primary's EnemyReinforceMinutes, or the difficulty's
     bool                    IsPlayerBase;   // Humans on the player's team start with a Defend base
+    bool                    IsBaseForced;   // ... because the primary objective needs one
     bool                    IsAllyBase;     // AI allies start with a Defend base
 
     ProcSettings            Settings;

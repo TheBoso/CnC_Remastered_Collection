@@ -899,6 +899,12 @@ $Tests = [ordered]@{
             Set-IniValue "$d\PROCMISSION.INI" "Hard" "WaveSize" "10"
             Set-IniValue "$d\PROCMISSION.INI" "Hard" "MaxThreat" "Light"
             Set-IniValue "$d\PROCMISSION.INI" "Hard" "FirstWaveSeconds" "60"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "BaseStartWaveRate" "100"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "BaseStartWaveSize" "100"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "BaseStartExtraWaves" "0"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "BaseStartFirstWave" "100"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "BaseStartThreat" "0"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Sentries" "no"
         }
         Check = { param($r)
             $f = @()
@@ -955,6 +961,104 @@ $Tests = [ordered]@{
             $f += Assert-Objective $r "Capture the research facility" "COMPLETE"
             $mapped = @(Get-Test $r "mapped")
             if ($mapped.Count -eq 2 -and ($mapped[0].Result -ge 95 -or $mapped[1].Result -lt 95)) { $f += "map not revealed by the reward ($($mapped[0].Result)% -> $($mapped[1].Result)%)" }
+            $f
+        }
+    }
+
+    base_start_pressure = @{
+        # A team that starts with a base gets harder waves (Normal: 1.3x as often, 125% size,
+        # +1 wave at a time, one threat step up, first wave at 70% of the quiet period).
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "base start: wave rate 130%, wave size 125%, max waves 3, start threat 1, first wave 168s")) {
+                $f += "no base-start boost: $(($r.Lines -match 'base start') -join ' | ')"
+            }
+            $f
+        }
+    }
+
+    base_start_forced = @{
+        # No boost for objectives that hand out the base themselves: they have their own keys.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "SURVIVE_SIEGE"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+        }
+        Check = { param($r)
+            $f = @()
+            if ($r.Lines -match "base start:") { $f += "a forced base (SURVIVE_SIEGE) got the base-start boost" }
+            $f
+        }
+    }
+
+    base_start_mcv = @{
+        # An MCV start keeps the plain difficulty table.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "MCV"
+        }
+        Check = { param($r)
+            $f = @()
+            if ($r.Lines -match "base start:") { $f += "an MCV start got the base-start boost" }
+            $f
+        }
+    }
+
+    sentries = @{
+        # Small enemy posts across the map (Normal: 2-4), away from the player's team, each
+        # with at least one building, held by the enemy; none in squad missions.
+        Args = @("--player", "Greece", "--enemies", "USSR,France", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+        }
+        Check = { param($r)
+            $f = @()
+            $summary = $r.Lines | Select-String "ProcMission: (\d+)/(\d+) sentries placed" | Select-Object -First 1
+            if (-not $summary) { $f += "no sentry summary"; return $f }
+            $placed = [int]$summary.Matches[0].Groups[1].Value
+            if ($placed -lt 2) { $f += "only $placed sentries placed: $($summary.Line)" }
+            foreach ($m in @($r.Lines | Select-String "sentry '(\w+)' \(enemy \d, (\w+)\) at cell \d+, (\d+) buildings, (\d+) cells from the player team")) {
+                $g = $m.Matches[0].Groups
+                if ([int]$g[3].Value -lt 1) { $f += "sentry $($g[1].Value) has no buildings" }
+                if ([int]$g[4].Value -lt 13) { $f += "sentry $($g[1].Value) only $($g[4].Value) cells from the player" }
+                if (($g[1].Value -like "SOV_*") -ne ($g[2].Value -eq "Soviet")) { $f += "sentry $($g[1].Value) held by a $($g[2].Value) enemy" }
+            }
+            $f
+        }
+    }
+
+    base_minimums = @{
+        # Enemy main bases get the difficulty's minimum construction yards and refineries
+        # (Hard: 3 and 3), so taking out one building doesn't cripple them.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Difficulty" "Hard"
+        }
+        Check = { param($r)
+            $f = @()
+            $line = $r.Lines | Select-String "enemy 0 \(Soviet\) base" | Select-Object -First 1
+            if (-not ($line -and $line.Line -match " FACT=3")) { $f += "not 3 construction yards: $($line.Line)" }
+            if (-not ($line -and $line.Line -match " PROC=(\d+)" -and [int]$Matches[1] -ge 3)) { $f += "fewer than 3 refineries: $($line.Line)" }
+            $f
+        }
+    }
+
+    sentries_not_in_squads = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "COMMANDO_RAID"
+        }
+        Check = { param($r)
+            $f = @()
+            if ($r.Lines -match "sentry '") { $f += "a squad mission got sentries" }
             $f
         }
     }

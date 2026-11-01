@@ -133,6 +133,7 @@ void ProcMissionManager::Reset()
     ExtraWaves = 0;
     EnemyReinforceMinutes = 0;
     IsPlayerBase = false;
+    IsBaseForced = false;
     IsAllyBase = false;
     AnchorCount = 0;
     PatrolCount = 0;
@@ -250,6 +251,7 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
     */
     ProcObjectivePreset const * primary = (ObjectiveCount > 0) ? Objectives[0].Preset : NULL;
     Place_Objective_Targets();
+    Place_Sentries();
 
     int firstwave = Diff.FirstWaveSeconds;
     if (primary != NULL) {
@@ -264,6 +266,23 @@ bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
         IsHuntingReinforcements = primary->IsHuntingReinforcements;
     }
     EnemyReinforceMinutes = (primary != NULL && primary->EnemyReinforceMinutes > 0) ? primary->EnemyReinforceMinutes : Diff.EnemyReinforceMinutes;
+
+    /*
+    **	A team that starts with a base has defences and factories from the first minute, so the
+    **	enemy comes sooner, bigger and more often. Objectives that hand out the base themselves
+    **	(survival, protect) carry their own pressure keys and are left as tuned.
+    */
+    if (IsPlayerBase && !IsBaseForced && !IsSpectating) {
+        WaveRatePct = (WaveRatePct * Diff.BaseWaveRatePct) / 100;
+        ExtraWaves += Diff.BaseExtraWaves;
+        Diff.WaveSizePct = (Diff.WaveSizePct * Diff.BaseWaveSizePct + 50) / 100;
+        Diff.StartThreat = (ProcThreatType)min((int)Diff.MaxThreat, (int)Diff.StartThreat + Diff.BaseThreatSteps);
+        firstwave = (firstwave * Diff.BaseFirstWavePct) / 100;
+        sprintf(buf, "ProcMission: base start: wave rate %d%%, wave size %d%%, max waves %d, start threat %d, first wave %ds",
+            WaveRatePct, Diff.WaveSizePct, Diff.MaxActiveWaves + ExtraWaves, (int)Diff.StartThreat, firstwave);
+        GlyphX_Debug_Print(buf);
+    }
+
     // A spectated game is AI against AI: both sides build and attack.
     if (IsSpectating) Settings.IsEnemyProduction = true;
 
@@ -369,6 +388,7 @@ void ProcMissionManager::Pick_Objectives()
     // A squad mission starts with neither an MCV nor a base.
     IsSquad = primary->IsSquadStart;
     bool forced = primary->PlayerBase[0] != '\0' || (primary->Owner == PROC_OWNER_PLAYER && primary->TargetCount > 0);
+    IsBaseForced = !IsSquad && forced;
     IsPlayerBase = !IsSquad && (forced || Settings.PlayerStart == PROC_START_BASE ||
         (Settings.PlayerStart == PROC_START_RANDOM && Random_Pick(0, 99) < Settings.PlayerBaseChance));
     switch (Settings.AllyStart) {
@@ -462,7 +482,7 @@ void ProcMissionManager::Build_Enemy_Bases()
             house->CurBuildings, house->Power, house->Drain);
 
         // What it makes things with, and any superweapons.
-        static StructType const s_Listed[] = {STRUCT_BARRACKS, STRUCT_TENT, STRUCT_WEAP, STRUCT_AIRSTRIP, STRUCT_HELIPAD, STRUCT_REFINERY,
+        static StructType const s_Listed[] = {STRUCT_CONST, STRUCT_BARRACKS, STRUCT_TENT, STRUCT_WEAP, STRUCT_AIRSTRIP, STRUCT_HELIPAD, STRUCT_REFINERY,
             STRUCT_MSLO, STRUCT_IRON_CURTAIN, STRUCT_CHRONOSPHERE};
         for (int t = 0; t < ARRAY_SIZE(s_Listed) && len < 180; t++) {
             int count = 0;
@@ -894,7 +914,8 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
     ProcBaseEntry entries[PROC_MAX_BASE_ENTRIES + ARRAY_SIZE(Diff.Superweapons)];
     int entrycount = 0;
     for (int e = 0; e < preset->EntryCount; e++) entries[entrycount++] = preset->Entries[e];
-    if (!isplayer && preset->Role == PROC_BASE_MAIN) {
+    bool mainbase = (!isplayer && preset->Role == PROC_BASE_MAIN);
+    if (mainbase) {
         for (int s = 0; s < Diff.SuperweaponCount; s++) {
             ProcBaseEntry & entry = entries[entrycount++];
             entry = ProcBaseEntry();
@@ -903,6 +924,32 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
             entry.MaxRadius = 11;
         }
     }
+
+    /*
+    **	Harder enemy main bases don't hang on a single building: spare construction yards
+    **	(so one lucky strike doesn't end its rebuilding) and a minimum of refineries.
+    */
+    if (mainbase) {
+        int yards = 0;
+        int after = 0;      // The spares go straight after the first yard, while there's room
+        for (int e = 0; e < entrycount; e++) {
+            if (entries[e].Type == STRUCT_CONST) {
+                yards += entries[e].Count;
+                after = e + 1;
+            }
+        }
+        if (yards < Diff.MinConstructionYards && entrycount < ARRAY_SIZE(entries)) {
+            for (int e = entrycount; e > after; e--) entries[e] = entries[e - 1];
+            entrycount++;
+            ProcBaseEntry & entry = entries[after];
+            entry = ProcBaseEntry();
+            entry.Type = STRUCT_CONST;
+            entry.Count = Diff.MinConstructionYards - yards;
+            entry.MinRadius = 4;
+            entry.MaxRadius = 10;
+        }
+    }
+    int refineries = 0;
 
     bool refinery = false;
     for (int e = 0; e < entrycount; e++) {
@@ -937,7 +984,22 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
                     continue;
                 }
             }
-            if (entry.Type == STRUCT_REFINERY) refinery = true;
+            if (entry.Type == STRUCT_REFINERY) {
+                refinery = true;
+                refineries++;
+            }
+        }
+    }
+
+    // Top the refineries up to the difficulty's minimum, each with a harvester of its own.
+    int extraharvesters = 0;
+    if (mainbase && Is_Allowed(BuildingTypeClass::As_Reference(STRUCT_REFINERY), house)) {
+        for (int tries = 0; refineries < Diff.MinRefineries && tries < Diff.MinRefineries * 2; tries++) {
+            if (!Place_Building(house, STRUCT_REFINERY, center, 5, 12)) continue;
+            if (preset->IsAutoPower) Add_Power(house, center);
+            refinery = true;
+            refineries++;
+            extraharvesters++;
         }
     }
 
@@ -959,7 +1021,7 @@ bool ProcMissionManager::Build_Base(HouseClass * house, ProcBasePreset const * p
 
     // Only bases that got their own refinery (an outpost may share a house with a main base).
     if (refinery) {
-        Place_Units(house, &UnitTypeClass::As_Reference(UNIT_HARVESTER), preset->Harvesters, center, MISSION_HARVEST);
+        Place_Units(house, &UnitTypeClass::As_Reference(UNIT_HARVESTER), preset->Harvesters + extraharvesters, center, MISSION_HARVEST);
     }
 
     MissionType guard = house->IsHuman ? MISSION_GUARD : MISSION_GUARD_AREA;
@@ -1074,6 +1136,109 @@ CELL ProcMissionManager::Find_Neutral_Location(int mindistance, HouseClass const
         if (best == -1 || dist < bestdist) {
             best = cell;
             bestdist = dist;
+        }
+    }
+    return best;
+}
+
+/*
+**	Small fortified enemy posts (Role=Sentry presets) scattered between the bases, so the map
+**	isn't empty on the way to the enemy: a turret or two with a few guards, held by the
+**	nearest enemy. Placed after the objective targets so they never take a target's spot.
+**	Not in squad missions, whose patrols and targets are balanced on their own.
+*/
+void ProcMissionManager::Place_Sentries()
+{
+    if (!Settings.IsSentries || IsSquad || EnemyCount == 0 || Diff.SentriesMax <= 0) return;
+
+    char buf[160];
+    int wanted = Random_Pick(Diff.SentriesMin, Diff.SentriesMax);
+
+    // Keep clear of the objective targets and outposts, and of each other.
+    CELL taken[PROC_MAX_OBJECTIVES + PROC_MAX_SENTRIES];
+    int takencount = 0;
+    for (int o = 0; o < ObjectiveCount; o++) {
+        if (Objectives[o].Target != TARGET_NONE) taken[takencount++] = As_Cell(Objectives[o].Target);
+    }
+
+    int placed = 0;
+    for (int s = 0; s < wanted; s++) {
+        CELL center = Find_Sentry_Location(taken, takencount);
+        if (center == -1) break;
+
+        int enemy = -1;
+        int ownerdist = 0;
+        for (int i = 0; i < EnemyCount; i++) {
+            int dist = Cell_Dist(center, Enemies[i].Home);
+            if (enemy == -1 || dist < ownerdist) {
+                enemy = i;
+                ownerdist = dist;
+            }
+        }
+        HouseClass * owner = Enemies[enemy].House;
+        ProcBasePreset const * preset = ProcPresets.Pick_Base(Proc_Side_Of(owner), PROC_BASE_SENTRY, owner->Control.TechLevel, Difficulty);
+        if (preset == NULL) break;
+
+        int before = owner->CurBuildings;
+        Build_Base(owner, preset, false, center, true);
+        taken[takencount++] = center;
+        placed++;
+
+        int playerdist = -1;
+        for (int i = 0; i < PlayerTeamCount; i++) {
+            int dist = Cell_Dist(center, Home_Cell(PlayerTeam[i]));
+            if (playerdist == -1 || dist < playerdist) playerdist = dist;
+        }
+        sprintf(buf, "ProcMission: sentry '%s' (enemy %d, %s) at cell %d, %d buildings, %d cells from the player team, %d from its base",
+            preset->Name, enemy, Proc_Side_Name(Proc_Side_Of(owner)), (int)center, owner->CurBuildings - before, playerdist, ownerdist);
+        GlyphX_Debug_Print(buf);
+    }
+    sprintf(buf, "ProcMission: %d/%d sentries placed", placed, wanted);
+    GlyphX_Debug_Print(buf);
+}
+
+/*
+**	A sentry spot: buildable ground the player's team can drive to, well away from its bases,
+**	clear of the enemy bases (a post under a main base's guns is just more base), and as far
+**	from the other posts and targets as possible so they spread across the map.
+*/
+CELL ProcMissionManager::Find_Sentry_Location(CELL const * taken, int takencount) const
+{
+    int zone = -1;
+    if (PlayerTeamCount > 0) zone = Map[Home_Cell(PlayerTeam[0])].Zones[MZONE_NORMAL];
+
+    CELL best = -1;
+    int bestscore = -1;
+    for (int attempt = 0; attempt < 400; attempt++) {
+        if (best != -1 && (attempt % 100) == 0) break;      // Keep the best spot of the strictest tier that had one
+        int relax = (attempt / 100) * 3;                    // Relax the distances on crowded maps
+        CELL cell = Clamp_To_Map(Map.MapCellX + Random_Pick(3, Map.MapCellWidth - 4), Map.MapCellY + Random_Pick(3, Map.MapCellHeight - 4));
+        if (!Map[cell].Is_Clear_To_Build(SPEED_NONE)) continue;
+        if (zone != -1 && Map[cell].Zones[MZONE_NORMAL] != zone) continue;
+
+        bool ok = true;
+        for (int i = 0; i < PlayerTeamCount && ok; i++) {
+            if (Cell_Dist(cell, Home_Cell(PlayerTeam[i])) < 22 - relax) ok = false;
+        }
+        for (int i = 0; i < Buildings.Count() && ok; i++) {
+            BuildingClass const * building = Buildings.Ptr(i);
+            HouseClass const * house = building->House;
+            if (building->IsInLimbo || house == NULL || house->Class->House == HOUSE_NEUTRAL) continue;
+            int clearance = Is_Player_Team(house) ? 16 - relax : max(8, 14 - relax);
+            if (Cell_Dist(cell, Coord_Cell(building->Center_Coord())) < clearance) ok = false;
+        }
+        int score = 1000;
+        for (int t = 0; t < takencount && ok; t++) {
+            int dist = Cell_Dist(cell, taken[t]);
+            if (dist < 14 - relax) ok = false;
+            score = min(score, dist);
+        }
+        if (!ok) continue;
+        if (takencount == 0) return cell;
+
+        if (score > bestscore) {
+            best = cell;
+            bestscore = score;
         }
     }
     return best;

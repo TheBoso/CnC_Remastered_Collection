@@ -18,7 +18,7 @@ extern void GlyphX_Debug_Print(const char *debug_text);
 static char const * s_SideNames[PROC_SIDE_COUNT] = {"Any", "Allied", "Soviet"};
 static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Medium", "Heavy", "Overwhelming"};
 static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad", "Reinforce"};
-static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend", "Camp"};
+static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend", "Camp", "Sentry"};
 static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect"};
 static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
 static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player", "Outpost"};
@@ -92,13 +92,15 @@ ProcDifficultyPreset::ProcDifficultyPreset() :
     EnemyCreditsPct(100), DefenseScalePct(100), GuardScalePct(100), WaveSizePct(100), WaveIntervalPct(100),
     MaxActiveWaves(2), OutpostChance(50), FirstWaveSeconds(240), StartThreat(PROC_THREAT_SCOUT),
     MaxThreat(PROC_THREAT_HEAVY), EscalateMinutes(5), NavalChance(35), PlayerReinforceMinutes(8),
-    AllyReinforceMinutes(8), EnemyReinforceMinutes(10), FactoryScalePct(100), SuperweaponCount(0)
+    AllyReinforceMinutes(8), EnemyReinforceMinutes(10), FactoryScalePct(100), SuperweaponCount(0),
+    BaseWaveRatePct(100), BaseWaveSizePct(100), BaseFirstWavePct(100), BaseThreatSteps(0), BaseExtraWaves(0),
+    MinConstructionYards(1), MinRefineries(1), SentriesMin(0), SentriesMax(0)
 {
 }
 
 ProcSettings::ProcSettings() :
     Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true), IsEnemyProduction(false), IsReinforcements(true),
-    IsKeepStartUnits(false), IsAllMaps(false), IsSpectate(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
+    IsKeepStartUnits(false), IsAllMaps(false), IsSpectate(false), IsSentries(true), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
     PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
     strcpy(Primary, "RANDOM");
@@ -510,6 +512,15 @@ static void Parse_Difficulty(CCINIClass & ini, char const * section, ProcDifficu
     diff.AllyReinforceMinutes = max(0, ini.Get_Int(section, "AllyReinforceMinutes", diff.AllyReinforceMinutes));
     diff.EnemyReinforceMinutes = max(0, ini.Get_Int(section, "EnemyReinforceMinutes", diff.EnemyReinforceMinutes));
     diff.FactoryScalePct = max(0, ini.Get_Int(section, "FactoryScale", diff.FactoryScalePct));
+    diff.BaseWaveRatePct = max(10, ini.Get_Int(section, "BaseStartWaveRate", diff.BaseWaveRatePct));
+    diff.BaseWaveSizePct = max(10, ini.Get_Int(section, "BaseStartWaveSize", diff.BaseWaveSizePct));
+    diff.BaseFirstWavePct = max(10, ini.Get_Int(section, "BaseStartFirstWave", diff.BaseFirstWavePct));
+    diff.BaseThreatSteps = Bound(ini.Get_Int(section, "BaseStartThreat", diff.BaseThreatSteps), 0, PROC_THREAT_COUNT - 1);
+    diff.BaseExtraWaves = Bound(ini.Get_Int(section, "BaseStartExtraWaves", diff.BaseExtraWaves), 0, 5);
+    diff.MinConstructionYards = Bound(ini.Get_Int(section, "MinConstructionYards", diff.MinConstructionYards), 1, 4);
+    diff.MinRefineries = Bound(ini.Get_Int(section, "MinRefineries", diff.MinRefineries), 0, 4);
+    diff.SentriesMin = Bound(ini.Get_Int(section, "SentriesMin", diff.SentriesMin), 0, PROC_MAX_SENTRIES);
+    diff.SentriesMax = Bound(ini.Get_Int(section, "SentriesMax", diff.SentriesMax), diff.SentriesMin, PROC_MAX_SENTRIES);
 
     char buffer[128];
     if (ini.Get_String(section, "Superweapons", "", buffer, sizeof(buffer)) > 0) {
@@ -548,6 +559,7 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.IsKeepStartUnits = ini.Get_Bool(section, "KeepStartUnits", settings.IsKeepStartUnits);
     settings.IsAllMaps = ini.Get_Bool(section, "AllMaps", settings.IsAllMaps);
     settings.IsSpectate = ini.Get_Bool(section, "Spectate", settings.IsSpectate);
+    settings.IsSentries = ini.Get_Bool(section, "Sentries", settings.IsSentries);
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
     settings.WaveMaxSeconds = max(settings.WaveMinSeconds, ini.Get_Int(section, "WaveMaxSeconds", settings.WaveMaxSeconds));
     settings.SpawnMode = (ProcSpawnModeType)Get_Enum(ini, section, "SpawnMode", s_SpawnNames, PROC_SPAWN_COUNT, settings.SpawnMode);
