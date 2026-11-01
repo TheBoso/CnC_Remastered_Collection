@@ -55,7 +55,11 @@ foreach ($primary in $Primaries) {
         if (-not ($lines -match "^END")) { $found += "harness died" }
         if (-not ($lines -match "generation complete")) { $found += "not generated" }
         if ($lines -match "falling back to destroy all") { $found += "primary fell back to destroy all" }
-        foreach ($m in ($lines | Select-String "could not place target for objective (\S+)")) { $found += "no target for $($m.Matches[0].Groups[1].Value)" }
+        # A bonus that doesn't fit is swapped for another one; only count the ones that weren't.
+        foreach ($m in ($lines | Select-String "could not place target for objective (\S+)")) {
+            $name = $m.Matches[0].Groups[1].Value
+            if (-not ($lines -match "secondary objective $name replaced by")) { $found += "no target for $name" }
+        }
         foreach ($m in ($lines | Select-String "objective (\S+) target \S+ at cell \d+ \((\d+) cells from the area centre, radius (\d+)")) {
             $out = [int]$m.Matches[0].Groups[2].Value; $radius = [int]$m.Matches[0].Groups[3].Value
             if ($out -gt [math]::Ceiling(($radius + 2) * 1.5)) { $found += "$($m.Matches[0].Groups[1].Value) target $out cells out" }

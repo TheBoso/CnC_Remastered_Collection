@@ -6,10 +6,12 @@
 .EXAMPLE
     .\deploy_procmod.ps1                 # build + deploy, AllMaps=yes in the mod copy
     .\deploy_procmod.ps1 -NoBuild -AllMaps:$false
+    .\deploy_procmod.ps1 -NoBuild -Spectate    # watch your lobby team's AI fight the enemy
 #>
 param(
     [string]$ModDir = (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "CnCRemastered\Mods\Red_Alert\ProceduralMissions"),
     [bool]$AllMaps = $true,
+    [switch]$Spectate,
     [switch]$NoBuild
 )
 
@@ -35,10 +37,11 @@ Copy-Item "$Repo\bin\Win32\RedAlert.dll", "$Repo\bin\Win32\RedAlert.pdb" $data -
 foreach ($f in "PROCMISSION.INI", "PROCTEAMS.INI", "PROCBASES.INI", "PROCOBJECTIVES.INI") {
     Copy-Item "$Repo\REDALERT\$f" $data -Force
 }
-if ($AllMaps) {
-    $ini = Join-Path $data "PROCMISSION.INI"
-    (Get-Content $ini) -replace '^AllMaps=no', 'AllMaps=yes' | Set-Content -Path $ini -Encoding ascii
-}
+$ini = Join-Path $data "PROCMISSION.INI"
+$lines = Get-Content $ini
+if ($AllMaps) { $lines = $lines -replace '^AllMaps=no', 'AllMaps=yes' }
+if ($Spectate) { $lines = $lines -replace '^Spectate=no', 'Spectate=yes' }
+$lines | Set-Content -Path $ini -Encoding ascii
 
-Write-Host "Deployed to $data (AllMaps=$AllMaps)"
+Write-Host "Deployed to $data (AllMaps=$AllMaps, Spectate=$([bool]$Spectate))"
 Get-ChildItem $data | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize

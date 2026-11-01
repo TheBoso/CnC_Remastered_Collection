@@ -68,14 +68,16 @@ ProcBasePreset::ProcBasePreset() :
     Harvesters(1), IsAutoPower(true), IsNaval(false), Credits(5000)
 {
     Name[0] = '\0';
+    for (int d = 0; d < DIFF_COUNT; d++) DiffWeight[d] = Weight;
 }
 
 ProcObjectivePreset::ProcObjectivePreset() :
     Kind(PROC_OBJ_DESTROY_BASES), Slot(PROC_SLOT_EITHER), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10),
-    MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0),
+    MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0), IsRewardReveal(false),
     IsSquadStart(false), SquadCount(0), PlayerCredits(-1), WavesOverride(-1), WaveDelaySeconds(0),
-    EnemyProductionOverride(-1), Patrols(0), PatrolThreat(PROC_THREAT_OVERWHELMING)
+    EnemyProductionOverride(-1), WaveRate(100), ExtraWaves(0), EnemyReinforceMinutes(0), IsHuntingReinforcements(false), Patrols(0), PatrolThreat(PROC_THREAT_OVERWHELMING)
 {
+    RewardText[0] = '\0';
     Name[0] = '\0';
     Guard[0] = '\0';
     PlayerBase[0] = '\0';
@@ -90,13 +92,13 @@ ProcDifficultyPreset::ProcDifficultyPreset() :
     EnemyCreditsPct(100), DefenseScalePct(100), GuardScalePct(100), WaveSizePct(100), WaveIntervalPct(100),
     MaxActiveWaves(2), OutpostChance(50), FirstWaveSeconds(240), StartThreat(PROC_THREAT_SCOUT),
     MaxThreat(PROC_THREAT_HEAVY), EscalateMinutes(5), NavalChance(35), PlayerReinforceMinutes(8),
-    AllyReinforceMinutes(8), EnemyReinforceMinutes(10)
+    AllyReinforceMinutes(8), EnemyReinforceMinutes(10), FactoryScalePct(100), SuperweaponCount(0)
 {
 }
 
 ProcSettings::ProcSettings() :
     Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true), IsEnemyProduction(false), IsReinforcements(true),
-    IsKeepStartUnits(false), IsAllMaps(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
+    IsKeepStartUnits(false), IsAllMaps(false), IsSpectate(false), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
     PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
     strcpy(Primary, "RANDOM");
@@ -384,6 +386,8 @@ static bool Parse_Base(CCINIClass & ini, char const * section, ProcBasePreset & 
     base.Role = (ProcBaseRoleType)Get_Enum(ini, section, "Role", s_BaseRoleNames, PROC_BASE_ROLE_COUNT, PROC_BASE_MAIN);
     base.MinTech = ini.Get_Int(section, "MinTech", 1);
     base.Weight = ini.Get_Int(section, "Weight", 10);
+    static char const * const s_DiffWeightKeys[DIFF_COUNT] = {"WeightEasy", "WeightNormal", "WeightHard"};
+    for (int d = 0; d < DIFF_COUNT; d++) base.DiffWeight[d] = max(0, ini.Get_Int(section, s_DiffWeightKeys[d], base.Weight));
     base.Harvesters = ini.Get_Int(section, "Harvesters", 1);
     base.IsAutoPower = ini.Get_Bool(section, "AutoPower", true);
     base.IsNaval = ini.Get_Bool(section, "Naval", false);
@@ -464,9 +468,15 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     if (ini.Is_Present(section, "Waves")) obj.WavesOverride = ini.Get_Bool(section, "Waves", true) ? 1 : 0;
     obj.WaveDelaySeconds = ini.Get_Int(section, "WaveDelaySeconds", 0);
     if (ini.Is_Present(section, "EnemyProduction")) obj.EnemyProductionOverride = ini.Get_Bool(section, "EnemyProduction", false) ? 1 : 0;
+    obj.WaveRate = Bound(ini.Get_Int(section, "WaveRate", 100), 10, 1000);
+    obj.ExtraWaves = Bound(ini.Get_Int(section, "ExtraWaves", 0), 0, 5);
+    obj.EnemyReinforceMinutes = max(0, ini.Get_Int(section, "EnemyReinforceMinutes", 0));
+    obj.IsHuntingReinforcements = ini.Get_Bool(section, "HuntingReinforcements", false);
     obj.Patrols = Bound(ini.Get_Int(section, "Patrols", 0), 0, PROC_MAX_PATROLS);
     obj.PatrolThreat = (ProcThreatType)Get_Enum(ini, section, "PatrolThreat", s_ThreatNames, PROC_THREAT_COUNT, PROC_THREAT_OVERWHELMING);
     Parse_Techno_List(ini, section, "RewardUnits", obj.RewardUnits, PROC_MAX_MEMBERS, obj.RewardUnitCount);
+    obj.IsRewardReveal = ini.Get_Bool(section, "RewardReveal", false);
+    ini.Get_String(section, "RewardText", "", obj.RewardText, sizeof(obj.RewardText));
 
     if (ini.Get_String(section, "Targets", "", buffer, sizeof(buffer)) > 0) {
         TargetListContext ctx = {&obj, section};
@@ -499,6 +509,22 @@ static void Parse_Difficulty(CCINIClass & ini, char const * section, ProcDifficu
     diff.PlayerReinforceMinutes = max(0, ini.Get_Int(section, "PlayerReinforceMinutes", diff.PlayerReinforceMinutes));
     diff.AllyReinforceMinutes = max(0, ini.Get_Int(section, "AllyReinforceMinutes", diff.AllyReinforceMinutes));
     diff.EnemyReinforceMinutes = max(0, ini.Get_Int(section, "EnemyReinforceMinutes", diff.EnemyReinforceMinutes));
+    diff.FactoryScalePct = max(0, ini.Get_Int(section, "FactoryScale", diff.FactoryScalePct));
+
+    char buffer[128];
+    if (ini.Get_String(section, "Superweapons", "", buffer, sizeof(buffer)) > 0) {
+        diff.SuperweaponCount = 0;
+        for (char * token = strtok(buffer, ", "); token != NULL && diff.SuperweaponCount < ARRAY_SIZE(diff.Superweapons); token = strtok(NULL, ", ")) {
+            StructType type = BuildingTypeClass::From_Name(token);
+            if (type == STRUCT_NONE) {
+                char buf[128];
+                sprintf(buf, "ProcINI: [%s] unknown superweapon structure '%s'", section, token);
+                GlyphX_Debug_Print(buf);
+                continue;
+            }
+            diff.Superweapons[diff.SuperweaponCount++] = type;
+        }
+    }
 }
 
 void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, ProcSettings & settings) const
@@ -521,6 +547,7 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.IsReinforcements = ini.Get_Bool(section, "Reinforcements", settings.IsReinforcements);
     settings.IsKeepStartUnits = ini.Get_Bool(section, "KeepStartUnits", settings.IsKeepStartUnits);
     settings.IsAllMaps = ini.Get_Bool(section, "AllMaps", settings.IsAllMaps);
+    settings.IsSpectate = ini.Get_Bool(section, "Spectate", settings.IsSpectate);
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
     settings.WaveMaxSeconds = max(settings.WaveMinSeconds, ini.Get_Int(section, "WaveMaxSeconds", settings.WaveMaxSeconds));
     settings.SpawnMode = (ProcSpawnModeType)Get_Enum(ini, section, "SpawnMode", s_SpawnNames, PROC_SPAWN_COUNT, settings.SpawnMode);
@@ -589,24 +616,41 @@ static bool Side_Matches(ProcSideType preset, ProcSideType wanted)
 /*
 **	Weighted random pick over the presets accepted by the filter.
 */
-template<class T, class F>
-static T const * Weighted_Pick(T const * presets, int count, F accept)
+template<class T>
+struct PresetWeight {
+    int operator()(T const & preset) const { return max(1, preset.Weight); }
+};
+
+template<class T, class F, class W>
+static T const * Weighted_Pick(T const * presets, int count, F accept, W weight)
 {
     int total = 0;
     for (int i = 0; i < count; i++) {
-        if (accept(presets[i])) total += max(1, presets[i].Weight);
+        if (accept(presets[i])) total += weight(presets[i]);
     }
     if (total == 0) return NULL;
 
     // Random_Pick only has 15 significant bits; build a wider roll for big weight totals.
     int roll = (total <= 0x7FFF) ? Random_Pick(0, total - 1) : (Random_Pick(0, 0x7FFF) * 0x8000 + Random_Pick(0, 0x7FFF)) % total;
     for (int i = 0; i < count; i++) {
-        if (!accept(presets[i])) continue;
-        roll -= max(1, presets[i].Weight);
+        if (!accept(presets[i]) || weight(presets[i]) <= 0) continue;
+        roll -= weight(presets[i]);
         if (roll < 0) return &presets[i];
     }
     return NULL;
 }
+
+template<class T, class F>
+static T const * Weighted_Pick(T const * presets, int count, F accept)
+{
+    return Weighted_Pick(presets, count, accept, PresetWeight<T>());
+}
+
+// A base preset's weight at a difficulty (0 = never at that difficulty).
+struct BaseWeight {
+    int Difficulty;
+    int operator()(ProcBasePreset const & base) const { return (Difficulty < 0) ? max(1, base.Weight) : base.DiffWeight[Difficulty]; }
+};
 
 struct TeamFilter {
     ProcSideType Side;
@@ -661,15 +705,21 @@ struct BaseFilter {
     }
 };
 
-ProcBasePreset const * ProcPresetLibrary::Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech) const
+ProcBasePreset const * ProcPresetLibrary::Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech, int difficulty) const
 {
     BaseFilter filter = {side, role, tech};
-    ProcBasePreset const * base = Weighted_Pick(Bases, BaseCount, filter);
+    BaseWeight weight = {(difficulty >= 0 && difficulty < DIFF_COUNT) ? difficulty : -1};
+    ProcBasePreset const * base = Weighted_Pick(Bases, BaseCount, filter, weight);
 
     // Below every preset's MinTech: ignore the tech requirement; the builder skips what isn't available.
     if (base == NULL) {
         filter.Tech = 99;
-        base = Weighted_Pick(Bases, BaseCount, filter);
+        base = Weighted_Pick(Bases, BaseCount, filter, weight);
+    }
+    // Every preset weighted 0 at this difficulty: any will do.
+    if (base == NULL) {
+        weight.Difficulty = -1;
+        base = Weighted_Pick(Bases, BaseCount, filter, weight);
     }
     return base;
 }

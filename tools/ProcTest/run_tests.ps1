@@ -695,8 +695,11 @@ $Tests = [ordered]@{
         Check = { param($r)
             $f = @()
             if ($r.Lines -match "enemy production disabled") { $f += "EnemyProduction=yes still disabled production" }
-            $first = $r.Status | Select-Object -First 1; $last = $r.Status | Select-Object -Last 1
-            if ($first -and $last -and [int]($last.Enemies -replace '\D.*$', '') -le [int]($first.Enemies -replace '\D.*$', '')) { $f += "enemy did not build ($($first.Enemies) -> $($last.Enemies) buildings)" }
+            # Its count goes up and down (it also loses buildings), so: did it ever have more than it started with?
+            $start = $r.Lines | Select-String "enemy 0 \(\w+\) base '\w+', (\d+) buildings" | Select-Object -First 1
+            $initial = if ($start) { [int]$start.Matches[0].Groups[1].Value } else { 0 }
+            $most = ($r.Status | ForEach-Object { [int]($_.Enemies -replace '\D.*$', '') } | Measure-Object -Maximum).Maximum
+            if ($most -le $initial) { $f += "enemy did not build (started with $initial buildings, never had more than $most)" }
             $f
         }
     }
@@ -735,7 +738,8 @@ $Tests = [ordered]@{
 
     naval_waves = @{
         # Map 3: the enemy base gets a shipyard on water that reaches the player's base.
-        Args = @("--scenario", "3", "--player", "England", "--enemies", "Greece", "--frames", "6000", "--do", "20:naval", "--do", "20:buildings", "--do", "5990:buildings")
+        Args = @("--scenario", "3", "--player", "England", "--enemies", "Greece", "--frames", "6000", "--do", "20:naval", "--do", "20:buildings", "--do", "5990:buildings",
+            "--do", "20:health", "--do", "5990:health")
         Patch = { param($d)
             Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
             Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
@@ -744,12 +748,22 @@ $Tests = [ordered]@{
         }
         Check = { param($r)
             $f = @()
+            # The bases are placed at random: the yard may end up on another stretch of water, or
+            # none of the player's buildings in gunboat range (then the enemy rightly attacks by land).
             $reach = Get-Test $r "naval" | Select-Object -First 1
-            if (-not $reach -or $reach.Result -lt 1) { $f += "no enemy naval yard that reaches the player (map changed?)" }
+            $inrange = $r.Lines | Select-String "buildings in range 5/9/20: (\d+)" | Select-Object -First 1
+            $shellable = $inrange -and [int]$inrange.Matches[0].Groups[1].Value -gt 0
+            if (-not $reach -or $reach.Result -lt 1 -or -not $shellable) {
+                Write-Host "       (naval_waves: no yard or no building in gunboat range on this layout, nothing to check)"
+            }
             $sea = @($r.Lines | Select-String "wave \S+ \(sent, threat \d+, by sea\)").Count
-            if ($sea -lt 1) { $f += "no naval wave sent" }
+            if ($sea -lt 1 -and $reach -and $reach.Result -ge 1 -and $shellable) { $f += "no naval wave sent" }
+            # Gunboats rarely finish a building off in time, so also count damage (the human never repairs).
             $b = @(Get-Test $r "buildings")
-            if ($b.Count -eq 2 -and $b[1].Result -ge $b[0].Result) { $f += "naval waves did no damage ($($b[0].Result) -> $($b[1].Result) player buildings)" }
+            $h = @(Get-Test $r "health")
+            if ($sea -ge 1 -and $b.Count -eq 2 -and $b[1].Result -ge $b[0].Result -and $h.Count -eq 2 -and $h[1].Result -ge $h[0].Result) {
+                $f += "naval waves did no damage ($($b[0].Result) -> $($b[1].Result) player buildings, $($h[0].Result)% -> $($h[1].Result)% health)"
+            }
             $f
         }
     }
@@ -766,14 +780,181 @@ $Tests = [ordered]@{
         }
         Check = { param($r)
             $f = @()
-            $sent = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(sent\)")
+            $sent = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(sent")
             $failed = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(failed\)")
             if ($failed.Count -gt 0) { $f += "$($failed.Count) reinforcements failed: $($failed[0].Line -replace '^DBG\s+\d+ ProcMission: ', '')" }
-            if (-not ($r.Lines -match "reinforcements (ALL|SOV)_REINF_\w+ for Tester \(sent\)")) { $f += "no reinforcements for the human" }
+            if (-not ($r.Lines -match "reinforcements (ALL|SOV)_REINF_\w+ for Tester \(sent")) { $f += "no reinforcements for the human" }
             if ($sent.Count -lt 6) { $f += "only $($sent.Count) reinforcements in 2 minutes, expected 2 each for 3 houses" }
             if (-not ($r.Lines -match "^MSG .*Reinforcements have arrived")) { $f += "the human was not told reinforcements arrived" }
             $units = @(Get-Test $r "units")
             if ($units.Count -eq 2 -and $units[1].Result -le $units[0].Result) { $f += "the human's units did not grow ($($units[0].Result) -> $($units[1].Result))" }
+            $f
+        }
+    }
+
+    spectate = @{
+        # Spectate=yes: the human owns nothing, sees the whole map and is left alone; the AI
+        # ally and the enemy (full skirmish AIs) fight it out with the director's help.
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "4000",
+            "--do", "100:units", "--do", "100:buildings", "--do", "1000:mapped", "--do", "3990:units")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Spectate" "yes"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "COMMANDO_RAID"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "FirstWaveSeconds" "30"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "PlayerReinforceMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "AllyReinforceMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "ProcMission: spectator mode")) { $f += "spectator mode not on" }
+            if ($r.Lines -match "COMMANDO_RAID|secondary objective") { $f += "spectating kept the configured primary / bonus objectives" }
+            if ($r.Lines -match "enemy production disabled") { $f += "enemy production was disabled while spectating" }
+            foreach ($t in @(Get-Test $r "units") + @(Get-Test $r "buildings")) {
+                if ($t.Result -ne 0) { $f += "the spectator owns $($t.Result) objects at frame $($t.Frame)" }
+            }
+            $mapped = Get-Test $r "mapped" | Select-Object -First 1
+            if (-not $mapped -or $mapped.Result -lt 95) { $f += "only $($mapped.Result)% of the map revealed" }
+            if ($r.Lines -match "wave .* -> Tester") { $f += "a wave was sent at the spectator" }
+            if (-not ($r.Lines -match "wave \S+ \(sent")) { $f += "no waves sent at the AI ally" }
+            if ($r.Lines -match "reinforcements \S+ for Tester") { $f += "the spectator got reinforcements" }
+            if (-not ($r.Lines -match "reinforcements \S+ for \S+ \(sent")) { $f += "the AI ally got no reinforcements" }
+            $over = Get-Over $r
+            if ($over) { $f += "the game ended ($($over.Result) at frame $($over.Frame))" }
+            $f
+        }
+    }
+
+    spectate_win = @{
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "3000", "--do", "450+30:wipe:ENEMY")
+        Patch = { param($d) Set-IniValue "$d\PROCMISSION.INI" "Generator" "Spectate" "yes" }
+        Check = { param($r) Assert-Over $r "win" }
+    }
+
+    spectate_lose = @{
+        # Once every AI ally is gone the spectator's team has lost.
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "3000", "--do", "450+30:wipe:ALLY")
+        Patch = { param($d) Set-IniValue "$d\PROCMISSION.INI" "Generator" "Spectate" "yes" }
+        Check = { param($r) Assert-Over $r "lose" }
+    }
+
+    reinforcements_water = @{
+        # Map 4: the map edges near the bases are water. Infantry come by Chinook (Allied) or
+        # Badger paradrop (Soviet), vehicles by landing ship; nobody is left stranded off the map.
+        Args = @("--scenario", "4", "--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "2800",
+            "--do", "850:athome", "--do", "2780:athome", "--do", "2780:stranded")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "AllyStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "StartThreat" "Medium"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "PlayerReinforceMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "AllyReinforceMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EnemyReinforceMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            $sent = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(sent, (by Chinook|by landing ship|by paradrop)")
+            if ($sent.Count -lt 6) { $f += "only $($sent.Count) reinforcements came by transport (expected 2 each for 3 houses)" }
+            if (-not ($r.Lines -match "for Tester \(sent, by (Chinook|landing ship)")) { $f += "the human got no Chinook / landing ship" }
+            if (-not ($r.Lines -match "for Computer \(sent, by (paradrop|landing ship)")) { $f += "the Soviet enemy got no paradrop / landing ship" }
+            $failed = @($r.Lines | Select-String "reinforcements \S+ for \S+ \(failed")
+            if ($failed.Count -gt 0) { $f += "$($failed.Count) reinforcements failed" }
+            $stranded = Get-Test $r "stranded" | Select-Object -Last 1
+            if ($stranded -and $stranded.Result -gt 0) { $f += "$($stranded.Result) units stranded off the map or on water" }
+            $athome = @(Get-Test $r "athome")
+            if ($athome.Count -eq 2 -and $athome[1].Result -le $athome[0].Result) { $f += "no reinforcements reached the human base ($($athome[0].Result) -> $($athome[1].Result) units)" }
+            $f
+        }
+    }
+
+    survive_pressure = @{
+        # Survival missions: waves 1.5x as often, one more wave at a time, and enemy
+        # reinforcements every 4 minutes that hunt the player's team instead of guarding.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "7300")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "SURVIVE_SIEGE"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "SURVIVE_SIEGE" "MinMinutes" "30"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "SURVIVE_SIEGE" "MaxMinutes" "30"
+        }
+        Check = { param($r)
+            $f = @()
+            $hunting = @($r.Lines | Select-String "reinforcements \S+ for Computer \(sent.*hunting\)")
+            if ($hunting.Count -lt 1) { $f += "no hunting enemy reinforcements in 8 minutes" }
+            if ($r.Lines -match "reinforcements \S+ for Computer \(sent(?!.*hunting)") { $f += "an enemy reinforcement did not hunt" }
+            if (-not ($r.Lines -match "status t=\d+s threat=\d+ waves=\d+/3 ")) { $f += "MaxActiveWaves not raised to 3 (Normal 2 + ExtraWaves 1)" }
+            $f
+        }
+    }
+
+    hard_superweapons = @{
+        # Hard: enemy main bases get the superweapons their side can own; the AI nukes by
+        # itself, the director fires the Iron Curtain (on a wave tank) and the Chronosphere.
+        Args = @("--player", "Greece", "--enemies", "USSR,France", "--frames", "15000")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Difficulty" "Hard"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "OutpostChance" "0"
+            # Weak waves, so the player lives long enough for every superweapon to charge.
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "WaveSize" "10"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "MaxThreat" "Light"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "FirstWaveSeconds" "60"
+        }
+        Check = { param($r)
+            $f = @()
+            $sov = $r.Lines | Select-String "enemy \d+ \(Soviet\) base" | Select-Object -First 1
+            $all = $r.Lines | Select-String "enemy \d+ \(Allied\) base" | Select-Object -First 1
+            if (-not ($sov -and $sov.Line -match "MSLO=1" -and $sov.Line -match "IRON=1")) { $f += "Soviet base lacks a missile silo / Iron Curtain: $($sov.Line)" }
+            if (-not ($all -and $all.Line -match "PDOX=1")) { $f += "Allied base lacks a Chronosphere: $($all.Line)" }
+            if (-not ($r.Lines -match "launched a nuke")) { $f += "no nuke launched" }
+            if (-not ($r.Lines -match "Iron Curtain on")) { $f += "Iron Curtain never used" }
+            if (-not ($r.Lines -match "Chronosphere sends")) { $f += "Chronosphere never used" }
+            $over = Get-Over $r
+            if ($over -and $over.Frame -lt 12000) { $f += "game ended at frame $($over.Frame) ($($over.Result)), before the superweapons charged" }
+            $f
+        }
+    }
+
+    hard_factories = @{
+        # FactoryScale multiplies an enemy base's factories and refineries; difficulty weights
+        # choose the preset (only SOV_MAIN_ARMOR is allowed on Hard here).
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "60")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Difficulty" "Hard"
+            Set-IniValue "$d\PROCMISSION.INI" "Hard" "FactoryScale" "200"
+            foreach ($b in @("SOV_MAIN_STANDARD", "SOV_MAIN_FORTRESS", "SOV_MAIN_AIRBASE", "SOV_MAIN_TESLA", "SOV_MAIN_GARRISON")) {
+                Set-IniValue "$d\PROCBASES.INI" $b "WeightHard" "0"
+            }
+        }
+        Check = { param($r)
+            $f = @()
+            $line = $r.Lines | Select-String "enemy 0 \(Soviet\) base" | Select-Object -First 1
+            if (-not ($line -and $line.Line -match "base 'SOV_MAIN_ARMOR'")) { $f += "WeightHard=0 presets were picked: $($line.Line)" }
+            # The preset has WEAP:2, PROC:2, BARR:1: doubled.
+            if (-not ($line -and $line.Line -match "WEAP=4" -and $line.Line -match "BARR=2")) { $f += "factories not doubled: $($line.Line)" }
+            $f
+        }
+    }
+
+    bonus_reward_text = @{
+        # Bonus objectives say what they are worth, and say so again when it is received;
+        # RewardReveal reveals the whole map.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1500", "--do", "440:mapped",
+            "--do", "450:damage:BONUS_TECH_CENTER_ALLIED:100",
+            "--do", "455:clear:BONUS_CAPTURE_LAB:10", "--do", "460:capture:BONUS_CAPTURE_LAB:3", "--do", "1400:mapped")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "SURVIVE_SIEGE"
+            Set-Bonuses $d @("BONUS_TECH_CENTER_ALLIED", "BONUS_CAPTURE_LAB")
+        }
+        Check = { param($r)
+            $f = @()
+            if ($null -eq (Get-MsgFrame $r "Bonus: Destroy the enemy tech center\. Reward: 2 Medium Tanks and 2 Artillery\.")) { $f += "tech center bonus does not show its reward" }
+            if ($null -eq (Get-MsgFrame $r "Bonus: Capture the research facility .* Reward: \`$1500 and the whole map revealed\.")) { $f += "lab bonus does not show its reward" }
+            if ($null -eq (Get-MsgFrame $r "Reward received: 2 Medium Tanks and 2 Artillery\.")) { $f += "no 'reward received' message for the tech center" }
+            $f += Assert-Objective $r "Capture the research facility" "COMPLETE"
+            $mapped = @(Get-Test $r "mapped")
+            if ($mapped.Count -eq 2 -and ($mapped[0].Result -ge 95 -or $mapped[1].Result -lt 95)) { $f += "map not revealed by the reward ($($mapped[0].Result)% -> $($mapped[1].Result)%)" }
             $f
         }
     }

@@ -1224,7 +1224,8 @@ void HouseClass::AI(void)
 	** through each object's AI before it will be properly set.
 	*/
 	if (Session.Type != GAME_NORMAL && !IsDefeated &&
-		!ActiveBScan && !ActiveAScan && !UScan && !ActiveIScan && !ActiveVScan && Frame > 0) {
+		!ActiveBScan && !ActiveAScan && !UScan && !ActiveIScan && !ActiveVScan && Frame > 0 &&
+		!(Scen.IsProcedural && ProcMission.Is_Spectator(this))) {
 		MPlayer_Defeated();
 	}
 
@@ -8069,7 +8070,8 @@ void HouseClass::Check_Pertinent_Structures(void)
 	}
 
 	// Procedural squad missions start the humans with no base: they only lose when the whole squad is gone.
-	if (Scen.IsProcedural && ProcMission.Is_Squad_Player(this)) {
+	// Spectators own nothing at all; the mission decides when their team has lost.
+	if (Scen.IsProcedural && (ProcMission.Is_Squad_Player(this) || ProcMission.Is_Spectator(this))) {
 		return;
 	}
 

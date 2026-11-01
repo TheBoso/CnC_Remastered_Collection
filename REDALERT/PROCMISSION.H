@@ -37,8 +37,8 @@
 #define PROC_TEXT_LEN                160
 
 #define PROC_MAX_TEAM_PRESETS        80
-#define PROC_MAX_BASE_PRESETS        32
-#define PROC_MAX_OBJECTIVE_PRESETS   32
+#define PROC_MAX_BASE_PRESETS        64
+#define PROC_MAX_OBJECTIVE_PRESETS   64
 
 #define PROC_MAX_MEMBERS             5       // Matches TeamTypeClass::MAX_TEAM_CLASSCOUNT
 #define PROC_MAX_TEAM_MISSIONS       8
@@ -199,6 +199,7 @@ struct ProcBasePreset {
     ProcBaseRoleType        Role;
     int                     MinTech;
     int                     Weight;
+    int                     DiffWeight[DIFF_COUNT];  // WeightEasy / WeightNormal / WeightHard (default Weight)
 
     ProcBaseEntry           Entries[PROC_MAX_BASE_ENTRIES];
     int                     EntryCount;
@@ -239,6 +240,8 @@ struct ProcObjectivePreset {
     long                    RewardCredits;
     ProcTechnoCount         RewardUnits[PROC_MAX_MEMBERS];
     int                     RewardUnitCount;
+    bool                    IsRewardReveal;             // Completing it reveals the whole map
+    char                    RewardText[PROC_NAME_LEN * 2];  // Shown instead of the generated "Reward: ..." text
 
     /*
     **	Squad missions (primary only). The humans start with a small squad instead of an MCV
@@ -251,6 +254,10 @@ struct ProcObjectivePreset {
     int                     WavesOverride;              // -1 = generator setting, 0 = no waves, 1 = waves
     int                     WaveDelaySeconds;           // 0 = difficulty FirstWaveSeconds
     int                     EnemyProductionOverride;    // -1 = generator setting, 0 = static enemy bases, 1 = skirmish AI builds
+    int                     WaveRate;                   // % of the normal wave rate (150 = waves 1.5x as often)
+    int                     ExtraWaves;                 // Added to the difficulty's MaxActiveWaves
+    int                     EnemyReinforceMinutes;      // 0 = difficulty table; otherwise enemy reinforcements every N minutes
+    bool                    IsHuntingReinforcements;    // Enemy reinforcements hunt the player's team instead of guarding
     int                     Patrols;                    // Patrol teams to generate
     ProcThreatType          PatrolThreat;               // Strongest patrol teams allowed (e.g. Light = no tanks for a Tanya squad)
     char                    Bonus[PROC_NAME_LEN];       // Secondary objective always added with this primary
@@ -276,6 +283,9 @@ struct ProcDifficultyPreset {
     int                     PlayerReinforceMinutes;     // Reinforcements for the humans every N minutes (0 = never)
     int                     AllyReinforceMinutes;       // ... for AI allies
     int                     EnemyReinforceMinutes;      // ... for enemies (they join their base's defence)
+    int                     FactoryScalePct;    // % of a base preset's factories / refineries built (fraction = chance of one more)
+    StructType              Superweapons[4];    // Added to enemy main bases (each house builds what its side may own)
+    int                     SuperweaponCount;
 
     ProcDifficultyPreset();
 };
@@ -291,6 +301,7 @@ struct ProcSettings {
     bool                    IsReinforcements;   // Director sends Role=Reinforce teams (timings in the difficulty tables)
     bool                    IsKeepStartUnits;   // Keep the lobby's starting units for enemies
     bool                    IsAllMaps;          // Every single-human skirmish map is procedural, flagged or not
+    bool                    IsSpectate;         // The humans get nothing and watch their AI allies fight the enemy
     int                     WaveMinSeconds;
     int                     WaveMaxSeconds;
     ProcSpawnModeType       SpawnMode;
@@ -320,7 +331,7 @@ public:
     ProcTeamPreset const * Pick_Team(ProcSideType side, ProcTeamRoleType role, ProcThreatType minthreat, ProcThreatType maxthreat, int tech, int naval = 0) const;
     ProcTeamPreset const * Find_Team(char const * name) const;
 
-    ProcBasePreset const * Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech) const;
+    ProcBasePreset const * Pick_Base(ProcSideType side, ProcBaseRoleType role, int tech, int difficulty = -1) const;
     ProcBasePreset const * Find_Base(char const * name) const;
 
     ProcObjectivePreset const * Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, bool cancapture, ProcObjectivePreset const * const * exclude, int excludecount) const;
@@ -362,8 +373,9 @@ struct ProcHouseInfo {
     HouseClass *            House;
     CELL                    Home;           // Base center chosen at generation time
     int                     InitialBuildings;
+    int                     NukeStage;      // Charge at the last director check (to log the AI's launches)
 
-    ProcHouseInfo() : House(NULL), Home(-1), InitialBuildings(0) {}
+    ProcHouseInfo() : House(NULL), Home(-1), InitialBuildings(0), NukeStage(0) {}
 };
 
 class ProcMissionManager {
@@ -382,6 +394,9 @@ public:
 
     // A human on the player's team in a squad mission (started with no base or MCV).
     bool Is_Squad_Player(HouseClass const * house) const { return IsActive && IsSquad && house->IsHuman && Is_Player_Team(house); }
+
+    // A human watching a Spectate=yes game: owns nothing, so the engine must not defeat it for that.
+    bool Is_Spectator(HouseClass const * house) const { return IsActive && IsSpectating && house->IsHuman && Is_Player_Team(house); }
 
     // tools/ProcTest only (exported as ProcMission_Test). See the function for the commands.
     int Test_Command(char const * command, char const * objective, int value);
@@ -413,6 +428,7 @@ private:
     void Add_Power(HouseClass * house, CELL center);
     CELL Find_Neutral_Location(int mindistance, HouseClass const * nearto = NULL) const;
     TARGET Find_Existing_Target(HouseClass * house, StructType type, CELL center, int maxdistance) const;
+    TARGET Find_Existing_Any(HouseClass * house, StructType const * types, int count, CELL center, int maxdistance, StructType & found) const;
 
     // Objectives
     void Update_Objectives();
@@ -425,6 +441,7 @@ private:
 
     // Director (attack waves)
     void Director_AI();
+    void Superweapon_AI();
     void Spawn_Wave(HouseClass * house);
     TeamTypeClass * Make_Wave_Type(ProcTeamPreset const * preset, HouseClass * house, HouseClass * victim, CELL home);
     bool Deliver_Wave(TeamTypeClass * teamtype, CELL home);
@@ -435,11 +452,15 @@ private:
     HouseClass * Pick_Victim(HouseClass * attacker) const;
     CELL Naval_Yard_Cell(HouseClass const * house) const;
     bool Can_Reach_By_Sea(CELL yard, HouseClass const * victim) const;
+    int Shell_Targets(CELL yard, HouseClass const * victim, int range, TARGET * targets, int max) const;
     ProcTeamPreset const * Pick_Naval_Team(HouseClass * house, HouseClass * victim, CELL yard) const;
 
     // Reinforcements
     void Reinforce_AI();
     bool Send_Reinforcements(HouseClass * house);
+    CELL Find_Edge_Cell(CELL target, MZoneType mzone, SpeedType speed) const;
+    CELL Find_Beach(CELL destination) const;
+    int Paradrop(HouseClass * house, TeamTypeClass const * teamtype, CELL destination);
     void Collect_Reinforce_Types();
 
     // Helpers
@@ -455,6 +476,11 @@ private:
     bool                    IsAnnounced;
     bool                    IsFinished;
     bool                    IsSquad;        // Squad mission: humans start with a squad, see ProcObjectivePreset
+    bool                    IsSpectating;   // Spectate=yes: humans get nothing, AI allies fight the enemy
+    bool                    IsHuntingReinforcements;    // Enemy reinforcements hunt the player's team (primary's HuntingReinforcements=)
+    int                     WaveRatePct;    // Primary's WaveRate: waves come this % as often
+    int                     ExtraWaves;     // Primary's ExtraWaves: added to MaxActiveWaves
+    int                     EnemyReinforceMinutes;  // Primary's EnemyReinforceMinutes, or the difficulty's
     bool                    IsPlayerBase;   // Humans on the player's team start with a Defend base
     bool                    IsAllyBase;     // AI allies start with a Defend base
 
