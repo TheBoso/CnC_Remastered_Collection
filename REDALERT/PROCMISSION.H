@@ -54,6 +54,8 @@
 #define PROC_MAX_PATROLS             8       // Patrol teams per mission
 #define PROC_MAX_ANCHORS             12      // Places patrols guard (targets, outposts, enemy bases)
 #define PROC_MAX_SENTRIES            8       // Role=Sentry posts per mission
+#define PROC_MAX_PRISONERS           8       // Rescue: people held per objective
+#define PROC_MAX_POINTS              4       // Control: points per objective
 #define PROC_FIRST_WAYPOINT          60      // Waypoints 60-97 are used for generated patrol routes
 #define PROC_RESCUE_RANGE            12      // AI units only rush to defend buildings this close (TechnoClass::Base_Is_Attacked)
 #define PROC_PATROL_CLEARANCE        14      // Patrol routes keep this far from where the player's team starts
@@ -104,6 +106,9 @@ typedef enum ProcObjectiveKindType : unsigned char {
     PROC_OBJ_DESTROY,               // Destroy a specific structure
     PROC_OBJ_CAPTURE,               // Capture a specific structure
     PROC_OBJ_PROTECT,               // Keep a specific structure alive until the timer runs out
+    PROC_OBJ_ASSASSINATE,           // Kill a specific enemy unit (it runs for its base when attacked)
+    PROC_OBJ_RESCUE,                // Free prisoners from an enemy camp and walk them back home
+    PROC_OBJ_CONTROL,               // Take control points and hold them all for a while
     PROC_OBJ_KIND_COUNT
 } ProcObjectiveKindType;
 
@@ -264,6 +269,16 @@ struct ProcObjectivePreset {
     ProcThreatType          PatrolThreat;               // Strongest patrol teams allowed (e.g. Light = no tanks for a Tanya squad)
     char                    Bonus[PROC_NAME_LEN];       // Secondary objective always added with this primary
 
+    /*
+    **	Unit objectives.
+    */
+    ProcTechnoCount         TargetUnits[PROC_MAX_TARGET_TYPES]; // Assassinate: the unit to kill (one is picked)
+    int                     TargetUnitCount;
+    ProcTechnoCount         Prisoners[PROC_MAX_MEMBERS];        // Rescue: who is held in the camp
+    int                     PrisonerCount;
+    int                     RescueNeeded;               // Rescue: how many must get home (0 = all of them)
+    int                     PointCount;                 // Control: points to take and hold
+
     char                    Text[PROC_TEXT_LEN];        // Shown to the player; %d is replaced by minutes
 
     ProcObjectivePreset();
@@ -379,9 +394,37 @@ struct ProcObjective {
     int                     Minutes;
     int                     HeldStrength;   // Squad missions: the target's strength may only go down (no repairs)
 
+    // Assassinate: Target is the unit itself.
+    TechnoTypeClass const * UnitType;       // Its type, to spot a reused slot
+    CELL                    Retreat;        // Where it runs when attacked (-1 = it stays put)
+    bool                    IsFleeing;
+
+    // Rescue: Target is the camp's cell.
+    TARGET                  Prisoners[PROC_MAX_PRISONERS];
+    TechnoTypeClass const * PrisonerTypes[PROC_MAX_PRISONERS];
+    unsigned char           PrisonerState[PROC_MAX_PRISONERS];  // ProcPrisonerType
+    int                     PrisonerCount;
+    int                     Rescued;
+    int                     Needed;
+    CELL                    Extraction;     // Where they must be brought
+
+    // Control: Target is the first point's cell.
+    CELL                    Points[PROC_MAX_POINTS];
+    bool                    IsPointHeld[PROC_MAX_POINTS];       // By the player's team
+    int                     PointCount;
+    long                    HeldTicks;      // Time all points have been held so far
+
     ProcObjective() : Preset(NULL), IsPrimary(false), State(PROC_STATE_ACTIVE), Target(TARGET_NONE),
-        TargetType(STRUCT_NONE), EndFrame(0), Minutes(0), HeldStrength(0) {}
+        TargetType(STRUCT_NONE), EndFrame(0), Minutes(0), HeldStrength(0), UnitType(NULL), Retreat(-1), IsFleeing(false),
+        PrisonerCount(0), Rescued(0), Needed(0), Extraction(-1), PointCount(0), HeldTicks(0) {}
 };
+
+typedef enum ProcPrisonerType : unsigned char {
+    PROC_PRISONER_HELD = 0,         // Still in the camp (neutral, asleep)
+    PROC_PRISONER_FREE,             // Freed: the player's, walking home
+    PROC_PRISONER_RESCUED,          // Made it home (removed from the map)
+    PROC_PRISONER_DEAD
+} ProcPrisonerType;
 
 struct ProcHouseInfo {
     HouseClass *            House;
@@ -423,6 +466,9 @@ private:
     void Build_Enemy_Bases();
     void Build_Player_Bases();
     void Place_Objective_Targets();
+    bool Replace_Misfit(ProcObjective & obj, ProcObjectivePreset const ** misfits, int & misfitcount);
+    bool Place_Unit_Objective(ProcObjective & obj, int faraway, HouseClass const * nearto);
+    void Place_Guard(ProcObjectivePreset const * preset, HouseClass * house, CELL cell);
     void Place_Sentries();
     CELL Find_Sentry_Location(CELL const * taken, int takencount) const;
     void Announce_Objectives();
@@ -440,6 +486,7 @@ private:
     bool Can_Place_Building(StructType type, CELL cell) const;
     bool Try_Place_Building(HouseClass * house, StructType type, CELL cell, TARGET * placed);
     void Place_Units(HouseClass * house, TechnoTypeClass const * type, int count, CELL center, MissionType mission, int minradius = 2, int maxradius = 7);
+    TechnoClass * Spawn_One(HouseClass * house, TechnoTypeClass const * type, CELL center, int minradius, int maxradius, MissionType mission);
     void Place_Naval_Yard(HouseClass * house, CELL center);
     void Add_Power(HouseClass * house, CELL center);
     CELL Find_Neutral_Location(int mindistance, HouseClass const * nearto = NULL) const;
@@ -448,6 +495,11 @@ private:
 
     // Objectives
     void Update_Objectives();
+    void Update_Assassinate(ProcObjective & obj, bool timeup);
+    void Update_Rescue(ProcObjective & obj, bool timeup);
+    void Update_Control(ProcObjective & obj, bool timeup);
+    int Count_Feet(CELL center, int radius, bool playerteam, bool humansonly = false) const;
+    CELL Contested_Point() const;
     void Complete_Objective(ProcObjective & objective);
     void Hold_Targets();
     void Fail_Objective(ProcObjective & objective);

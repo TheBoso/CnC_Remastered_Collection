@@ -1063,6 +1063,210 @@ $Tests = [ordered]@{
         }
     }
 
+    assassinate_win = @{
+        # The marshal waits in a remote outpost, runs for his base once hurt, and killing him wins.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1500",
+            "--do", "450:hurt:PRIMARY:40", "--do", "600:fleeing:PRIMARY", "--do", "750:kill:PRIMARY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "ASSASSINATE_MARSHAL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "objective ASSASSINATE_MARSHAL target GNRL at cell \d+ .*runs to cell \d+")) { $f += "no marshal placed in a camp" }
+            if (-not ($r.Lines -match "ASSASSINATE_MARSHAL target flees from cell \d+ to cell \d+ \(hurt\)")) { $f += "the marshal did not run when hurt" }
+            $flee = Get-Test $r "fleeing" | Select-Object -First 1
+            if (-not $flee -or $flee.Result -ne 1) { $f += "fleeing not reported" }
+            $f += Assert-Objective $r "field marshal" "COMPLETE"
+            $f += Assert-Over $r "win"
+            $f
+        }
+    }
+
+    assassinate_runs_when_spotted = @{
+        # Getting close is enough to make him run (no damage).
+        Args = @("--player", "USSR", "--enemies", "Greece", "--frames", "900", "--do", "450:approach:PRIMARY", "--do", "880:fleeing:PRIMARY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "ASSASSINATE_MARSHAL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "ASSASSINATE_MARSHAL target flees from cell \d+ to cell \d+ \(spotted\)")) { $f += "the marshal did not run when the player's units came close" }
+            if ($null -eq (Get-MsgFrame $r "The target is running for its base")) { $f += "no 'running' message" }
+            $f
+        }
+    }
+
+    rescue_win = @{
+        # Free the prisoners (a rifleman next to each), bring them home: 3 of 4 needed.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1500",
+            "--do", "440:clear:PRIMARY:14", "--do", "450:free:PRIMARY", "--do", "520:prisoners:PRIMARY",
+            "--do", "530:deliver:PRIMARY", "--do", "600:prisoners:PRIMARY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "RESCUE_PRISONERS"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "objective RESCUE_PRISONERS: 4 prisoners at cell \d+ \(3 needed\)")) { $f += "prisoners not placed: $(($r.Lines -match 'RESCUE_PRISONERS') -join ' | ')" }
+            $before = Get-Test $r "prisoners" | Select-Object -First 1
+            if (-not $before -or $before.Result -ne 40) { $f += "expected 4 freed after 'free', got $($before.Result)" }
+            if (@($r.Lines | Select-String "prisoner \d+ \(\w+\) freed by").Count -lt 4) { $f += "not every prisoner was freed" }
+            $f += Assert-Objective $r "Prisoners are held in an enemy camp" "COMPLETE"
+            $f += Assert-Over $r "win"
+            $f
+        }
+    }
+
+    rescue_walk_home = @{
+        # The freed prisoners really walk home across the map.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "9000",
+            "--do", "440:clear:PRIMARY:14", "--do", "450:free:PRIMARY", "--do", "520+300:escort:PRIMARY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "RESCUE_PRISONERS"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Sentries" "no"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Reinforcements" "no"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMin" "0"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "SecondaryMax" "0"
+        }
+        Check = { param($r)
+            $f = @()
+            $rescued = @($r.Lines | Select-String "RESCUE_PRISONERS prisoner \d+ rescued").Count
+            if ($rescued -lt 3) { $f += "only $rescued prisoners walked home" }
+            $f += Assert-Over $r "win"
+            $f
+        }
+    }
+
+    rescue_lose = @{
+        # Too many prisoners dead: the rescue fails.
+        Args = @("--player", "USSR", "--enemies", "Greece", "--frames", "1200", "--do", "440:clear:PRIMARY:14", "--do", "450:free:PRIMARY", "--do", "520:kill:PRIMARY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "RESCUE_PRISONERS"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+        }
+        Check = { param($r)
+            $f = @()
+            $f += Assert-Objective $r "Prisoners are held in an enemy camp" "FAILED"
+            $f += Assert-Over $r "lose"
+            $f
+        }
+    }
+
+    rescue_squad = @{
+        # Squad version: Tanya frees two prisoners and they get back to where the squad started.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1500",
+            "--do", "440:clear:PRIMARY:14", "--do", "450:free:PRIMARY", "--do", "530:deliver:PRIMARY")
+        Patch = { param($d) Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "RESCUE_SQUAD" }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "starts with squad 'ALL_SQUAD_TANYA'")) { $f += "no Tanya squad" }
+            $camp = $r.Lines | Select-String "objective RESCUE_SQUAD: 3 prisoners at cell \d+ \(2 needed\), extraction at cell \d+ \((\d+) cells away\)" | Select-Object -First 1
+            if (-not $camp) { $f += "prisoners not placed" }
+            elseif ([int]$camp.Matches[0].Groups[1].Value -lt 20) { $f += "the camp is only $($camp.Matches[0].Groups[1].Value) cells from the squad" }
+            $f += Assert-Objective $r "Free the prisoners" "COMPLETE"
+            $f += Assert-Over $r "win"
+            $f
+        }
+    }
+
+    hold_the_hill_win = @{
+        # Three points, held by enemy guards; take them all and hold them for a minute.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "2400", "--do", "450:occupy:PRIMARY:-1", "--do", "500:points:PRIMARY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "HOLD_THE_HILL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "HOLD_THE_HILL" "MinMinutes" "1"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "HOLD_THE_HILL" "MaxMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            $points = @($r.Lines | Select-String "objective HOLD_THE_HILL: control point (\w) at cell \d+ \((\d+) cells from the player team")
+            if ($points.Count -ne 3) { $f += "$($points.Count) control points placed" }
+            foreach ($p in $points) { if ([int]$p.Matches[0].Groups[2].Value -lt 13) { $f += "point $($p.Matches[0].Groups[1].Value) only $($p.Matches[0].Groups[2].Value) cells from the player" } }
+            $held = Get-Test $r "points" | Select-Object -First 1
+            if (-not $held -or $held.Result -ne 3) { $f += "expected 3 points held, got $($held.Result)" }
+            $f += Assert-Objective $r "Take the three control points" "COMPLETE"
+            # Held from ~frame 460 for 60 s (900 frames).
+            $over = Get-Over $r
+            if ($over -and $over.Frame -lt 1300) { $f += "won at frame $($over.Frame), before the minute was up" }
+            $f += Assert-Over $r "win"
+            $f
+        }
+    }
+
+    hold_the_hill_pause = @{
+        # Losing a point pauses the clock (it doesn't reset): 30 s held, 20 s lost, then 30 s more.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "3000",
+            "--do", "450:occupy:PRIMARY:-1", "--do", "900:contest:PRIMARY:0", "--do", "1200:occupy:PRIMARY:0")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "HOLD_THE_HILL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "HOLD_THE_HILL" "MinMinutes" "1"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "HOLD_THE_HILL" "MaxMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "HOLD_THE_HILL point A lost")) { $f += "point A was not lost" }
+            if ($null -eq (Get-MsgFrame $r "Control point A lost to the enemy")) { $f += "no 'point lost' message" }
+            $over = Get-Over $r
+            if ($over -and ($over.Frame -lt 1550 -or $over.Frame -gt 1900)) { $f += "won at frame $($over.Frame), expected ~1650 (clock paused, not reset)" }
+            $f += Assert-Over $r "win"
+            $f
+        }
+    }
+
+    hold_the_hill_waves = @{
+        # Enemy waves go to retake the points the player holds.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "4500", "--do", "450:occupy:PRIMARY:-1")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "HOLD_THE_HILL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "FirstWaveSeconds" "40"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "WaveMinSeconds" "20"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "WaveMaxSeconds" "30"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "HOLD_THE_HILL" "MinMinutes" "20"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "HOLD_THE_HILL" "MaxMinutes" "20"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "wave \S+ \(sent, threat \d+, to a control point\)")) { $f += "no wave went for a control point" }
+            $f
+        }
+    }
+
+    bonus_unit_objectives = @{
+        # The three unit objectives as bonuses, each paying out.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "2600",
+            "--do", "450:kill:BONUS_ASSASSINATE",
+            "--do", "450:clear:BONUS_RESCUE:14", "--do", "460:free:BONUS_RESCUE", "--do", "530:deliver:BONUS_RESCUE",
+            "--do", "450:occupy:BONUS_CONTROL:-1")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "SURVIVE_SIEGE"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "BONUS_CONTROL" "MinMinutes" "1"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "BONUS_CONTROL" "MaxMinutes" "1"
+            Set-Bonuses $d @("BONUS_ASSASSINATE", "BONUS_RESCUE", "BONUS_CONTROL")
+        }
+        Check = { param($r)
+            $f = @()
+            $f += Assert-Objective $r "Kill the enemy field marshal" "COMPLETE"
+            $f += Assert-Objective $r "Free the prisoners at an enemy camp" "COMPLETE"
+            $f += Assert-Objective $r "Take both control points" "COMPLETE"
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$3000\.')) { $f += "no assassination reward" }
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$2000 and the whole map revealed\.')) { $f += "no rescue reward" }
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$4000\.')) { $f += "no control reward" }
+            $f += Assert-NoOver $r
+            $f
+        }
+    }
+
     presets_beside_dll = @{
         # How the real client runs a mod: RedAlert.dll and the presets share the mod's Data
         # folder, which is not on the engine's file search path.

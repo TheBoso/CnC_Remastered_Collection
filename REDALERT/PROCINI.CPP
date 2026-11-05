@@ -19,7 +19,7 @@ static char const * s_SideNames[PROC_SIDE_COUNT] = {"Any", "Allied", "Soviet"};
 static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Medium", "Heavy", "Overwhelming"};
 static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad", "Reinforce"};
 static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend", "Camp", "Sentry"};
-static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect"};
+static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect", "Assassinate", "Rescue", "Control"};
 static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
 static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player", "Outpost"};
 static char const * s_SpawnNames[PROC_SPAWN_COUNT] = {"Base", "Edge"};
@@ -75,7 +75,8 @@ ProcObjectivePreset::ProcObjectivePreset() :
     Kind(PROC_OBJ_DESTROY_BASES), Slot(PROC_SLOT_EITHER), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10),
     MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0), IsRewardReveal(false),
     IsSquadStart(false), SquadCount(0), PlayerCredits(-1), WavesOverride(-1), WaveDelaySeconds(0),
-    EnemyProductionOverride(-1), WaveRate(100), ExtraWaves(0), EnemyReinforceMinutes(0), IsHuntingReinforcements(false), Patrols(0), PatrolThreat(PROC_THREAT_OVERWHELMING)
+    EnemyProductionOverride(-1), WaveRate(100), ExtraWaves(0), EnemyReinforceMinutes(0), IsHuntingReinforcements(false), Patrols(0), PatrolThreat(PROC_THREAT_OVERWHELMING),
+    TargetUnitCount(0), PrisonerCount(0), RescueNeeded(0), PointCount(0)
 {
     RewardText[0] = '\0';
     Name[0] = '\0';
@@ -437,8 +438,12 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     obj.Kind = (ProcObjectiveKindType)Get_Enum(ini, section, "Kind", s_KindNames, PROC_OBJ_KIND_COUNT, PROC_OBJ_DESTROY_BASES);
     obj.Slot = (ProcObjectiveSlotType)Get_Enum(ini, section, "Slot", s_SlotNames, PROC_SLOT_COUNT, PROC_SLOT_EITHER);
     obj.PlayerSide = (ProcSideType)Get_Enum(ini, section, "PlayerSide", s_SideNames, PROC_SIDE_COUNT, PROC_SIDE_ANY);
-    obj.Owner = (ProcOwnerType)Get_Enum(ini, section, "Owner", s_OwnerNames, PROC_OWNER_COUNT,
-        (obj.Kind == PROC_OBJ_PROTECT) ? PROC_OWNER_PLAYER : PROC_OWNER_ENEMY);
+    // Default owners: your base for Protect, a remote camp for Assassinate / Rescue, no one for Control.
+    ProcOwnerType owner = PROC_OWNER_ENEMY;
+    if (obj.Kind == PROC_OBJ_PROTECT) owner = PROC_OWNER_PLAYER;
+    if (obj.Kind == PROC_OBJ_ASSASSINATE || obj.Kind == PROC_OBJ_RESCUE) owner = PROC_OWNER_OUTPOST;
+    if (obj.Kind == PROC_OBJ_CONTROL) owner = PROC_OWNER_NEUTRAL;
+    obj.Owner = (ProcOwnerType)Get_Enum(ini, section, "Owner", s_OwnerNames, PROC_OWNER_COUNT, owner);
     obj.MinTech = ini.Get_Int(section, "MinTech", 1);
     obj.Weight = ini.Get_Int(section, "Weight", 10);
     obj.MinMinutes = ini.Get_Int(section, "MinMinutes", 0);
@@ -479,6 +484,10 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     Parse_Techno_List(ini, section, "RewardUnits", obj.RewardUnits, PROC_MAX_MEMBERS, obj.RewardUnitCount);
     obj.IsRewardReveal = ini.Get_Bool(section, "RewardReveal", false);
     ini.Get_String(section, "RewardText", "", obj.RewardText, sizeof(obj.RewardText));
+    Parse_Techno_List(ini, section, "TargetUnit", obj.TargetUnits, PROC_MAX_TARGET_TYPES, obj.TargetUnitCount);
+    Parse_Techno_List(ini, section, "Prisoners", obj.Prisoners, PROC_MAX_MEMBERS, obj.PrisonerCount);
+    obj.RescueNeeded = max(0, ini.Get_Int(section, "RescueNeeded", 0));
+    obj.PointCount = Bound(ini.Get_Int(section, "Points", 0), 0, PROC_MAX_POINTS);
 
     if (ini.Get_String(section, "Targets", "", buffer, sizeof(buffer)) > 0) {
         TargetListContext ctx = {&obj, section};
@@ -487,9 +496,12 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
 
     // Structure objectives are useless without a target; timed objectives need a duration.
     bool needstarget = (obj.Kind == PROC_OBJ_DESTROY || obj.Kind == PROC_OBJ_CAPTURE || obj.Kind == PROC_OBJ_PROTECT);
-    bool needstime = (obj.Kind == PROC_OBJ_SURVIVE || obj.Kind == PROC_OBJ_PROTECT);
+    bool needstime = (obj.Kind == PROC_OBJ_SURVIVE || obj.Kind == PROC_OBJ_PROTECT || obj.Kind == PROC_OBJ_CONTROL);
     if (needstarget && obj.TargetCount == 0) return false;
     if (needstime && obj.MinMinutes <= 0) return false;
+    if (obj.Kind == PROC_OBJ_ASSASSINATE && obj.TargetUnitCount == 0) return false;
+    if (obj.Kind == PROC_OBJ_RESCUE && obj.PrisonerCount == 0) return false;
+    if (obj.Kind == PROC_OBJ_CONTROL && obj.PointCount == 0) return false;
     if (obj.IsSquadStart && obj.SquadCount == 0) return false;
     return true;
 }

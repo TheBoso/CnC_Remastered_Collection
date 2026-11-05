@@ -14,7 +14,8 @@
 #>
 param(
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\CnCRemastered",
-    [string[]]$Primaries = @("DESTROY_ALL", "SURVIVE_SIEGE", "DESTROY_COMMAND", "CAPTURE_LAB", "HOLD_THE_LINE", "COMMANDO_RAID", "COMMANDO_FORWARD_BASE"),
+    [string[]]$Primaries = @("DESTROY_ALL", "SURVIVE_SIEGE", "DESTROY_COMMAND", "CAPTURE_LAB", "HOLD_THE_LINE", "COMMANDO_RAID", "COMMANDO_FORWARD_BASE",
+        "ASSASSINATE_MARSHAL", "RESCUE_PRISONERS", "RESCUE_SQUAD", "HOLD_THE_HILL"),
     [int[]]$Maps = 1..24,
     [string]$Player = "Greece",
     [string]$Enemies = "USSR,England"
@@ -63,6 +64,10 @@ foreach ($primary in $Primaries) {
         foreach ($m in ($lines | Select-String "objective (\S+) target \S+ at cell \d+ \((\d+) cells from the area centre, radius (\d+)")) {
             $out = [int]$m.Matches[0].Groups[2].Value; $radius = [int]$m.Matches[0].Groups[3].Value
             if ($out -gt [math]::Ceiling(($radius + 2) * 1.5)) { $found += "$($m.Matches[0].Groups[1].Value) target $out cells out" }
+        }
+        if ($primary -eq "HOLD_THE_HILL") {
+            $points = @($lines | Select-String "objective HOLD_THE_HILL: control point").Count
+            if ($points -lt 3) { $found += "only $points control points" }
         }
         foreach ($m in ($lines | Select-String "base '([^']+)'.*\(power (\d+)/(\d+)\)")) {
             if ([int]$m.Matches[0].Groups[2].Value -lt [int]$m.Matches[0].Groups[3].Value) { $found += "'$($m.Matches[0].Groups[1].Value)' power $($m.Matches[0].Groups[2].Value)/$($m.Matches[0].Groups[3].Value)" }

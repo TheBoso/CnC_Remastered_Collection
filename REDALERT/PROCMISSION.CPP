@@ -28,6 +28,10 @@ ProcMissionManager ProcMission;
 #define PROC_NAVAL_REACH            12                  // A naval wave needs water this close to the victim's base
 #define PROC_REVEAL_RADIUS          4                   // Shroud lifted around each objective target when announced
 #define PROC_TARGET_REACH           3                   // How far a crowded area may push an objective target out
+#define PROC_POINT_RADIUS           4                   // Control: units within this many cells hold a point
+#define PROC_FREE_RADIUS            2                   // Rescue: a prisoner is freed when the player's units get this close
+#define PROC_EXTRACT_RADIUS         5                   // Rescue: ... and rescued this close to the extraction point
+#define PROC_FLEE_RADIUS            6                   // Assassinate: the target runs when the player's units get this close
 #define PROC_NEUTRAL_CLEARANCE      20                  // Camps / outposts / neutral targets keep this far from enemy buildings
 
 
@@ -856,18 +860,31 @@ void ProcMissionManager::Place_Units(HouseClass * house, TechnoTypeClass const *
     if (type->What_Am_I() == RTTI_AIRCRAFTTYPE) return;     // Aircraft need a helipad / airfield; never placed loose
 
     for (int i = 0; i < count; i++) {
-        CELL cell = isvessel ? Find_Water_Near(center, 24) : Random_Cell_Around(center, minradius, maxradius);
-        if (cell == -1) return;
-
-        TechnoClass * obj = (TechnoClass *)type->Create_One_Of(house);
-        if (obj == NULL) return;
-
-        if (!Scan_Place_Object(obj, cell)) {
-            delete obj;
-            continue;
-        }
-        obj->Assign_Mission(mission);
+        if (isvessel && Find_Water_Near(center, 24) == -1) return;
+        Spawn_One(house, type, center, minradius, maxradius, mission);
     }
+}
+
+/*
+**	One unit of this type around 'center' (ships on the nearest water), or NULL if there is no room.
+*/
+TechnoClass * ProcMissionManager::Spawn_One(HouseClass * house, TechnoTypeClass const * type, CELL center, int minradius, int maxradius, MissionType mission)
+{
+    if (type == NULL || house == NULL || center == -1 || type->What_Am_I() == RTTI_AIRCRAFTTYPE) return NULL;
+
+    bool isvessel = (type->What_Am_I() == RTTI_VESSELTYPE);
+    CELL cell = isvessel ? Find_Water_Near(center, 24) : Random_Cell_Around(center, minradius, maxradius);
+    if (cell == -1) return NULL;
+
+    TechnoClass * obj = (TechnoClass *)type->Create_One_Of(house);
+    if (obj == NULL) return NULL;
+
+    if (!Scan_Place_Object(obj, cell)) {
+        delete obj;
+        return NULL;
+    }
+    obj->Assign_Mission(mission);
+    return obj;
 }
 
 void ProcMissionManager::Place_Naval_Yard(HouseClass * house, CELL center)
@@ -1138,6 +1155,9 @@ CELL ProcMissionManager::Find_Neutral_Location(int mindistance, HouseClass const
             bestdist = dist;
         }
     }
+
+    // A small map may have no spot that far out (a squad's far target): settle for the usual distance.
+    if (best == -1 && mindistance > 22) return Find_Neutral_Location(22, nearto);
     return best;
 }
 
@@ -1155,10 +1175,11 @@ void ProcMissionManager::Place_Sentries()
     int wanted = Random_Pick(Diff.SentriesMin, Diff.SentriesMax);
 
     // Keep clear of the objective targets and outposts, and of each other.
-    CELL taken[PROC_MAX_OBJECTIVES + PROC_MAX_SENTRIES];
+    CELL taken[PROC_MAX_OBJECTIVES * PROC_MAX_POINTS + PROC_MAX_SENTRIES];
     int takencount = 0;
     for (int o = 0; o < ObjectiveCount; o++) {
-        if (Objectives[o].Target != TARGET_NONE) taken[takencount++] = As_Cell(Objectives[o].Target);
+        if (Objectives[o].Target != TARGET_NONE && takencount < ARRAY_SIZE(taken)) taken[takencount++] = As_Cell(Objectives[o].Target);
+        for (int p = 1; p < Objectives[o].PointCount && takencount < ARRAY_SIZE(taken); p++) taken[takencount++] = Objectives[o].Points[p];
     }
 
     int placed = 0;
@@ -1259,7 +1280,9 @@ void ProcMissionManager::Place_Objective_Targets()
         ProcObjective & obj = Objectives[i];
         ProcObjectivePreset const * preset = obj.Preset;
 
-        if (obj.Minutes > 0) {
+        // Control: the minutes are how long the points must be held, not a time limit; its clock
+        // only shows while they are (Update_Control).
+        if (obj.Minutes > 0 && preset->Kind != PROC_OBJ_CONTROL) {
             obj.EndFrame = Elapsed + obj.Minutes * TICKS_PER_MINUTE;
             if (obj.IsPrimary) {
                 // The primary objective's clock is shown on the sidebar.
@@ -1268,7 +1291,8 @@ void ProcMissionManager::Place_Objective_Targets()
             }
         }
 
-        if (preset->TargetCount == 0) continue;
+        bool unitkind = (preset->Kind == PROC_OBJ_ASSASSINATE || preset->Kind == PROC_OBJ_RESCUE || preset->Kind == PROC_OBJ_CONTROL);
+        if (preset->TargetCount == 0 && !unitkind) continue;
 
         /*
         **	Pick the owner and the area for the target structure.
@@ -1288,6 +1312,22 @@ void ProcMissionManager::Place_Objective_Targets()
         // Any other target in a squad mission is the far end of the trip, well away from where
         // the squad starts (its patrols would otherwise be on the squad straight away).
         int faraway = (IsSquad && nearto == NULL) ? 20 : 0;
+
+        // A unit to kill, prisoners to free or points to hold: placed their own way.
+        if (unitkind) {
+            if (!Place_Unit_Objective(obj, faraway, nearto)) {
+                sprintf(buf, "ProcMission: could not place target for objective %s", preset->Name);
+                GlyphX_Debug_Print(buf);
+                obj.Target = TARGET_NONE;
+                if (Replace_Misfit(obj, misfits, misfitcount)) {
+                    i--;
+                    continue;
+                }
+                obj.State = PROC_STATE_FAILED;
+            }
+            continue;
+        }
+
         switch (preset->Owner) {
             case PROC_OWNER_ENEMY: {
                 enemyindex = Random_Pick(0, EnemyCount - 1);
@@ -1375,24 +1415,9 @@ void ProcMissionManager::Place_Objective_Targets()
             sprintf(buf, "ProcMission: could not place target for objective %s", preset->Name);
             GlyphX_Debug_Print(buf);
             obj.Target = TARGET_NONE;
-
-            // A bonus that doesn't fit this map is swapped for another one.
-            if (!obj.IsPrimary && misfitcount < ARRAY_SIZE(misfits)) {
-                misfits[misfitcount++] = preset;
-                ProcObjectivePreset const * exclude[PROC_MAX_OBJECTIVES + ARRAY_SIZE(misfits)];
-                int excludecount = 0;
-                for (int o = 0; o < ObjectiveCount; o++) exclude[excludecount++] = Objectives[o].Preset;
-                for (int m = 0; m < misfitcount; m++) exclude[excludecount++] = misfits[m];
-                ProcObjectivePreset const * other = ProcPresets.Pick_Objective(PlayerSide, false, TechLevel, IsPlayerBase, !IsSquad, exclude, excludecount);
-                if (other != NULL) {
-                    sprintf(buf, "ProcMission: secondary objective %s replaced by %s", preset->Name, other->Name);
-                    GlyphX_Debug_Print(buf);
-                    obj = ProcObjective();
-                    obj.Preset = other;
-                    obj.Minutes = Random_Pick(other->MinMinutes, other->MaxMinutes);
-                    i--;
-                    continue;
-                }
+            if (Replace_Misfit(obj, misfits, misfitcount)) {
+                i--;
+                continue;
             }
             obj.State = PROC_STATE_FAILED;
             continue;
@@ -1418,18 +1443,7 @@ void ProcMissionManager::Place_Objective_Targets()
         /*
         **	Garrison. Neutral targets are guarded by an enemy so the guards actually fight.
         */
-        ProcTeamPreset const * guard = (preset->Guard[0] != '\0') ? ProcPresets.Find_Team(preset->Guard) : NULL;
-        if (guard != NULL) {
-            HouseClass * guardhouse = (preset->Owner == PROC_OWNER_NEUTRAL) ? Enemies[Random_Pick(0, EnemyCount - 1)].House : owner;
-            MissionType mission = (guardhouse == Commander) ? MISSION_GUARD : MISSION_GUARD_AREA;
-            CELL targetcell = As_Cell(obj.Target);
-            for (int m = 0; m < guard->MemberCount; m++) {
-                if (!Is_Allowed(*guard->Members[m].Type, guardhouse)) continue;
-                int count = guard->Members[m].Count;
-                if (guardhouse != Commander) count = max(1, (count * Diff.GuardScalePct + 50) / 100);
-                Place_Units(guardhouse, guard->Members[m].Type, count, targetcell, mission);
-            }
-        }
+        Place_Guard(preset, (preset->Owner == PROC_OWNER_NEUTRAL) ? Enemies[Random_Pick(0, EnemyCount - 1)].House : owner, As_Cell(obj.Target));
 
         // Patrols (squad missions) guard the enemy and neutral targets, but not a capture target:
         // once captured it is the player's, and a patrol looping through it would wreck it.
@@ -1460,6 +1474,158 @@ void ProcMissionManager::Place_Objective_Targets()
             Objectives[0].IsPrimary = true;
         }
     }
+}
+
+/*
+**	A bonus that doesn't fit this map is swapped for another one (true: 'obj' now holds it,
+**	to be placed again). A primary is left to the destroy-all fallback.
+*/
+bool ProcMissionManager::Replace_Misfit(ProcObjective & obj, ProcObjectivePreset const ** misfits, int & misfitcount)
+{
+    if (obj.IsPrimary || misfitcount >= 6) return false;
+
+    ProcObjectivePreset const * preset = obj.Preset;
+    misfits[misfitcount++] = preset;
+    ProcObjectivePreset const * exclude[PROC_MAX_OBJECTIVES + 6];
+    int excludecount = 0;
+    for (int o = 0; o < ObjectiveCount; o++) exclude[excludecount++] = Objectives[o].Preset;
+    for (int m = 0; m < misfitcount; m++) exclude[excludecount++] = misfits[m];
+    ProcObjectivePreset const * other = ProcPresets.Pick_Objective(PlayerSide, false, TechLevel, IsPlayerBase, !IsSquad, exclude, excludecount);
+    if (other == NULL) return false;
+
+    char buf[160];
+    sprintf(buf, "ProcMission: secondary objective %s replaced by %s", preset->Name, other->Name);
+    GlyphX_Debug_Print(buf);
+    obj = ProcObjective();
+    obj.Preset = other;
+    obj.Minutes = Random_Pick(other->MinMinutes, other->MaxMinutes);
+    return true;
+}
+
+/*
+**	The objective's Guard= team around 'cell'. Enemy guards are scaled by the difficulty.
+*/
+void ProcMissionManager::Place_Guard(ProcObjectivePreset const * preset, HouseClass * house, CELL cell)
+{
+    ProcTeamPreset const * guard = (preset->Guard[0] != '\0') ? ProcPresets.Find_Team(preset->Guard) : NULL;
+    if (guard == NULL || house == NULL || cell == -1) return;
+
+    MissionType mission = (house == Commander) ? MISSION_GUARD : MISSION_GUARD_AREA;
+    for (int m = 0; m < guard->MemberCount; m++) {
+        if (!Is_Allowed(*guard->Members[m].Type, house)) continue;
+        int count = guard->Members[m].Count;
+        if (house != Commander) count = max(1, (count * Diff.GuardScalePct + 50) / 100);
+        Place_Units(house, guard->Members[m].Type, count, cell, mission);
+    }
+}
+
+/*
+**	Objectives about units and places rather than a structure:
+**	  Assassinate  the target unit (TargetUnit=) in a camp away from the bases (Owner=Outpost,
+**	               default) or inside an enemy base (Owner=Enemy), with its guards. From a camp
+**	               it runs for its main base once the player's units come close or hurt it.
+**	  Rescue       the prisoners (Prisoners=), held by no one and asleep, in an enemy camp.
+**	               They must be brought back to the player's base (or a squad's start).
+**	  Control      Points= spots between the bases, each held by enemy guards (Guard=) and
+**	               marked by a neutral building from Targets= when one fits.
+*/
+bool ProcMissionManager::Place_Unit_Objective(ProcObjective & obj, int faraway, HouseClass const * nearto)
+{
+    char buf[200];
+    ProcObjectivePreset const * preset = obj.Preset;
+    if (EnemyCount == 0) return false;
+
+    if (preset->Kind == PROC_OBJ_CONTROL) {
+        CELL taken[PROC_MAX_OBJECTIVES + PROC_MAX_POINTS];
+        int takencount = 0;
+        for (int o = 0; o < ObjectiveCount; o++) {
+            if (&Objectives[o] != &obj && Objectives[o].Target != TARGET_NONE) taken[takencount++] = As_Cell(Objectives[o].Target);
+        }
+        for (int p = 0; p < preset->PointCount; p++) {
+            CELL cell = Find_Sentry_Location(taken, takencount);
+            if (cell == -1) break;
+            taken[takencount++] = cell;
+            obj.Points[obj.PointCount] = cell;
+            obj.IsPointHeld[obj.PointCount] = false;
+            obj.PointCount++;
+
+            // Held by the nearest enemy to begin with.
+            int enemy = 0;
+            for (int e = 1; e < EnemyCount; e++) {
+                if (Cell_Dist(cell, Enemies[e].Home) < Cell_Dist(cell, Enemies[enemy].Home)) enemy = e;
+            }
+            HouseClass * neutral = HouseClass::As_Pointer(HOUSE_NEUTRAL);
+            TARGET marker = TARGET_NONE;
+            for (int t = 0; t < preset->TargetCount && marker == TARGET_NONE; t++) {
+                Place_Building(neutral, preset->Targets[(t + p) % preset->TargetCount], cell, 0, 2, &marker, PROC_TARGET_REACH);
+            }
+            Place_Guard(preset, Enemies[enemy].House, cell);
+            Add_Anchor(cell, Enemies[enemy].House);
+
+            int playerdist = 1000;
+            for (int h = 0; h < PlayerTeamCount; h++) playerdist = min(playerdist, Cell_Dist(cell, Home_Cell(PlayerTeam[h])));
+            sprintf(buf, "ProcMission: objective %s: control point %c at cell %d (%d cells from the player team, marker %s, held by enemy %d)",
+                preset->Name, 'A' + p, (int)cell, playerdist, marker != TARGET_NONE ? As_Building(marker)->Class->IniName : "none", enemy);
+            GlyphX_Debug_Print(buf);
+        }
+        if (obj.PointCount < min(2, preset->PointCount)) return false;
+        obj.Target = ::As_Target(obj.Points[0]);
+        return true;
+    }
+
+    // A camp away from the bases, or a spot inside an enemy base.
+    int enemyindex = Random_Pick(0, EnemyCount - 1);
+    HouseClass * owner = Enemies[enemyindex].House;
+    CELL center = -1;
+    bool camp = (preset->Owner != PROC_OWNER_ENEMY);
+    for (int attempt = 0; attempt < 5 && center == -1; attempt++) {
+        center = camp ? Find_Neutral_Location(20 + faraway, nearto) : Map.Nearby_Location(Toward(Enemies[enemyindex].Home, Home_Cell(Commander), 4), SPEED_FOOT);
+        if (center != -1 && !Map[center].Is_Clear_To_Move(SPEED_FOOT, false, false)) center = -1;
+    }
+    if (center == -1) return false;
+    if (camp) Build_Outpost(owner, preset, center);
+
+    if (preset->Kind == PROC_OBJ_ASSASSINATE) {
+        ProcTechnoCount const & pick = preset->TargetUnits[Random_Pick(0, preset->TargetUnitCount - 1)];
+        TechnoClass * target = Spawn_One(owner, pick.Type, center, 0, 2, MISSION_GUARD);
+        if (target == NULL) target = Spawn_One(owner, pick.Type, center, 0, 5, MISSION_GUARD);
+        if (target == NULL) return false;
+        obj.Target = target->As_Target();
+        obj.UnitType = pick.Type;
+        obj.Retreat = camp ? Enemies[enemyindex].Home : -1;
+        Place_Guard(preset, owner, center);
+        Add_Anchor(center, owner);
+
+        CELL cell = Coord_Cell(target->Center_Coord());
+        sprintf(buf, "ProcMission: objective %s target %s at cell %d (%d cells from the area centre, radius %d), runs to cell %d",
+            preset->Name, pick.Type->IniName, (int)cell, Cell_Dist(cell, center), 5, (int)obj.Retreat);
+        GlyphX_Debug_Print(buf);
+        return true;
+    }
+
+    // Rescue
+    HouseClass * neutral = HouseClass::As_Pointer(HOUSE_NEUTRAL);
+    for (int i = 0; i < preset->PrisonerCount; i++) {
+        for (int n = 0; n < preset->Prisoners[i].Count && obj.PrisonerCount < PROC_MAX_PRISONERS; n++) {
+            TechnoClass * prisoner = Spawn_One(neutral, preset->Prisoners[i].Type, center, 0, 2, MISSION_SLEEP);
+            if (prisoner == NULL) continue;
+            obj.Prisoners[obj.PrisonerCount] = prisoner->As_Target();
+            obj.PrisonerTypes[obj.PrisonerCount] = preset->Prisoners[i].Type;
+            obj.PrisonerState[obj.PrisonerCount] = PROC_PRISONER_HELD;
+            obj.PrisonerCount++;
+        }
+    }
+    if (obj.PrisonerCount == 0) return false;
+    obj.Needed = (preset->RescueNeeded > 0) ? min(preset->RescueNeeded, obj.PrisonerCount) : obj.PrisonerCount;
+    obj.Extraction = Home_Cell(Commander);
+    obj.Target = ::As_Target(center);
+    Place_Guard(preset, owner, center);
+    Add_Anchor(center, owner);
+
+    sprintf(buf, "ProcMission: objective %s: %d prisoners at cell %d (%d needed), extraction at cell %d (%d cells away)",
+        preset->Name, obj.PrisonerCount, (int)center, obj.Needed, (int)obj.Extraction, Cell_Dist(center, obj.Extraction));
+    GlyphX_Debug_Print(buf);
+    return true;
 }
 
 /*
@@ -1571,9 +1737,12 @@ void ProcMissionManager::Announce_Objectives()
         if (Objectives[i].Target != TARGET_NONE) {
             // Show the player where it is: reveal the area around it for every human on the team.
             for (int h = 0; h < PlayerTeamCount; h++) {
-                if (PlayerTeam[h]->IsHuman) Map.Sight_From(As_Cell(Objectives[i].Target), PROC_REVEAL_RADIUS, PlayerTeam[h], false);
+                if (!PlayerTeam[h]->IsHuman) continue;
+                Map.Sight_From(As_Cell(Objectives[i].Target), PROC_REVEAL_RADIUS, PlayerTeam[h], false);
+                for (int p = 1; p < Objectives[i].PointCount; p++) Map.Sight_From(Objectives[i].Points[p], PROC_REVEAL_RADIUS, PlayerTeam[h], false);
             }
             On_Ping(Commander, As_Coord(Objectives[i].Target));
+            for (int p = 1; p < Objectives[i].PointCount; p++) On_Ping(Commander, Cell_Coord(Objectives[i].Points[p]));
         }
     }
 }
@@ -1622,7 +1791,9 @@ void ProcMissionManager::Update_Objectives()
         if (obj.State != PROC_STATE_ACTIVE) continue;
 
         bool timeup = (obj.EndFrame != 0 && Elapsed >= obj.EndFrame);
-        BuildingClass * target = Live_Target(obj);
+        ProcObjectiveKindType kind = obj.Preset->Kind;
+        bool structure = (kind == PROC_OBJ_DESTROY || kind == PROC_OBJ_CAPTURE || kind == PROC_OBJ_PROTECT);
+        BuildingClass * target = structure ? Live_Target(obj) : NULL;
 
         switch (obj.Preset->Kind) {
             case PROC_OBJ_DESTROY_BASES: {
@@ -1658,10 +1829,235 @@ void ProcMissionManager::Update_Objectives()
                 else if (timeup) Complete_Objective(obj);
                 break;
 
+            case PROC_OBJ_ASSASSINATE:
+                Update_Assassinate(obj, timeup);
+                break;
+
+            case PROC_OBJ_RESCUE:
+                Update_Rescue(obj, timeup);
+                break;
+
+            case PROC_OBJ_CONTROL:
+                Update_Control(obj, timeup);
+                break;
+
             default:
                 break;
         }
     }
+}
+
+/*
+**	The live unit behind 'target', or NULL once it is dead (or its slot holds something else).
+*/
+static TechnoClass * Live_Unit(TARGET target, TechnoTypeClass const * type, bool carried = false)
+{
+    if (target == TARGET_NONE) return NULL;
+    TechnoClass * techno = As_Techno(target, false);
+    if (techno == NULL || !techno->IsActive || techno->Strength <= 0) return NULL;
+    if (techno->IsInLimbo && !carried) return NULL;     // 'carried': a passenger in a transport is in limbo too
+    if (type != NULL && techno->Techno_Type_Class() != type) return NULL;
+    return techno;
+}
+
+/*
+**	Infantry and vehicles within 'radius' cells: the player's team's (only the humans' with
+**	'humansonly'), or the enemies'.
+*/
+int ProcMissionManager::Count_Feet(CELL center, int radius, bool playerteam, bool humansonly) const
+{
+    int count = 0;
+    for (int i = 0; i < Infantry.Count(); i++) {
+        InfantryClass const * foot = Infantry.Ptr(i);
+        if (foot->IsInLimbo || foot->Strength <= 0) continue;
+        HouseClass const * house = foot->House;
+        bool ours = Is_Player_Team(house);
+        if (ours != playerteam || house->Class->House == HOUSE_NEUTRAL || (humansonly && !house->IsHuman)) continue;
+        if (foot->Class->IsCivilian) continue;          // Freed prisoners hold nothing
+        if (Cell_Dist(Coord_Cell(foot->Center_Coord()), center) <= radius) count++;
+    }
+    for (int i = 0; i < Units.Count(); i++) {
+        UnitClass const * foot = Units.Ptr(i);
+        if (foot->IsInLimbo || foot->Strength <= 0) continue;
+        HouseClass const * house = foot->House;
+        bool ours = Is_Player_Team(house);
+        if (ours != playerteam || house->Class->House == HOUSE_NEUTRAL || (humansonly && !house->IsHuman)) continue;
+        if (Cell_Dist(Coord_Cell(foot->Center_Coord()), center) <= radius) count++;
+    }
+    return count;
+}
+
+/*
+**	Kill the target. From a camp it runs for its main base once the player's units close in
+**	or hurt it, and digs in there: a hunt across the map rather than a sniping job.
+*/
+void ProcMissionManager::Update_Assassinate(ProcObjective & obj, bool timeup)
+{
+    TechnoClass * target = Live_Unit(obj.Target, obj.UnitType);
+    if (target == NULL) {
+        Complete_Objective(obj);
+        return;
+    }
+    if (timeup) {
+        Fail_Objective(obj);
+        return;
+    }
+    if (obj.IsFleeing || obj.Retreat == -1) return;
+
+    CELL cell = Coord_Cell(target->Center_Coord());
+    bool hurt = (int)target->Strength * 4 < (int)target->Techno_Type_Class()->MaxStrength * 3;
+    if (!hurt && Count_Feet(cell, PROC_FLEE_RADIUS, true) == 0) return;
+
+    obj.IsFleeing = true;
+    SpeedType speed = (target->What_Am_I() == RTTI_INFANTRY) ? SPEED_FOOT : SPEED_TRACK;
+    target->Assign_Mission(MISSION_MOVE);
+    target->Assign_Target(TARGET_NONE);
+    target->Assign_Destination(::As_Target(Map.Nearby_Location(obj.Retreat, speed)));
+    target->Commence();
+    On_Ping(Commander, target->Center_Coord());
+    Message("The target is running for its base. Stop it!");
+
+    char buf[128];
+    sprintf(buf, "ProcMission: %s target flees from cell %d to cell %d (%s)", obj.Preset->Name, (int)cell, (int)obj.Retreat, hurt ? "hurt" : "spotted");
+    GlyphX_Debug_Print(buf);
+}
+
+/*
+**	Prisoners are freed when the humans' units reach them (they become the player's own),
+**	and rescued once they are walked to the extraction point (they leave the map there).
+*/
+void ProcMissionManager::Update_Rescue(ProcObjective & obj, bool timeup)
+{
+    char buf[160];
+    int alive = 0;
+    for (int i = 0; i < obj.PrisonerCount; i++) {
+        unsigned char & state = obj.PrisonerState[i];
+        if (state == PROC_PRISONER_RESCUED || state == PROC_PRISONER_DEAD) continue;
+
+        TechnoClass * prisoner = Live_Unit(obj.Prisoners[i], obj.PrisonerTypes[i], state == PROC_PRISONER_FREE);
+        if (prisoner == NULL) {
+            state = PROC_PRISONER_DEAD;
+            sprintf(buf, "ProcMission: %s prisoner %d (%s) died", obj.Preset->Name, i, obj.PrisonerTypes[i]->IniName);
+            GlyphX_Debug_Print(buf);
+            continue;
+        }
+        CELL cell = Coord_Cell(prisoner->Center_Coord());
+
+        if (state == PROC_PRISONER_HELD) {
+            // The nearest human unit's owner takes charge of them.
+            HouseClass * rescuer = NULL;
+            for (int h = 0; h < PlayerTeamCount && rescuer == NULL; h++) {
+                if (!PlayerTeam[h]->IsHuman) continue;
+                for (int f = 0; f < Infantry.Count() && rescuer == NULL; f++) {
+                    InfantryClass const * foot = Infantry.Ptr(f);
+                    if ((HouseClass *)foot->House != PlayerTeam[h] || foot->IsInLimbo || foot->Class->IsCivilian) continue;
+                    if (Cell_Dist(Coord_Cell(foot->Center_Coord()), cell) <= PROC_FREE_RADIUS) rescuer = PlayerTeam[h];
+                }
+                for (int f = 0; f < Units.Count() && rescuer == NULL; f++) {
+                    UnitClass const * foot = Units.Ptr(f);
+                    if ((HouseClass *)foot->House != PlayerTeam[h] || foot->IsInLimbo) continue;
+                    if (Cell_Dist(Coord_Cell(foot->Center_Coord()), cell) <= PROC_FREE_RADIUS) rescuer = PlayerTeam[h];
+                }
+            }
+            if (rescuer == NULL) {
+                alive++;
+                continue;
+            }
+
+            // Swap the neutral sleeper for one the rescuer controls.
+            prisoner->Limbo();
+            delete prisoner;
+            TechnoClass * freed = (TechnoClass *)obj.PrisonerTypes[i]->Create_One_Of(rescuer);
+            if (freed == NULL || !Scan_Place_Object(freed, cell)) {
+                if (freed != NULL) delete freed;
+                state = PROC_PRISONER_DEAD;
+                continue;
+            }
+            freed->Assign_Mission(MISSION_GUARD);
+            obj.Prisoners[i] = freed->As_Target();
+            state = PROC_PRISONER_FREE;
+            alive++;
+            Message("Prisoner freed. Bring them back home!");
+            sprintf(buf, "ProcMission: %s prisoner %d (%s) freed by %s at cell %d", obj.Preset->Name, i, obj.PrisonerTypes[i]->IniName, rescuer->IniName, (int)cell);
+            GlyphX_Debug_Print(buf);
+            continue;
+        }
+
+        // Free: home yet? (Riding in an APC or a Chinook counts once they get out.)
+        if (!prisoner->IsInLimbo && Cell_Dist(cell, obj.Extraction) <= PROC_EXTRACT_RADIUS) {
+            prisoner->Limbo();
+            delete prisoner;
+            state = PROC_PRISONER_RESCUED;
+            obj.Rescued++;
+            sprintf(buf, "Prisoner rescued (%d of %d).", obj.Rescued, obj.Needed);
+            Message(buf);
+            sprintf(buf, "ProcMission: %s prisoner %d rescued (%d/%d)", obj.Preset->Name, i, obj.Rescued, obj.Needed);
+            GlyphX_Debug_Print(buf);
+            continue;
+        }
+        alive++;
+    }
+
+    if (obj.Rescued >= obj.Needed) Complete_Objective(obj);
+    else if (obj.Rescued + alive < obj.Needed || timeup) Fail_Objective(obj);
+}
+
+/*
+**	A point belongs to whoever has units there alone (contested points keep their owner).
+**	The clock runs while the player's team holds all of them, and pauses otherwise.
+*/
+void ProcMissionManager::Update_Control(ProcObjective & obj, bool timeup)
+{
+    char buf[128];
+    bool all = (obj.PointCount > 0);
+    for (int p = 0; p < obj.PointCount; p++) {
+        int ours = Count_Feet(obj.Points[p], PROC_POINT_RADIUS, true);
+        int theirs = Count_Feet(obj.Points[p], PROC_POINT_RADIUS, false);
+        bool held = obj.IsPointHeld[p];
+        if (ours > 0 && theirs == 0) held = true;
+        if (theirs > 0 && ours == 0) held = false;
+        if (held != obj.IsPointHeld[p]) {
+            obj.IsPointHeld[p] = held;
+            sprintf(buf, held ? "Control point %c taken." : "Control point %c lost to the enemy!", 'A' + p);
+            Message(buf);
+            sprintf(buf, "ProcMission: %s point %c %s (ours %d, theirs %d)", obj.Preset->Name, 'A' + p, held ? "taken" : "lost", ours, theirs);
+            GlyphX_Debug_Print(buf);
+        }
+        if (!obj.IsPointHeld[p]) all = false;
+    }
+
+    long needed = (long)obj.Minutes * TICKS_PER_MINUTE;
+    if (all) obj.HeldTicks += PROC_OBJECTIVE_CHECK_RATE;
+    if (obj.IsPrimary) {
+        // The sidebar clock shows the time left to hold, only while it is running.
+        if (all) {
+            Scen.MissionTimer = max(0L, needed - obj.HeldTicks);
+            if (!Scen.MissionTimer.Is_Active()) Scen.MissionTimer.Start();
+        } else if (Scen.MissionTimer.Is_Active()) {
+            Scen.MissionTimer.Stop();
+        }
+    }
+
+    if (obj.HeldTicks >= needed) Complete_Objective(obj);
+    else if (timeup) Fail_Objective(obj);
+}
+
+/*
+**	A control point the player's team holds, for a wave to take back (-1 = none).
+*/
+CELL ProcMissionManager::Contested_Point() const
+{
+    for (int i = 0; i < ObjectiveCount; i++) {
+        ProcObjective const & obj = Objectives[i];
+        if (obj.State != PROC_STATE_ACTIVE || obj.Preset->Kind != PROC_OBJ_CONTROL) continue;
+        CELL held[PROC_MAX_POINTS];
+        int count = 0;
+        for (int p = 0; p < obj.PointCount; p++) {
+            if (obj.IsPointHeld[p]) held[count++] = obj.Points[p];
+        }
+        if (count > 0) return held[Random_Pick(0, count - 1)];
+    }
+    return -1;
 }
 
 /*
@@ -2053,11 +2449,27 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
         tt->MissionCount = m;
     }
 
+    /*
+    **	Control missions: most land waves go to retake a point the player holds, and stay to
+    **	guard it (a Do mission never ends, so the team keeps the point).
+    */
+    CELL point = naval ? -1 : Contested_Point();
+    if (point != -1 && Random_Pick(0, 99) < 70) {
+        CELL spot = Map.Nearby_Location(point, SPEED_TRACK);
+        tt->MissionList[0].Mission = TMISSION_MOVECELL;
+        tt->MissionList[0].Data.Value = spot;
+        tt->MissionList[1].Mission = TMISSION_DO;
+        tt->MissionList[1].Data.Value = MISSION_GUARD_AREA;
+        tt->MissionCount = 2;
+    } else {
+        point = -1;
+    }
+
     bool ok = naval ? Spawn_Team(tt, yard, 0, 0) : Deliver_Wave(tt, home);
 
-    char buf[128];
-    sprintf(buf, "ProcMission: wave %s (%s, threat %d%s) from %s -> %s", preset->Name, ok ? "sent" : "failed",
-        (int)preset->Threat, naval ? ", by sea" : "", house->IniName, victim->IniName);
+    char buf[160];
+    sprintf(buf, "ProcMission: wave %s (%s, threat %d%s%s) from %s -> %s", preset->Name, ok ? "sent" : "failed",
+        (int)preset->Threat, naval ? ", by sea" : "", (point != -1) ? ", to a control point" : "", house->IniName, victim->IniName);
     GlyphX_Debug_Print(buf);
 
     if (!ok) {
@@ -2836,6 +3248,21 @@ void ProcMissionManager::Message(char const * text) const
  *   stranded                     returns (and prints) the ground units of any house that are outside
  *                                the playable area or standing on water
  *
+ *   Unit objectives:
+ *   kill     <objective>         Assassinate: kill the target outright
+ *   hurt     <objective> <pct>   Assassinate: damage the target by pct % (it should run); returns its strength
+ *   fleeing  <objective>         Assassinate: 1 once the target has run for its base
+ *   approach <objective>         Assassinate: put two of the commander's riflemen 3-4 cells from the target
+ *   free     <objective>         Rescue: put a rifleman of the commander's next to every held prisoner
+ *   escort   <objective>         Rescue: order the freed prisoners to walk to the extraction point
+ *   deliver  <objective>         Rescue: move the freed prisoners next to the extraction point at once
+ *   prisoners <objective>        Rescue: returns rescued x100 + freed x10 + still held
+ *   kill     <objective>         Rescue: kill every prisoner still alive
+ *   occupy   <objective> <p>     Control: kill the enemy units at point p (-1 = every point) and put
+ *                                three of the commander's riflemen there
+ *   contest  <objective> <p>     Control: kill the player's units at point p and put three enemy riflemen there
+ *   points   <objective>         Control: returns how many points the player's team holds
+ *
  * Returns -1 for an unknown command or objective.
  ******************************************************************************/
 
@@ -2976,6 +3403,113 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
         }
     }
     if (obj == NULL) return -1;
+
+    /*
+    **	Unit objectives.
+    */
+    ProcObjectiveKindType kind = obj->Preset->Kind;
+    if (kind == PROC_OBJ_ASSASSINATE) {
+        TechnoClass * unit = Live_Unit(obj->Target, obj->UnitType);
+        if (stricmp(command, "fleeing") == 0) return obj->IsFleeing ? 1 : 0;
+        if (stricmp(command, "approach") == 0) {
+            if (unit == NULL) return -1;
+            int spawned = 0;
+            for (int n = 0; n < 2; n++) {
+                if (Spawn_One(Commander, &InfantryTypeClass::As_Reference(INFANTRY_E1), Coord_Cell(unit->Center_Coord()), 3, 4, MISSION_GUARD) != NULL) spawned++;
+            }
+            return spawned;
+        }
+        if (stricmp(command, "kill") == 0 || stricmp(command, "hurt") == 0) {
+            if (unit == NULL) return -1;
+            int damage = (stricmp(command, "kill") == 0) ? (int)unit->Strength : max(1, (int)unit->Techno_Type_Class()->MaxStrength * value / 100);
+            unit->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+            unit = Live_Unit(obj->Target, obj->UnitType);
+            return (unit != NULL) ? (int)unit->Strength : 0;
+        }
+    }
+
+    if (kind == PROC_OBJ_RESCUE) {
+        int held = 0, freed = 0, done = 0;
+        for (int i = 0; i < obj->PrisonerCount; i++) {
+            TechnoClass * prisoner = Live_Unit(obj->Prisoners[i], obj->PrisonerTypes[i]);
+            unsigned char state = obj->PrisonerState[i];
+            if (state == PROC_PRISONER_RESCUED) done++;
+            if (prisoner == NULL) continue;
+            CELL cell = Coord_Cell(prisoner->Center_Coord());
+            if (state == PROC_PRISONER_HELD) {
+                held++;
+                if (stricmp(command, "free") == 0) Spawn_One(Commander, &InfantryTypeClass::As_Reference(INFANTRY_E1), cell, 1, 1, MISSION_GUARD);
+            } else if (state == PROC_PRISONER_FREE) {
+                freed++;
+                if (stricmp(command, "escort") == 0) {
+                    prisoner->Assign_Mission(MISSION_MOVE);
+                    prisoner->Assign_Target(TARGET_NONE);
+                    prisoner->Assign_Destination(::As_Target(Map.Nearby_Location(obj->Extraction, SPEED_FOOT)));
+                    prisoner->Commence();
+                } else if (stricmp(command, "deliver") == 0) {
+                    prisoner->Limbo();
+                    if (!Scan_Place_Object(prisoner, Random_Cell_Around(obj->Extraction, 1, 3))) prisoner->Unlimbo(Cell_Coord(cell), DIR_N);
+                    prisoner->Assign_Mission(MISSION_GUARD);
+                }
+            }
+        }
+        if (stricmp(command, "kill") == 0) {
+            for (int i = 0; i < obj->PrisonerCount; i++) {
+                TechnoClass * prisoner = Live_Unit(obj->Prisoners[i], obj->PrisonerTypes[i]);
+                if (prisoner != NULL) {
+                    int damage = prisoner->Strength;
+                    prisoner->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+                }
+            }
+            return held + freed;
+        }
+        if (stricmp(command, "free") == 0) return held;
+        if (stricmp(command, "escort") == 0 || stricmp(command, "deliver") == 0) return freed;
+        if (stricmp(command, "prisoners") == 0) return done * 100 + freed * 10 + held;
+    }
+
+    if (kind == PROC_OBJ_CONTROL) {
+        if (stricmp(command, "points") == 0) {
+            int held = 0;
+            for (int p = 0; p < obj->PointCount; p++) held += obj->IsPointHeld[p] ? 1 : 0;
+            return held;
+        }
+        bool occupy = (stricmp(command, "occupy") == 0);
+        if (occupy || stricmp(command, "contest") == 0) {
+            int done = 0;
+            for (int p = 0; p < obj->PointCount; p++) {
+                if (value >= 0 && value < obj->PointCount && p != value) continue;
+                CELL point = obj->Points[p];
+
+                // Clear the other side off the point...
+                TARGET victims[100];
+                int count = 0;
+                for (int layer = 0; layer < LAYER_COUNT; layer++) {
+                    for (int i = 0; i < Map.Layer[layer].Count() && count < ARRAY_SIZE(victims); i++) {
+                        ObjectClass * object = Map.Layer[layer][i];
+                        if (!object->Is_Foot()) continue;
+                        HouseClass * house = ((TechnoClass *)object)->House;
+                        if (house->Class->House == HOUSE_NEUTRAL || Is_Player_Team(house) != !occupy) continue;
+                        if (Cell_Dist(Coord_Cell(object->Center_Coord()), point) <= PROC_POINT_RADIUS + 3) victims[count++] = object->As_Target();
+                    }
+                }
+                for (int i = 0; i < count; i++) {
+                    TechnoClass * techno = As_Techno(victims[i]);
+                    if (techno == NULL || !techno->IsActive || techno->IsInLimbo || techno->Strength <= 0) continue;
+                    int damage = techno->Strength;
+                    techno->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+                }
+
+                // ... and put our own riflemen on it.
+                HouseClass * house = occupy ? Commander : Enemies[0].House;
+                for (int n = 0; n < 3; n++) {
+                    if (Spawn_One(house, &InfantryTypeClass::As_Reference(INFANTRY_E1), point, 0, 2, MISSION_GUARD) != NULL) done++;
+                }
+            }
+            return done;
+        }
+    }
+
     BuildingClass * target = (obj->Target != TARGET_NONE) ? As_Building(obj->Target) : NULL;
     if (target != NULL && (!target->IsActive || target->IsInLimbo || target->Class->Type != obj->TargetType)) target = NULL;
 
@@ -2997,8 +3531,9 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
     }
 
     if (stricmp(command, "clear") == 0) {
-        if (target == NULL) return -1;
-        CELL center = Coord_Cell(target->Center_Coord());
+        // Around the target structure, or the objective's spot (a rescue camp, a control point).
+        CELL center = (target != NULL) ? Coord_Cell(target->Center_Coord()) : (obj->Target != TARGET_NONE) ? As_Cell(obj->Target) : -1;
+        if (center == -1) return -1;
         TARGET victims[200];
         int count = 0;
         for (int layer = 0; layer < LAYER_COUNT; layer++) {
