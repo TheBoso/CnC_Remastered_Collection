@@ -30,7 +30,7 @@ $Here = $PSScriptRoot
 $Run = Join-Path $Here "run"
 $Content = Join-Path $GameDir "Data\CNCDATA\RED_ALERT\CD1"
 $MSBuild = "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\MSBuild\15.0\Bin\MSBuild.exe"
-$PresetFiles = @("PROCMISSION.INI", "PROCTEAMS.INI", "PROCBASES.INI", "PROCOBJECTIVES.INI")
+$PresetFiles = @("PROCMISSION.INI", "PROCTEAMS.INI", "PROCBASES.INI", "PROCOBJECTIVES.INI", "PROCEVENTS.INI")
 
 # Teams that need vehicles; none of them may appear at tech level 1.
 $ArmorTeams = @("SOV_HEAVY_RAID", "SOV_ARMOR_COLUMN", "SOV_V2_STRIKE", "SOV_HARV_HUNTERS", "SOV_COMBINED_ARMS",
@@ -1263,6 +1263,233 @@ $Tests = [ordered]@{
             if ($null -eq (Get-MsgFrame $r 'Reward received: \$2000 and the whole map revealed\.')) { $f += "no rescue reward" }
             if ($null -eq (Get-MsgFrame $r 'Reward received: \$4000\.')) { $f += "no control reward" }
             $f += Assert-NoOver $r
+            $f
+        }
+    }
+
+    events_situational = @{
+        # The director reads the situation: nothing special at the first check (an Any event fires),
+        # then the AI ally's base is hit and the next check answers with the distress call.
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "2400", "--do", "1300:hurtally:ALL:20", "--do", "1340:situation")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "PlayerStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "AllyStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Reinforcements" "no"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventFirstMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventMinMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventMaxMinutes" "1"
+            Set-IniValue "$d\PROCEVENTS.INI" "ALLY_DISTRESS" "Weight" "100000"
+        }
+        Check = { param($r)
+            $f = @()
+            $fired = @($r.Lines | Select-String "ProcMission: event (\w+) fired at (\d+)s \(situation: ([^)]*)\)")
+            if ($fired.Count -lt 2) { $f += "only $($fired.Count) events fired: $(($r.Lines -match 'ProcMission: event') -join ' | ')" }
+            else {
+                if ($fired[0].Matches[0].Groups[1].Value -eq "ALLY_DISTRESS") { $f += "the distress call came before the ally was attacked" }
+                $distress = $fired | Where-Object { $_.Matches[0].Groups[1].Value -eq "ALLY_DISTRESS" } | Select-Object -First 1
+                if (-not $distress) { $f += "no distress call after the ally was hit: $(($fired | ForEach-Object Line) -join ' | ')" }
+                elseif ($distress.Matches[0].Groups[3].Value -notmatch "ally attacked") { $f += "distress situation: $($distress.Matches[0].Groups[3].Value)" }
+            }
+            $s = Get-Test $r "situation" | Select-Object -First 1
+            if (-not $s -or ($s.Result -band 8) -eq 0) { $f += "situation after the hit lacks 'ally attacked' ($($s.Result))" }
+            $f
+        }
+    }
+
+    events_timing = @{
+        # Events start after EventFirstMinutes and keep coming; none in squad missions.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "4000")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventFirstMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventMinMinutes" "1"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventMaxMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            $fired = @($r.Lines | Select-String "ProcMission: event \w+ fired at (\d+)s")
+            if ($fired.Count -lt 2) { $f += "only $($fired.Count) events in 4 minutes: $(($r.Lines -match 'ProcMission: event') -join ' | ')" }
+            elseif ([int]$fired[0].Matches[0].Groups[1].Value -lt 59) { $f += "first event at $($fired[0].Matches[0].Groups[1].Value)s, before EventFirstMinutes" }
+            $f
+        }
+    }
+
+    events_not_in_squads = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "2000")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "COMMANDO_RAID"
+            Set-IniValue "$d\PROCMISSION.INI" "Normal" "EventFirstMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            if ($r.Lines -match "ProcMission: event ") { $f += "an event fired in a squad mission" }
+            $f
+        }
+    }
+
+    event_ally_distress = @{
+        # The ally's worst-hit base gets a protect objective, and enemy waves go for that ally.
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "1400", "--do", "440:hurtally:ALL:30", "--do", "450:event:ALLY_DISTRESS")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "AllyStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            $t = Get-Test $r "event" | Select-Object -First 1
+            if (-not $t -or $t.Result -ne 1) { $f += "the event did not fire" }
+            if (-not ($r.Lines -match "objective EVENT_ALLY_DISTRESS target \w+ at cell \d+ .*existing building")) { $f += "no ally building to protect" }
+            if ($null -eq (Get-MsgFrame $r "Your ally is under heavy attack")) { $f += "no distress message" }
+            if ($null -eq (Get-MsgFrame $r "Bonus: Help your ally")) { $f += "objective not announced" }
+            $waves = @($r.Lines | Select-String "wave \S+ \(sent, threat \d+, event ALLY_DISTRESS\) from \S+ -> (\S+)")
+            if ($waves.Count -ne 2) { $f += "$($waves.Count) waves sent at the ally (expected 2)" }
+            elseif ($waves[0].Matches[0].Groups[1].Value -eq "Tester") { $f += "the waves went for the human, not the ally" }
+            $f
+        }
+    }
+
+    event_ally_distress_win = @{
+        Args = @("--player", "Greece", "--allies", "England", "--enemies", "USSR", "--frames", "1500", "--do", "450:event:ALLY_DISTRESS")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "AllyStart" "Base"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCEVENTS.INI" "ALLY_DISTRESS" "Waves" "0"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "EVENT_ALLY_DISTRESS" "MinMinutes" "1"
+            Set-IniValue "$d\PROCOBJECTIVES.INI" "EVENT_ALLY_DISTRESS" "MaxMinutes" "1"
+        }
+        Check = { param($r)
+            $f = @()
+            $f += Assert-Objective $r "Help your ally" "COMPLETE"
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$2500\.')) { $f += "no reward" }
+            $f += Assert-NoOver $r
+            $f
+        }
+    }
+
+    event_convoy_kill = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "900", "--do", "450:event:CONVOY", "--do", "600:kill:EVENT_CONVOY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "objective EVENT_CONVOY target TRUK at cell \d+ .*convoy to cell \d+ \(\d+ cells\)")) { $f += "no convoy placed: $(($r.Lines -match 'EVENT_CONVOY|CONVOY') -join ' | ')" }
+            $f += Assert-Objective $r "Destroy the enemy supply truck" "COMPLETE"
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$3000\.')) { $f += "no reward" }
+            $f
+        }
+    }
+
+    event_convoy_through = @{
+        # Left alone, the convoy drives across the map and gets through.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "9000", "--do", "450:event:CONVOY")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Events" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            $f += Assert-Objective $r "Destroy the enemy supply truck" "FAILED"
+            if ($null -eq (Get-MsgFrame $r "The enemy convoy got through")) { $f += "no 'got through' message" }
+            $f += Assert-NoOver $r
+            $f
+        }
+    }
+
+    event_supply_drop = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1600", "--do", "450:event:SUPPLY_DROP", "--do", "460:occupy:EVENT_SUPPLY_DROP:-1")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCEVENTS.INI" "SUPPLY_DROP" "Waves" "0"
+        }
+        Check = { param($r)
+            $f = @()
+            if ($null -eq (Get-MsgFrame $r "A supply plane went down")) { $f += "no event message" }
+            $f += Assert-Objective $r "Secure the crash site" "COMPLETE"
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$2500\.')) { $f += "no reward" }
+            $f
+        }
+    }
+
+    event_supply_drop_contested = @{
+        # The enemy sends a wave to the crash site too.
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "600", "--do", "450:event:SUPPLY_DROP")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "wave \S+ \(sent, threat \d+, to a spot, event SUPPLY_DROP\)")) { $f += "no wave sent to the crash site" }
+            $f
+        }
+    }
+
+    event_downed_pilot = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "1000",
+            "--do", "450:event:DOWNED_PILOT", "--do", "460:free:EVENT_DOWNED_PILOT", "--do", "520:deliver:EVENT_DOWNED_PILOT")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+            Set-IniValue "$d\PROCEVENTS.INI" "DOWNED_PILOT" "Waves" "0"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "objective EVENT_DOWNED_PILOT: 1 prisoners at cell")) { $f += "no pilot placed" }
+            if ($r.Lines -match "outpost '\S+' for EVENT_DOWNED_PILOT") { $f += "the pilot got a camp (Owner=Neutral)" }
+            $f += Assert-Objective $r "Reach the downed pilot" "COMPLETE"
+            if ($null -eq (Get-MsgFrame $r 'Reward received: \$1000 and the whole map revealed\.')) { $f += "no reward" }
+            $f
+        }
+    }
+
+    event_commander = @{
+        Args = @("--player", "USSR", "--enemies", "Greece", "--frames", "900", "--do", "450:event:COMMANDER_SPOTTED", "--do", "600:kill:EVENT_COMMANDER_SPOTTED")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            if (-not ($r.Lines -match "outpost '\S+' for EVENT_COMMANDER_SPOTTED")) { $f += "no camp for the commander" }
+            $f += Assert-Objective $r "Kill the enemy commander" "COMPLETE"
+            $f
+        }
+    }
+
+    event_counterattack = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "600", "--do", "450:event:COUNTERATTACK")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            $waves = @($r.Lines | Select-String "wave \S+ \(sent, threat (\d+), event COUNTERATTACK\) from \S+ -> Tester")
+            if ($waves.Count -ne 2) { $f += "$($waves.Count) counter-attack waves (expected 2)" }
+            if ($null -eq (Get-MsgFrame $r "regrouping for a counter-attack")) { $f += "no warning" }
+            $f
+        }
+    }
+
+    event_reinforce = @{
+        Args = @("--player", "Greece", "--enemies", "USSR", "--frames", "700", "--do", "450:event:EMERGENCY_REINFORCEMENTS")
+        Patch = { param($d)
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Primary" "DESTROY_ALL"
+            Set-IniValue "$d\PROCMISSION.INI" "Generator" "Waves" "no"
+        }
+        Check = { param($r)
+            $f = @()
+            $sent = @($r.Lines | Select-String "reinforcements \S+ for Tester \(sent")
+            if ($sent.Count -lt 2) { $f += "$($sent.Count) reinforcement teams (expected 2)" }
+            if ($null -eq (Get-MsgFrame $r "emergency reinforcements")) { $f += "no message" }
             $f
         }
     }

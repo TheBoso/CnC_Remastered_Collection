@@ -34,7 +34,7 @@ if (-not (Test-Path $json)) {
 }
 
 Copy-Item "$Repo\bin\Win32\RedAlert.dll", "$Repo\bin\Win32\RedAlert.pdb" $data -Force
-foreach ($f in "PROCMISSION.INI", "PROCTEAMS.INI", "PROCBASES.INI", "PROCOBJECTIVES.INI") {
+foreach ($f in "PROCMISSION.INI", "PROCTEAMS.INI", "PROCBASES.INI", "PROCOBJECTIVES.INI", "PROCEVENTS.INI") {
     Copy-Item "$Repo\REDALERT\$f" $data -Force
 }
 $ini = Join-Path $data "PROCMISSION.INI"

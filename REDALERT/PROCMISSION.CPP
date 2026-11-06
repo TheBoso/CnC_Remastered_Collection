@@ -160,6 +160,15 @@ void ProcMissionManager::Reset()
     NextReinforce[0] = NextReinforce[1] = NextReinforce[2] = 0;
     ReinforceCounter = 0;
     ReinforceTypeCount = 0;
+    LastWaveFrame = 0;
+    NextEventFrame = 0;
+    EventsUsed = 0;
+    EventsFired = 0;
+    SentryCount = 0;
+    SentryLostFrame = 0;
+    AllyStrength = 0;
+    AllyHitFrame = 0;
+    PeakBuildings = 0;
 }
 
 bool ProcMissionManager::Generate(CCINIClass & scenario_ini)
@@ -1205,6 +1214,14 @@ void ProcMissionManager::Place_Sentries()
         taken[takencount++] = center;
         placed++;
 
+        // The director notices when a post with buildings is wiped out.
+        if ((int)owner->CurBuildings > before && SentryCount < PROC_MAX_SENTRIES) {
+            SentryCells[SentryCount] = center;
+            SentryOwners[SentryCount] = owner;
+            IsSentryLost[SentryCount] = false;
+            SentryCount++;
+        }
+
         int playerdist = -1;
         for (int i = 0; i < PlayerTeamCount; i++) {
             int dist = Cell_Dist(center, Home_Cell(PlayerTeam[i]));
@@ -1270,13 +1287,14 @@ CELL ProcMissionManager::Find_Sentry_Location(CELL const * taken, int takencount
  * OBJECTIVES
  ******************************************************************************/
 
-void ProcMissionManager::Place_Objective_Targets()
+void ProcMissionManager::Place_Objective_Targets(int first)
 {
     char buf[160];
     ProcObjectivePreset const * misfits[6];     // Bonuses that did not fit this map
     int misfitcount = 0;
 
-    for (int i = 0; i < ObjectiveCount; i++) {
+    // 'first': only the objectives from there on (an event's objective, added mid-mission).
+    for (int i = first; i < ObjectiveCount; i++) {
         ProcObjective & obj = Objectives[i];
         ProcObjectivePreset const * preset = obj.Preset;
 
@@ -1356,6 +1374,31 @@ void ProcMissionManager::Place_Objective_Targets()
                 minradius = 0;
                 maxradius = 5;
                 break;
+            case PROC_OWNER_ALLY: {
+                // One of an AI ally's own buildings (an ally in distress): the ally whose base is worst hit.
+                int worst = 101;
+                for (int h = 0; h < PlayerTeamCount; h++) {
+                    HouseClass * ally = PlayerTeam[h];
+                    if (ally->IsHuman || !Is_Alive(ally) || ally->CurBuildings == 0) continue;
+                    long strength = 0, maximum = 0;
+                    for (int b = 0; b < Buildings.Count(); b++) {
+                        BuildingClass const * building = Buildings.Ptr(b);
+                        if ((HouseClass *)building->House != ally || building->IsInLimbo || building->Strength <= 0) continue;
+                        strength += building->Strength;
+                        maximum += building->Class->MaxStrength;
+                    }
+                    int health = maximum ? (int)(strength * 100 / maximum) : 100;
+                    if (health < worst) {
+                        worst = health;
+                        owner = ally;
+                    }
+                }
+                if (owner == NULL) break;
+                center = Home_Cell(owner);
+                minradius = 3;
+                maxradius = 9;
+                break;
+            }
             default:
                 break;
         }
@@ -1381,7 +1424,7 @@ void ProcMissionManager::Place_Objective_Targets()
         // ("destroy their refinery", "keep your power plant online"); a new one is only added
         // when it has none (crowded bases may have no room).
         bool existing = false;
-        bool inbase = (preset->Owner == PROC_OWNER_ENEMY || preset->Owner == PROC_OWNER_PLAYER);
+        bool inbase = (preset->Owner == PROC_OWNER_ENEMY || preset->Owner == PROC_OWNER_PLAYER || preset->Owner == PROC_OWNER_ALLY);
         if (inbase) {
             // Any of the base's own buildings: a crowded base spreads up to 12 cells further out.
             obj.Target = Find_Existing_Any(owner, candidates, candidatecount, center, maxradius + 12, obj.TargetType);
@@ -1428,7 +1471,7 @@ void ProcMissionManager::Place_Objective_Targets()
         }
 
         // A target added to a base must not leave it short of power.
-        if (!existing && (preset->Owner == PROC_OWNER_PLAYER || preset->Owner == PROC_OWNER_ENEMY)) {
+        if (!existing && inbase) {
             Add_Power(owner, center);
         }
 
@@ -1461,7 +1504,7 @@ void ProcMissionManager::Place_Objective_Targets()
     /*
     **	A primary objective without its target is impossible; fall back to destroying the enemy.
     */
-    if (ObjectiveCount > 0 && Objectives[0].State == PROC_STATE_FAILED) {
+    if (first == 0 && ObjectiveCount > 0 && Objectives[0].State == PROC_STATE_FAILED) {
         GlyphX_Debug_Print("ProcMission: primary objective unusable, falling back to destroy all enemies");
         ProcObjectivePreset const * fallback = NULL;
         for (int i = 0; i < ProcPresets.ObjectiveCount && fallback == NULL; i++) {
@@ -1482,7 +1525,7 @@ void ProcMissionManager::Place_Objective_Targets()
 */
 bool ProcMissionManager::Replace_Misfit(ProcObjective & obj, ProcObjectivePreset const ** misfits, int & misfitcount)
 {
-    if (obj.IsPrimary || misfitcount >= 6) return false;
+    if (obj.IsPrimary || obj.IsEvent || misfitcount >= 6) return false;
 
     ProcObjectivePreset const * preset = obj.Preset;
     misfits[misfitcount++] = preset;
@@ -1505,7 +1548,7 @@ bool ProcMissionManager::Replace_Misfit(ProcObjective & obj, ProcObjectivePreset
 /*
 **	The objective's Guard= team around 'cell'. Enemy guards are scaled by the difficulty.
 */
-void ProcMissionManager::Place_Guard(ProcObjectivePreset const * preset, HouseClass * house, CELL cell)
+void ProcMissionManager::Place_Guard(ProcObjectivePreset const * preset, HouseClass * house, CELL cell, CELL moveto)
 {
     ProcTeamPreset const * guard = (preset->Guard[0] != '\0') ? ProcPresets.Find_Team(preset->Guard) : NULL;
     if (guard == NULL || house == NULL || cell == -1) return;
@@ -1515,7 +1558,16 @@ void ProcMissionManager::Place_Guard(ProcObjectivePreset const * preset, HouseCl
         if (!Is_Allowed(*guard->Members[m].Type, house)) continue;
         int count = guard->Members[m].Count;
         if (house != Commander) count = max(1, (count * Diff.GuardScalePct + 50) / 100);
-        Place_Units(house, guard->Members[m].Type, count, cell, mission);
+        for (int n = 0; n < count; n++) {
+            TechnoClass * unit = Spawn_One(house, guard->Members[m].Type, cell, 2, 7, mission);
+
+            // Escorts travel with what they guard (a convoy).
+            if (unit != NULL && moveto != -1) {
+                unit->Assign_Mission(MISSION_MOVE);
+                unit->Assign_Destination(::As_Target(Map.Nearby_Location(moveto, SPEED_TRACK)));
+                unit->Commence();
+            }
+        }
     }
 }
 
@@ -1573,7 +1625,39 @@ bool ProcMissionManager::Place_Unit_Objective(ProcObjective & obj, int faraway, 
         return true;
     }
 
-    // A camp away from the bases, or a spot inside an enemy base.
+    /*
+    **	A convoy drives from the map edge nearest the player's team to an enemy base, right across
+    **	the map, with its escorts; it must be stopped before it gets there.
+    */
+    if (preset->Kind == PROC_OBJ_ASSASSINATE && preset->IsConvoy) {
+        int enemy = Random_Pick(0, EnemyCount - 1);
+        for (int e = 0; e < EnemyCount && Enemies[enemy].House->CurBuildings == 0; e++) enemy = (enemy + 1) % EnemyCount;
+        HouseClass * owner = Enemies[enemy].House;
+        CELL destination = Map.Nearby_Location(Enemies[enemy].Home, SPEED_WHEEL);
+        CELL start = Find_Edge_Cell(Home_Cell(Commander), MZONE_NORMAL, SPEED_WHEEL);
+        if (start == -1 || destination <= 0 || Map[start].Zones[MZONE_NORMAL] != Map[destination].Zones[MZONE_NORMAL]) return false;
+        if (Cell_Dist(start, destination) < 30) return false;
+
+        ProcTechnoCount const & pick = preset->TargetUnits[Random_Pick(0, preset->TargetUnitCount - 1)];
+        TechnoClass * target = Spawn_One(owner, pick.Type, start, 0, 2, MISSION_GUARD);
+        if (target == NULL) return false;
+        target->Assign_Mission(MISSION_MOVE);
+        target->Assign_Destination(::As_Target(destination));
+        target->Commence();
+        obj.Target = target->As_Target();
+        obj.UnitType = pick.Type;
+        obj.Retreat = destination;
+        obj.IsFleeing = true;
+        Place_Guard(preset, owner, start, destination);
+
+        CELL cell = Coord_Cell(target->Center_Coord());
+        sprintf(buf, "ProcMission: objective %s target %s at cell %d (%d cells from the area centre, radius %d), convoy to cell %d (%d cells)",
+            preset->Name, pick.Type->IniName, (int)cell, Cell_Dist(cell, start), 5, (int)destination, Cell_Dist(cell, destination));
+        GlyphX_Debug_Print(buf);
+        return true;
+    }
+
+    // A camp away from the bases (or just a spot, Owner=Neutral), or a spot inside an enemy base.
     int enemyindex = Random_Pick(0, EnemyCount - 1);
     HouseClass * owner = Enemies[enemyindex].House;
     CELL center = -1;
@@ -1583,7 +1667,7 @@ bool ProcMissionManager::Place_Unit_Objective(ProcObjective & obj, int faraway, 
         if (center != -1 && !Map[center].Is_Clear_To_Move(SPEED_FOOT, false, false)) center = -1;
     }
     if (center == -1) return false;
-    if (camp) Build_Outpost(owner, preset, center);
+    if (preset->Owner == PROC_OWNER_OUTPOST) Build_Outpost(owner, preset, center);
 
     if (preset->Kind == PROC_OBJ_ASSASSINATE) {
         ProcTechnoCount const & pick = preset->TargetUnits[Random_Pick(0, preset->TargetUnitCount - 1)];
@@ -1716,8 +1800,6 @@ void ProcMissionManager::Objective_Text(ProcObjective const & objective, char * 
 
 void ProcMissionManager::Announce_Objectives()
 {
-    char buf[PROC_TEXT_LEN + 192];
-
     // Spectators see the whole battlefield.
     if (IsSpectating) {
         for (int h = 0; h < PlayerTeamCount; h++) {
@@ -1730,20 +1812,28 @@ void ProcMissionManager::Announce_Objectives()
     }
 
     for (int i = 0; i < ObjectiveCount; i++) {
-        if (Objectives[i].State != PROC_STATE_ACTIVE) continue;
-        Objective_Text(Objectives[i], buf, sizeof(buf));
-        Message(buf);
+        if (Objectives[i].State == PROC_STATE_ACTIVE) Announce_Objective(i);
+    }
+}
 
-        if (Objectives[i].Target != TARGET_NONE) {
-            // Show the player where it is: reveal the area around it for every human on the team.
-            for (int h = 0; h < PlayerTeamCount; h++) {
-                if (!PlayerTeam[h]->IsHuman) continue;
-                Map.Sight_From(As_Cell(Objectives[i].Target), PROC_REVEAL_RADIUS, PlayerTeam[h], false);
-                for (int p = 1; p < Objectives[i].PointCount; p++) Map.Sight_From(Objectives[i].Points[p], PROC_REVEAL_RADIUS, PlayerTeam[h], false);
-            }
-            On_Ping(Commander, As_Coord(Objectives[i].Target));
-            for (int p = 1; p < Objectives[i].PointCount; p++) On_Ping(Commander, Cell_Coord(Objectives[i].Points[p]));
+/*
+**	Shows one objective: its text, and where it is (revealed around it, pinged on the radar).
+*/
+void ProcMissionManager::Announce_Objective(int i)
+{
+    char buf[PROC_TEXT_LEN + 192];
+    Objective_Text(Objectives[i], buf, sizeof(buf));
+    Message(buf);
+
+    if (Objectives[i].Target != TARGET_NONE) {
+        // Show the player where it is: reveal the area around it for every human on the team.
+        for (int h = 0; h < PlayerTeamCount; h++) {
+            if (!PlayerTeam[h]->IsHuman) continue;
+            Map.Sight_From(As_Cell(Objectives[i].Target), PROC_REVEAL_RADIUS, PlayerTeam[h], false);
+            for (int p = 1; p < Objectives[i].PointCount; p++) Map.Sight_From(Objectives[i].Points[p], PROC_REVEAL_RADIUS, PlayerTeam[h], false);
         }
+        On_Ping(Commander, As_Coord(Objectives[i].Target));
+        for (int p = 1; p < Objectives[i].PointCount; p++) On_Ping(Commander, Cell_Coord(Objectives[i].Points[p]));
     }
 }
 
@@ -1900,6 +1990,19 @@ void ProcMissionManager::Update_Assassinate(ProcObjective & obj, bool timeup)
     }
     if (timeup) {
         Fail_Objective(obj);
+        return;
+    }
+
+    // A convoy that gets through is lost; one that stopped (blocked, or done shooting back) drives on.
+    if (obj.Preset->IsConvoy) {
+        if (Cell_Dist(Coord_Cell(target->Center_Coord()), obj.Retreat) <= 4) {
+            Message("The enemy convoy got through.");
+            Fail_Objective(obj);
+        } else if (target->Get_Mission() != MISSION_MOVE) {
+            target->Assign_Mission(MISSION_MOVE);
+            target->Assign_Destination(::As_Target(obj.Retreat));
+            target->Commence();
+        }
         return;
     }
     if (obj.IsFleeing || obj.Retreat == -1) return;
@@ -2408,16 +2511,20 @@ void ProcMissionManager::Collect_Wave_Types()
 
 static int Naval_Range(ProcTeamPreset const * preset);
 
-void ProcMissionManager::Spawn_Wave(HouseClass * house)
+/*
+**	Sends a wave from this house. Events can pick the victim, send it to a spot (it moves there
+**	and holds it) and make it 'boost' threat steps stronger than the director would.
+*/
+bool ProcMissionManager::Spawn_Wave(HouseClass * house, HouseClass * victim, CELL spot, int boost, char const * why)
 {
-    ProcThreatType high = Current_Threat();
+    ProcThreatType high = (ProcThreatType)min((int)PROC_THREAT_COUNT - 1, (int)Current_Threat() + boost);
     ProcThreatType low = (ProcThreatType)max((int)PROC_THREAT_SCOUT, (int)high - 1);
 
-    HouseClass * victim = Pick_Victim(house);
-    if (victim == NULL) return;
+    if (victim == NULL) victim = Pick_Victim(house);
+    if (victim == NULL) return false;
 
     // Some waves come by sea, from a house that has a naval yard.
-    CELL yard = Naval_Yard_Cell(house);
+    CELL yard = (spot == -1) ? Naval_Yard_Cell(house) : -1;
     ProcTeamPreset const * preset = NULL;
     if (yard != -1 && Random_Pick(0, 99) < Diff.NavalChance) {
         preset = Pick_Naval_Team(house, victim, yard);
@@ -2426,11 +2533,11 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
     if (preset == NULL) {
         preset = ProcPresets.Pick_Team(Proc_Side_Of(house), PROC_TEAM_ATTACK, low, high, house->Control.TechLevel);
     }
-    if (preset == NULL) return;
+    if (preset == NULL) return false;
 
     CELL home = Home_Cell(house);
     TeamTypeClass * tt = Make_Wave_Type(preset, house, victim, home);
-    if (tt == NULL) return;
+    if (tt == NULL) return false;
 
     /*
     **	Ships shell what their guns can reach from the water. Left to pick their own targets they
@@ -2453,8 +2560,8 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
     **	Control missions: most land waves go to retake a point the player holds, and stay to
     **	guard it (a Do mission never ends, so the team keeps the point).
     */
-    CELL point = naval ? -1 : Contested_Point();
-    if (point != -1 && Random_Pick(0, 99) < 70) {
+    CELL point = naval ? -1 : (spot != -1) ? spot : Contested_Point();
+    if (point != -1 && (spot != -1 || Random_Pick(0, 99) < 70)) {
         CELL spot = Map.Nearby_Location(point, SPEED_TRACK);
         tt->MissionList[0].Mission = TMISSION_MOVECELL;
         tt->MissionList[0].Data.Value = spot;
@@ -2467,15 +2574,19 @@ void ProcMissionManager::Spawn_Wave(HouseClass * house)
 
     bool ok = naval ? Spawn_Team(tt, yard, 0, 0) : Deliver_Wave(tt, home);
 
-    char buf[160];
-    sprintf(buf, "ProcMission: wave %s (%s, threat %d%s%s) from %s -> %s", preset->Name, ok ? "sent" : "failed",
-        (int)preset->Threat, naval ? ", by sea" : "", (point != -1) ? ", to a control point" : "", house->IniName, victim->IniName);
+    char buf[200];
+    sprintf(buf, "ProcMission: wave %s (%s, threat %d%s%s%s%s) from %s -> %s", preset->Name, ok ? "sent" : "failed",
+        (int)preset->Threat, naval ? ", by sea" : "", (point != -1) ? ((spot != -1) ? ", to a spot" : ", to a control point") : "",
+        why ? ", event " : "", why ? why : "", house->IniName, victim->IniName);
     GlyphX_Debug_Print(buf);
 
     if (!ok) {
         WaveTypes[--WaveTypeCount] = NULL;
         delete tt;
+        return false;
     }
+    LastWaveFrame = Elapsed;
+    return true;
 }
 
 /*
@@ -3049,6 +3160,10 @@ void ProcMissionManager::Director_AI()
 
     if ((Elapsed % (TICKS_PER_SECOND * 2)) == 0) {
         Superweapon_AI();
+        Track_Situation();
+    }
+    if ((Elapsed % (TICKS_PER_SECOND * 5)) == 0) {
+        Events_AI();
     }
 
     if (!Settings.IsWaves || Elapsed < NextWaveFrame) return;
@@ -3068,6 +3183,225 @@ void ProcMissionManager::Director_AI()
         // Too many waves alive; look again shortly.
         NextWaveFrame = Elapsed + TICKS_PER_SECOND * 10;
     }
+}
+
+
+/*******************************************************************************
+ * EVENTS
+ *
+ * Every few minutes the director throws a twist (PROCEVENTS.INI), picked for the
+ * situation: an ally under attack calls for help, a player who is ahead gets a
+ * counter-attack, one who is behind gets help, a quiet spell gets a convoy to hunt.
+ ******************************************************************************/
+
+/*
+**	What the situation reads need over time: the humans' peak building count, damage to the
+**	AI allies' bases, and sentry posts that have fallen.
+*/
+void ProcMissionManager::Track_Situation()
+{
+    char buf[128];
+
+    int buildings = 0;
+    long allies = 0;
+    for (int h = 0; h < PlayerTeamCount; h++) {
+        if (PlayerTeam[h]->IsHuman) buildings += PlayerTeam[h]->CurBuildings;
+    }
+    PeakBuildings = max(PeakBuildings, buildings);
+
+    for (int i = 0; i < Buildings.Count(); i++) {
+        BuildingClass const * building = Buildings.Ptr(i);
+        if (building->IsInLimbo || building->Strength <= 0) continue;
+        HouseClass const * house = building->House;
+        if (!house->IsHuman && Is_Player_Team(house)) allies += building->Strength;
+    }
+    // A drop of 2% (losses count, repairs don't hide a new hit for long).
+    if (AllyStrength > 0 && allies < AllyStrength - max(1L, AllyStrength / 50)) {
+        if (AllyHitFrame == 0 || Elapsed - AllyHitFrame >= TICKS_PER_MINUTE) {
+            sprintf(buf, "ProcMission: AI allies' bases under attack (strength %ld -> %ld)", AllyStrength, allies);
+            GlyphX_Debug_Print(buf);
+        }
+        AllyHitFrame = Elapsed;
+    }
+    AllyStrength = allies;
+
+    for (int s = 0; s < SentryCount; s++) {
+        if (IsSentryLost[s]) continue;
+        bool standing = false;
+        for (int i = 0; i < Buildings.Count() && !standing; i++) {
+            BuildingClass const * building = Buildings.Ptr(i);
+            if ((HouseClass *)building->House != SentryOwners[s] || building->IsInLimbo || building->Strength <= 0) continue;
+            if (Cell_Dist(Coord_Cell(building->Center_Coord()), SentryCells[s]) <= 5) standing = true;
+        }
+        if (!standing) {
+            IsSentryLost[s] = true;
+            SentryLostFrame = Elapsed;
+            sprintf(buf, "ProcMission: sentry post at cell %d destroyed", (int)SentryCells[s]);
+            GlyphX_Debug_Print(buf);
+        }
+    }
+}
+
+int ProcMissionManager::Situation() const
+{
+    int situation = PROC_WHEN_ANY;
+
+    for (int i = 0; i < EnemyCount; i++) {
+        int initial = Enemies[i].InitialBuildings;
+        if (initial > 0 && (initial - (int)Enemies[i].House->CurBuildings) * 4 >= initial) situation |= PROC_WHEN_AHEAD;
+    }
+
+    int buildings = 0;
+    for (int h = 0; h < PlayerTeamCount; h++) {
+        if (PlayerTeam[h]->IsHuman) buildings += PlayerTeam[h]->CurBuildings;
+    }
+    if (PeakBuildings >= 4 && buildings * 10 < PeakBuildings * 7) situation |= PROC_WHEN_BEHIND;
+
+    if (AllyHitFrame != 0 && Elapsed - AllyHitFrame < TICKS_PER_MINUTE) situation |= PROC_WHEN_ALLY_ATTACKED;
+    if (SentryLostFrame != 0 && Elapsed - SentryLostFrame < 2 * TICKS_PER_MINUTE) situation |= PROC_WHEN_SENTRY_LOST;
+    if (Active_Waves() == 0 && Elapsed - LastWaveFrame > TICKS_PER_MINUTE) situation |= PROC_WHEN_QUIET;
+    return situation;
+}
+
+static void Situation_Names(int situation, char * buffer)
+{
+    static char const * const names[PROC_WHEN_COUNT] = {"any", "ahead", "behind", "ally attacked", "sentry lost", "quiet"};
+    buffer[0] = '\0';
+    for (int w = 1; w < PROC_WHEN_COUNT; w++) {
+        if ((situation & (1 << w)) == 0) continue;
+        if (buffer[0] != '\0') strcat(buffer, ", ");
+        strcat(buffer, names[w]);
+    }
+    if (buffer[0] == '\0') strcpy(buffer, "nothing special");
+}
+
+void ProcMissionManager::Events_AI()
+{
+    if (!Settings.IsEvents || IsSquad || IsSpectating || IsFinished || ProcPresets.EventCount == 0 || EnemyCount == 0) return;
+
+    if (NextEventFrame == 0) NextEventFrame = StartFrame + (long)Diff.EventFirstMinutes * TICKS_PER_MINUTE;
+    if (Elapsed < NextEventFrame) return;
+
+    int situation = Situation();
+    int minutes = (int)((Elapsed - StartFrame) / TICKS_PER_MINUTE);
+    for (int tries = 0; tries < 4; tries++) {
+        ProcEventPreset const * event = ProcPresets.Pick_Event(PlayerSide, TechLevel, situation, minutes, EventsUsed);
+        if (event == NULL) break;
+        unsigned long bit = 1UL << (event - ProcPresets.Events);
+
+        if (Fire_Event(event)) {
+            if (event->IsOnce) EventsUsed |= bit;
+            EventsFired++;
+            NextEventFrame = Elapsed + (long)Random_Pick(Diff.EventMinMinutes, Diff.EventMaxMinutes) * TICKS_PER_MINUTE;
+            return;
+        }
+        // An objective that doesn't fit this map won't fit later either; waves and help can wait.
+        if (event->Kind == PROC_EVENT_OBJECTIVE) EventsUsed |= bit;
+        else break;
+    }
+    NextEventFrame = Elapsed + TICKS_PER_SECOND * 30;
+}
+
+/*
+**	Adds a Slot=Event objective mid-mission and places it. Returns its index, or -1.
+*/
+int ProcMissionManager::Add_Event_Objective(ProcObjectivePreset const * preset)
+{
+    // Finished event objectives make room for new ones.
+    for (int i = 1; i < ObjectiveCount; i++) {
+        if (Objectives[i].IsEvent && Objectives[i].State != PROC_STATE_ACTIVE) {
+            for (int j = i; j < ObjectiveCount - 1; j++) Objectives[j] = Objectives[j + 1];
+            ObjectiveCount--;
+            i--;
+        }
+    }
+    if (ObjectiveCount >= PROC_MAX_OBJECTIVES) return -1;
+    for (int i = 0; i < ObjectiveCount; i++) {
+        if (Objectives[i].Preset == preset) return -1;      // Already on
+    }
+
+    int index = ObjectiveCount++;
+    ProcObjective & obj = Objectives[index];
+    obj = ProcObjective();
+    obj.Preset = preset;
+    obj.IsEvent = true;
+    obj.Minutes = Random_Pick(preset->MinMinutes, preset->MaxMinutes);
+    Place_Objective_Targets(index);
+
+    if (obj.State != PROC_STATE_ACTIVE || (obj.Target == TARGET_NONE && preset->TargetCount > 0 && preset->Kind != PROC_OBJ_CONTROL)) {
+        ObjectiveCount--;
+        return -1;
+    }
+    return index;
+}
+
+bool ProcMissionManager::Fire_Event(ProcEventPreset const * event)
+{
+    char buf[256];
+    char situation[96];
+    Situation_Names(Situation(), situation);
+    bool ok = false;
+
+    switch (event->Kind) {
+        case PROC_EVENT_OBJECTIVE: {
+            ProcObjectivePreset const * preset = ProcPresets.Find_Objective(event->Objective);
+            int index = (preset != NULL) ? Add_Event_Objective(preset) : -1;
+            if (index < 0) {
+                sprintf(buf, "ProcMission: event %s: objective %s %s", event->Name, event->Objective, preset ? "could not be placed" : "not found");
+                GlyphX_Debug_Print(buf);
+                return false;
+            }
+            if (event->Text[0] != '\0') Message(event->Text);
+            Announce_Objective(index);
+
+            // Waves after it: an ally's base in distress is attacked, anything else is contested.
+            ProcObjective const & obj = Objectives[index];
+            BuildingClass * building = (preset->Owner == PROC_OWNER_ALLY) ? As_Building(obj.Target) : NULL;
+            HouseClass * victim = (building != NULL) ? (HouseClass *)building->House : NULL;
+            CELL where = (victim != NULL) ? Home_Cell(victim) : As_Cell(obj.Target);
+            int enemy = -1;
+            for (int e = 0; e < EnemyCount; e++) {
+                if (!Is_Alive(Enemies[e].House) || Enemies[e].House->CurBuildings == 0) continue;
+                if (enemy == -1 || Cell_Dist(where, Enemies[e].Home) < Cell_Dist(where, Enemies[enemy].Home)) enemy = e;
+            }
+            for (int n = 0; n < event->Waves && enemy != -1; n++) {
+                Spawn_Wave(Enemies[enemy].House, (victim != NULL) ? victim : Commander, (victim != NULL) ? -1 : where, 0, event->Name);
+            }
+            ok = true;
+            break;
+        }
+
+        case PROC_EVENT_COUNTERATTACK: {
+            // From the enemy with the most left to throw.
+            int enemy = -1;
+            for (int e = 0; e < EnemyCount; e++) {
+                if (!Is_Alive(Enemies[e].House) || Enemies[e].House->CurBuildings == 0) continue;
+                if (enemy == -1 || Enemies[e].House->CurBuildings > Enemies[enemy].House->CurBuildings) enemy = e;
+            }
+            if (enemy == -1 || !Is_Alive(Commander)) return false;
+            for (int n = 0; n < max(1, event->Waves); n++) {
+                if (Spawn_Wave(Enemies[enemy].House, Commander, -1, event->ThreatBoost, event->Name)) ok = true;
+            }
+            if (ok && event->Text[0] != '\0') Message(event->Text);
+            break;
+        }
+
+        case PROC_EVENT_REINFORCE:
+            for (int n = 0; n < max(1, event->Waves); n++) {
+                for (int h = 0; h < PlayerTeamCount; h++) {
+                    if (PlayerTeam[h]->IsHuman && Is_Alive(PlayerTeam[h]) && Send_Reinforcements(PlayerTeam[h])) ok = true;
+                }
+            }
+            if (ok && event->Text[0] != '\0') Message(event->Text);
+            break;
+
+        default:
+            break;
+    }
+
+    sprintf(buf, "ProcMission: event %s %s at %lds (situation: %s)", event->Name, ok ? "fired" : "failed", (Elapsed - StartFrame) / TICKS_PER_SECOND, situation);
+    GlyphX_Debug_Print(buf);
+    return ok;
 }
 
 
@@ -3263,6 +3597,11 @@ void ProcMissionManager::Message(char const * text) const
  *   contest  <objective> <p>     Control: kill the player's units at point p and put three enemy riflemen there
  *   points   <objective>         Control: returns how many points the player's team holds
  *
+ *   Events:
+ *   event    <event>             fire this PROCEVENTS.INI event now; returns 1 if it fired
+ *   situation                    returns the director's situation (PROC_WHEN_* bits)
+ *   hurtally ALL <pct>           damage every AI ally building by pct % of its strength
+ *
  * Returns -1 for an unknown command or objective.
  ******************************************************************************/
 
@@ -3272,6 +3611,32 @@ int ProcMissionManager::Test_Command(char const * command, char const * objectiv
     if (objective == NULL) objective = "";
 
     if (stricmp(command, "credits") == 0) return (int)Commander->Available_Money();
+
+    if (stricmp(command, "situation") == 0) return Situation();
+    if (stricmp(command, "event") == 0) {
+        ProcEventPreset const * event = ProcPresets.Find_Event(objective);
+        if (event == NULL) return -1;
+        bool ok = Fire_Event(event);
+        if (ok) EventsFired++;
+        return ok ? 1 : 0;
+    }
+    if (stricmp(command, "hurtally") == 0) {
+        TARGET victims[200];
+        int count = 0;
+        for (int i = 0; i < Buildings.Count() && count < ARRAY_SIZE(victims); i++) {
+            BuildingClass * building = Buildings.Ptr(i);
+            if (building->IsInLimbo || building->Strength <= 0 || building->House->IsHuman || !Is_Player_Team(building->House)) continue;
+            victims[count++] = building->As_Target();
+        }
+        for (int i = 0; i < count; i++) {
+            BuildingClass * building = As_Building(victims[i]);
+            if (building == NULL || building->Strength <= 0) continue;
+            int damage = max(1, (int)building->Class->MaxStrength * value / 100);
+            if (damage >= building->Strength) damage = building->Strength - 1;      // Hurt, not destroyed
+            if (damage > 0) building->Take_Damage(damage, 0, WARHEAD_HE, NULL, true);
+        }
+        return count;
+    }
     if (stricmp(command, "units") == 0) return Commander->CurInfantry + Commander->CurUnits + Commander->CurVessels + Commander->CurAircraft;
     if (stricmp(command, "buildings") == 0) return Commander->CurBuildings;
 

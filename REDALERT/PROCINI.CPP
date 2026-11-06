@@ -20,8 +20,10 @@ static char const * s_ThreatNames[PROC_THREAT_COUNT] = {"Scout", "Light", "Mediu
 static char const * s_TeamRoleNames[PROC_TEAM_ROLE_COUNT] = {"Attack", "Defense", "Patrol", "Squad", "Reinforce"};
 static char const * s_BaseRoleNames[PROC_BASE_ROLE_COUNT] = {"Main", "Outpost", "Defend", "Camp", "Sentry"};
 static char const * s_KindNames[PROC_OBJ_KIND_COUNT] = {"DestroyBases", "Survive", "Destroy", "Capture", "Protect", "Assassinate", "Rescue", "Control"};
-static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either"};
-static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player", "Outpost"};
+static char const * s_SlotNames[PROC_SLOT_COUNT] = {"Primary", "Secondary", "Either", "Event"};
+static char const * s_OwnerNames[PROC_OWNER_COUNT] = {"Enemy", "Neutral", "Player", "Outpost", "Ally"};
+static char const * s_EventKindNames[PROC_EVENT_KIND_COUNT] = {"Objective", "Counterattack", "Reinforce"};
+static char const * s_WhenNames[PROC_WHEN_COUNT] = {"Any", "Ahead", "Behind", "AllyAttacked", "SentryLost", "Quiet"};
 static char const * s_SpawnNames[PROC_SPAWN_COUNT] = {"Base", "Edge"};
 static char const * s_StartNames[PROC_START_COUNT] = {"MCV", "Base", "Random", "Same"};
 static char const * s_DiffNames[DIFF_COUNT] = {"Easy", "Normal", "Hard"};
@@ -71,12 +73,21 @@ ProcBasePreset::ProcBasePreset() :
     for (int d = 0; d < DIFF_COUNT; d++) DiffWeight[d] = Weight;
 }
 
+ProcEventPreset::ProcEventPreset() :
+    Kind(PROC_EVENT_OBJECTIVE), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10), When(PROC_WHEN_ANY), MinMinutes(0),
+    IsOnce(true), Waves(0), ThreatBoost(0)
+{
+    Name[0] = '\0';
+    Objective[0] = '\0';
+    Text[0] = '\0';
+}
+
 ProcObjectivePreset::ProcObjectivePreset() :
     Kind(PROC_OBJ_DESTROY_BASES), Slot(PROC_SLOT_EITHER), PlayerSide(PROC_SIDE_ANY), MinTech(1), Weight(10),
     MinMinutes(0), MaxMinutes(0), TargetCount(0), Owner(PROC_OWNER_ENEMY), RewardCredits(0), RewardUnitCount(0), IsRewardReveal(false),
     IsSquadStart(false), SquadCount(0), PlayerCredits(-1), WavesOverride(-1), WaveDelaySeconds(0),
     EnemyProductionOverride(-1), WaveRate(100), ExtraWaves(0), EnemyReinforceMinutes(0), IsHuntingReinforcements(false), Patrols(0), PatrolThreat(PROC_THREAT_OVERWHELMING),
-    TargetUnitCount(0), PrisonerCount(0), RescueNeeded(0), PointCount(0)
+    TargetUnitCount(0), IsConvoy(false), PrisonerCount(0), RescueNeeded(0), PointCount(0)
 {
     RewardText[0] = '\0';
     Name[0] = '\0';
@@ -95,13 +106,14 @@ ProcDifficultyPreset::ProcDifficultyPreset() :
     MaxThreat(PROC_THREAT_HEAVY), EscalateMinutes(5), NavalChance(35), PlayerReinforceMinutes(8),
     AllyReinforceMinutes(8), EnemyReinforceMinutes(10), FactoryScalePct(100), SuperweaponCount(0),
     BaseWaveRatePct(100), BaseWaveSizePct(100), BaseFirstWavePct(100), BaseThreatSteps(0), BaseExtraWaves(0),
-    MinConstructionYards(1), MinRefineries(1), SentriesMin(0), SentriesMax(0)
+    MinConstructionYards(1), MinRefineries(1), EventFirstMinutes(6), EventMinMinutes(5), EventMaxMinutes(8),
+    SentriesMin(0), SentriesMax(0)
 {
 }
 
 ProcSettings::ProcSettings() :
     Difficulty(DIFF_NORMAL), SecondaryMin(0), SecondaryMax(2), TechLevel(0), IsWaves(true), IsEnemyProduction(false), IsReinforcements(true),
-    IsKeepStartUnits(false), IsAllMaps(false), IsSpectate(false), IsSentries(true), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
+    IsKeepStartUnits(false), IsAllMaps(false), IsSpectate(false), IsSentries(true), IsEvents(true), WaveMinSeconds(90), WaveMaxSeconds(180), SpawnMode(PROC_SPAWN_BASE),
     PlayerStart(PROC_START_RANDOM), AllyStart(PROC_START_SAME), PlayerBaseChance(35)
 {
     strcpy(Primary, "RANDOM");
@@ -485,6 +497,7 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     obj.IsRewardReveal = ini.Get_Bool(section, "RewardReveal", false);
     ini.Get_String(section, "RewardText", "", obj.RewardText, sizeof(obj.RewardText));
     Parse_Techno_List(ini, section, "TargetUnit", obj.TargetUnits, PROC_MAX_TARGET_TYPES, obj.TargetUnitCount);
+    obj.IsConvoy = ini.Get_Bool(section, "Convoy", false);
     Parse_Techno_List(ini, section, "Prisoners", obj.Prisoners, PROC_MAX_MEMBERS, obj.PrisonerCount);
     obj.RescueNeeded = max(0, ini.Get_Int(section, "RescueNeeded", 0));
     obj.PointCount = Bound(ini.Get_Int(section, "Points", 0), 0, PROC_MAX_POINTS);
@@ -503,6 +516,43 @@ static bool Parse_Objective(CCINIClass & ini, char const * section, ProcObjectiv
     if (obj.Kind == PROC_OBJ_RESCUE && obj.PrisonerCount == 0) return false;
     if (obj.Kind == PROC_OBJ_CONTROL && obj.PointCount == 0) return false;
     if (obj.IsSquadStart && obj.SquadCount == 0) return false;
+    return true;
+}
+
+static bool Parse_Event(CCINIClass & ini, char const * section, ProcEventPreset & event)
+{
+    char buffer[256];
+    event.Kind = (ProcEventKindType)Get_Enum(ini, section, "Kind", s_EventKindNames, PROC_EVENT_KIND_COUNT, PROC_EVENT_OBJECTIVE);
+    event.PlayerSide = (ProcSideType)Get_Enum(ini, section, "PlayerSide", s_SideNames, PROC_SIDE_COUNT, PROC_SIDE_ANY);
+    event.MinTech = ini.Get_Int(section, "MinTech", 1);
+    event.Weight = max(0, ini.Get_Int(section, "Weight", 10));
+    event.MinMinutes = max(0, ini.Get_Int(section, "MinMinutes", 0));
+    event.IsOnce = ini.Get_Bool(section, "Once", true);
+    event.Waves = Bound(ini.Get_Int(section, "Waves", (event.Kind == PROC_EVENT_OBJECTIVE) ? 0 : 1), 0, 4);
+    event.ThreatBoost = Bound(ini.Get_Int(section, "ThreatBoost", 0), 0, PROC_THREAT_COUNT - 1);
+    Parse_Name(ini, section, "Objective", event.Objective, sizeof(event.Objective));
+    ini.Get_String(section, "Text", "", event.Text, sizeof(event.Text));
+
+    // When=Ahead,Quiet: any of them.
+    event.When = 0;
+    if (ini.Get_String(section, "When", "Any", buffer, sizeof(buffer)) > 0) {
+        for (char * token = strtok(buffer, ", "); token != NULL; token = strtok(NULL, ", ")) {
+            bool known = false;
+            for (int w = 0; w < PROC_WHEN_COUNT; w++) {
+                if (stricmp(token, s_WhenNames[w]) == 0) {
+                    event.When |= (1 << w);
+                    known = true;
+                }
+            }
+            if (!known) {
+                char buf[128];
+                sprintf(buf, "ProcINI: [%s] unknown When= situation '%s'", section, token);
+                GlyphX_Debug_Print(buf);
+            }
+        }
+    }
+    if (event.When == 0) event.When = PROC_WHEN_ANY;
+    if (event.Kind == PROC_EVENT_OBJECTIVE && event.Objective[0] == '\0') return false;
     return true;
 }
 
@@ -531,6 +581,9 @@ static void Parse_Difficulty(CCINIClass & ini, char const * section, ProcDifficu
     diff.BaseExtraWaves = Bound(ini.Get_Int(section, "BaseStartExtraWaves", diff.BaseExtraWaves), 0, 5);
     diff.MinConstructionYards = Bound(ini.Get_Int(section, "MinConstructionYards", diff.MinConstructionYards), 1, 4);
     diff.MinRefineries = Bound(ini.Get_Int(section, "MinRefineries", diff.MinRefineries), 0, 4);
+    diff.EventFirstMinutes = max(0, ini.Get_Int(section, "EventFirstMinutes", diff.EventFirstMinutes));
+    diff.EventMinMinutes = max(1, ini.Get_Int(section, "EventMinMinutes", diff.EventMinMinutes));
+    diff.EventMaxMinutes = max(diff.EventMinMinutes, ini.Get_Int(section, "EventMaxMinutes", diff.EventMaxMinutes));
     diff.SentriesMin = Bound(ini.Get_Int(section, "SentriesMin", diff.SentriesMin), 0, PROC_MAX_SENTRIES);
     diff.SentriesMax = Bound(ini.Get_Int(section, "SentriesMax", diff.SentriesMax), diff.SentriesMin, PROC_MAX_SENTRIES);
 
@@ -572,6 +625,7 @@ void ProcPresetLibrary::Read_Settings(CCINIClass & ini, char const * section, Pr
     settings.IsAllMaps = ini.Get_Bool(section, "AllMaps", settings.IsAllMaps);
     settings.IsSpectate = ini.Get_Bool(section, "Spectate", settings.IsSpectate);
     settings.IsSentries = ini.Get_Bool(section, "Sentries", settings.IsSentries);
+    settings.IsEvents = ini.Get_Bool(section, "Events", settings.IsEvents);
     settings.WaveMinSeconds = max(10, ini.Get_Int(section, "WaveMinSeconds", settings.WaveMinSeconds));
     settings.WaveMaxSeconds = max(settings.WaveMinSeconds, ini.Get_Int(section, "WaveMaxSeconds", settings.WaveMaxSeconds));
     settings.SpawnMode = (ProcSpawnModeType)Get_Enum(ini, section, "SpawnMode", s_SpawnNames, PROC_SPAWN_COUNT, settings.SpawnMode);
@@ -591,7 +645,7 @@ bool ProcPresetLibrary::Load()
     for (int d = 0; d < DIFF_COUNT; d++) {
         Difficulty[d] = ProcDifficultyPreset();
     }
-    TeamCount = BaseCount = ObjectiveCount = 0;
+    TeamCount = BaseCount = ObjectiveCount = EventCount = 0;
 
     {
         CCINIClass ini;
@@ -621,7 +675,14 @@ bool ProcPresetLibrary::Load()
         }
     }
 
-    sprintf(buf, "ProcINI: loaded %d teams, %d bases, %d objectives", TeamCount, BaseCount, ObjectiveCount);
+    {
+        CCINIClass ini;
+        if (Load_INI(PROC_EVENTS_INI, ini)) {
+            EventCount = Load_Presets(ini, "Events", Events, PROC_MAX_EVENT_PRESETS, Parse_Event);
+        }
+    }
+
+    sprintf(buf, "ProcINI: loaded %d teams, %d bases, %d objectives, %d events", TeamCount, BaseCount, ObjectiveCount, EventCount);
     GlyphX_Debug_Print(buf);
 
     return BaseCount > 0;
@@ -767,6 +828,7 @@ struct ObjectiveFilter {
 
     bool operator()(ProcObjectivePreset const & obj) const {
         if (!Side_Matches(obj.PlayerSide, PlayerSide) || obj.MinTech > Tech) return false;
+        if (obj.Slot == PROC_SLOT_EVENT || obj.Owner == PROC_OWNER_ALLY) return false;     // Only events add these
         if (IsPrimary && obj.Slot == PROC_SLOT_SECONDARY) return false;
         if (!IsPrimary && obj.Slot == PROC_SLOT_PRIMARY) return false;
 
@@ -796,6 +858,44 @@ ProcObjectivePreset const * ProcPresetLibrary::Find_Objective(char const * name)
 {
     for (int i = 0; i < ObjectiveCount; i++) {
         if (stricmp(Objectives[i].Name, name) == 0) return &Objectives[i];
+    }
+    return NULL;
+}
+
+struct EventFilter {
+    ProcEventPreset const * First;
+    ProcSideType PlayerSide;
+    int Tech;
+    int Situation;
+    int Minutes;
+    unsigned long Used;
+
+    bool operator()(ProcEventPreset const & event) const {
+        if (!Side_Matches(event.PlayerSide, PlayerSide) || event.MinTech > Tech || event.Weight <= 0) return false;
+        if (event.MinMinutes > Minutes || (event.When & Situation) == 0) return false;
+        return (Used & (1UL << (&event - First))) == 0;
+    }
+};
+
+// Events made for the situation at hand come up more often than the ones that can happen any time.
+struct EventWeight {
+    int Situation;
+    int operator()(ProcEventPreset const & event) const {
+        return event.Weight * (((event.When & Situation & ~PROC_WHEN_ANY) != 0) ? 3 : 1);
+    }
+};
+
+ProcEventPreset const * ProcPresetLibrary::Pick_Event(ProcSideType playerside, int tech, int situation, int minutes, unsigned long used) const
+{
+    EventFilter filter = {Events, playerside, tech, situation | PROC_WHEN_ANY, minutes, used};
+    EventWeight weight = {situation};
+    return Weighted_Pick(Events, EventCount, filter, weight);
+}
+
+ProcEventPreset const * ProcPresetLibrary::Find_Event(char const * name) const
+{
+    for (int i = 0; i < EventCount; i++) {
+        if (stricmp(Events[i].Name, name) == 0) return &Events[i];
     }
     return NULL;
 }

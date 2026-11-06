@@ -47,7 +47,8 @@
 #define PROC_MAX_TARGET_TYPES        6
 
 #define PROC_MAX_HOUSES              MAX_PLAYERS
-#define PROC_MAX_OBJECTIVES          4       // Active objectives per mission (1 primary + secondaries)
+#define PROC_MAX_OBJECTIVES          8       // Objectives per mission (1 primary + bonuses + event objectives)
+#define PROC_MAX_EVENT_PRESETS       32      // Fits the director's fired-events bit mask
 #define PROC_MAX_WAVE_TYPES          24      // TeamTypes the director may own at once
 #define PROC_MAX_REINFORCE_TYPES     8       // Reinforcement TeamTypes alive at once
 #define PROC_MAX_SQUAD_CHOICES       4       // Squad= presets per objective (one per side is typical)
@@ -116,6 +117,7 @@ typedef enum ProcObjectiveSlotType : unsigned char {
     PROC_SLOT_PRIMARY = 0,          // Can only be the win condition
     PROC_SLOT_SECONDARY,            // Can only be a bonus task
     PROC_SLOT_EITHER,
+    PROC_SLOT_EVENT,                // Only added mid-mission by an event (PROCEVENTS.INI)
     PROC_SLOT_COUNT
 } ProcObjectiveSlotType;
 
@@ -125,6 +127,7 @@ typedef enum ProcOwnerType : unsigned char {
     PROC_OWNER_NEUTRAL,             // Placed somewhere neutral, away from all bases
     PROC_OWNER_PLAYER,              // Placed in the player's base
     PROC_OWNER_OUTPOST,             // Placed in a small enemy outpost generated away from all bases
+    PROC_OWNER_ALLY,                // An AI ally's own building (event objectives)
     PROC_OWNER_COUNT
 } ProcOwnerType;
 
@@ -153,6 +156,25 @@ typedef enum ProcSpawnModeType : unsigned char {
 /*******************************************************************************
  * PRESETS (loaded from the INI library)
  ******************************************************************************/
+
+// Mid-mission events (PROCEVENTS.INI): what happens.
+typedef enum ProcEventKindType : unsigned char {
+    PROC_EVENT_OBJECTIVE = 0,       // A surprise bonus objective (Objective=, a Slot=Event preset)
+    PROC_EVENT_COUNTERATTACK,       // Extra waves at the player's team, stronger than usual
+    PROC_EVENT_REINFORCE,           // Reinforcements for the humans right away
+    PROC_EVENT_KIND_COUNT
+} ProcEventKindType;
+
+// ... and the situations it waits for (When=, any of them). The director reads them every few seconds.
+enum {
+    PROC_WHEN_ANY           = 0x01, // Always
+    PROC_WHEN_AHEAD         = 0x02, // An enemy has lost a quarter of its buildings
+    PROC_WHEN_BEHIND        = 0x04, // The humans have lost 30% of their buildings (from their peak)
+    PROC_WHEN_ALLY_ATTACKED = 0x08, // An AI ally's base took damage in the last minute
+    PROC_WHEN_SENTRY_LOST   = 0x10, // A sentry post was wiped out in the last two minutes
+    PROC_WHEN_QUIET         = 0x20, // No wave out, none sent for a minute
+    PROC_WHEN_COUNT         = 6
+};
 
 struct ProcTechnoCount {
     TechnoTypeClass const * Type;
@@ -222,6 +244,23 @@ struct ProcBasePreset {
     ProcBasePreset();
 };
 
+struct ProcEventPreset {
+    char                    Name[PROC_NAME_LEN];
+    ProcEventKindType       Kind;
+    ProcSideType            PlayerSide;     // Only when the player is on this side
+    int                     MinTech;
+    int                     Weight;         // x3 while one of its When= situations (other than Any) holds
+    int                     When;           // PROC_WHEN_* mask
+    int                     MinMinutes;     // Not before this many minutes into the mission
+    bool                    IsOnce;         // At most once per mission
+    char                    Objective[PROC_NAME_LEN];   // Kind=Objective: the Slot=Event objective preset
+    int                     Waves;          // Objective: waves sent at it; Counterattack: waves; Reinforce: teams
+    int                     ThreatBoost;    // Counterattack: threat steps above the current one
+    char                    Text[PROC_TEXT_LEN];        // Announced when it fires
+
+    ProcEventPreset();
+};
+
 struct ProcObjectivePreset {
     char                    Name[PROC_NAME_LEN];
     ProcObjectiveKindType   Kind;
@@ -274,6 +313,7 @@ struct ProcObjectivePreset {
     */
     ProcTechnoCount         TargetUnits[PROC_MAX_TARGET_TYPES]; // Assassinate: the unit to kill (one is picked)
     int                     TargetUnitCount;
+    bool                    IsConvoy;                   // Assassinate: it drives from the map edge to its base; fails if it gets there
     ProcTechnoCount         Prisoners[PROC_MAX_MEMBERS];        // Rescue: who is held in the camp
     int                     PrisonerCount;
     int                     RescueNeeded;               // Rescue: how many must get home (0 = all of them)
@@ -312,6 +352,9 @@ struct ProcDifficultyPreset {
     int                     BaseExtraWaves;     // Added to MaxActiveWaves
     int                     MinConstructionYards;   // Enemy main bases have at least this many construction yards
     int                     MinRefineries;          // ... and refineries (after FactoryScale)
+    int                     EventFirstMinutes;  // Quiet period before the first mid-mission event
+    int                     EventMinMinutes;    // Gap between events (random in this range)
+    int                     EventMaxMinutes;
     int                     SentriesMin;        // Role=Sentry posts scattered across the map (random in this range)
     int                     SentriesMax;
 
@@ -331,6 +374,7 @@ struct ProcSettings {
     bool                    IsAllMaps;          // Every single-human skirmish map is procedural, flagged or not
     bool                    IsSpectate;         // The humans get nothing and watch their AI allies fight the enemy
     bool                    IsSentries;         // Enemies get Role=Sentry posts across the map (count in the difficulty tables)
+    bool                    IsEvents;           // The director throws mid-mission events (PROCEVENTS.INI)
     int                     WaveMinSeconds;
     int                     WaveMaxSeconds;
     ProcSpawnModeType       SpawnMode;
@@ -366,6 +410,10 @@ public:
     ProcObjectivePreset const * Pick_Objective(ProcSideType playerside, bool primary, int tech, bool playerbase, bool cancapture, ProcObjectivePreset const * const * exclude, int excludecount) const;
     ProcObjectivePreset const * Find_Objective(char const * name) const;
 
+    // A mid-mission event for this situation (PROC_WHEN_* mask), skipping the 'used' ones (bit per preset index).
+    ProcEventPreset const * Pick_Event(ProcSideType playerside, int tech, int situation, int minutes, unsigned long used) const;
+    ProcEventPreset const * Find_Event(char const * name) const;
+
     ProcSettings            Settings;
     ProcDifficultyPreset    Difficulty[DIFF_COUNT];
 
@@ -377,6 +425,9 @@ public:
 
     ProcObjectivePreset     Objectives[PROC_MAX_OBJECTIVE_PRESETS];
     int                     ObjectiveCount;
+
+    ProcEventPreset         Events[PROC_MAX_EVENT_PRESETS];
+    int                     EventCount;
 };
 
 
@@ -393,6 +444,8 @@ struct ProcObjective {
     long                    EndFrame;       // Timer end (0 = no timer)
     int                     Minutes;
     int                     HeldStrength;   // Squad missions: the target's strength may only go down (no repairs)
+
+    bool                    IsEvent;        // Added mid-mission by an event
 
     // Assassinate: Target is the unit itself.
     TechnoTypeClass const * UnitType;       // Its type, to spot a reused slot
@@ -415,7 +468,7 @@ struct ProcObjective {
     long                    HeldTicks;      // Time all points have been held so far
 
     ProcObjective() : Preset(NULL), IsPrimary(false), State(PROC_STATE_ACTIVE), Target(TARGET_NONE),
-        TargetType(STRUCT_NONE), EndFrame(0), Minutes(0), HeldStrength(0), UnitType(NULL), Retreat(-1), IsFleeing(false),
+        TargetType(STRUCT_NONE), EndFrame(0), Minutes(0), HeldStrength(0), IsEvent(false), UnitType(NULL), Retreat(-1), IsFleeing(false),
         PrisonerCount(0), Rescued(0), Needed(0), Extraction(-1), PointCount(0), HeldTicks(0) {}
 };
 
@@ -465,13 +518,14 @@ private:
     void Add_Objective(ProcObjectivePreset const * preset, bool primary, ProcObjectivePreset const ** chosen);
     void Build_Enemy_Bases();
     void Build_Player_Bases();
-    void Place_Objective_Targets();
+    void Place_Objective_Targets(int first = 0);
     bool Replace_Misfit(ProcObjective & obj, ProcObjectivePreset const ** misfits, int & misfitcount);
     bool Place_Unit_Objective(ProcObjective & obj, int faraway, HouseClass const * nearto);
-    void Place_Guard(ProcObjectivePreset const * preset, HouseClass * house, CELL cell);
+    void Place_Guard(ProcObjectivePreset const * preset, HouseClass * house, CELL cell, CELL moveto = -1);
     void Place_Sentries();
     CELL Find_Sentry_Location(CELL const * taken, int takencount) const;
     void Announce_Objectives();
+    void Announce_Objective(int index);
 
     // Base building
     bool Build_Base(HouseClass * house, ProcBasePreset const * preset, bool isplayer, CELL center = -1, bool skipconst = false);
@@ -510,7 +564,14 @@ private:
     // Director (attack waves)
     void Director_AI();
     void Superweapon_AI();
-    void Spawn_Wave(HouseClass * house);
+    bool Spawn_Wave(HouseClass * house, HouseClass * victim = NULL, CELL spot = -1, int boost = 0, char const * why = NULL);
+
+    // Mid-mission events
+    void Events_AI();
+    void Track_Situation();
+    int Situation() const;
+    bool Fire_Event(ProcEventPreset const * event);
+    int Add_Event_Objective(ProcObjectivePreset const * preset);
     TeamTypeClass * Make_Wave_Type(ProcTeamPreset const * preset, HouseClass * house, HouseClass * victim, CELL home);
     bool Deliver_Wave(TeamTypeClass * teamtype, CELL home);
     bool Spawn_Team(TeamTypeClass * teamtype, CELL center, int minradius, int maxradius);
@@ -589,6 +650,20 @@ private:
     TeamTypeClass *         WaveTypes[PROC_MAX_WAVE_TYPES];
     long                    WaveStart[PROC_MAX_WAVE_TYPES];   // Elapsed when each wave was sent
     int                     WaveTypeCount;
+    long                    LastWaveFrame;      // Elapsed when the last wave was sent
+
+    // Mid-mission events and the situation the director reads.
+    long                    NextEventFrame;     // 0 = not scheduled yet
+    unsigned long           EventsUsed;         // Once= events fired, and events that didn't fit this map
+    int                     EventsFired;
+    CELL                    SentryCells[PROC_MAX_SENTRIES];
+    HouseClass *            SentryOwners[PROC_MAX_SENTRIES];
+    bool                    IsSentryLost[PROC_MAX_SENTRIES];
+    int                     SentryCount;
+    long                    SentryLostFrame;    // Elapsed when a sentry post last fell (0 = never)
+    long                    AllyStrength;       // AI allies' building strength at the last look
+    long                    AllyHitFrame;       // Elapsed when it last dropped (0 = never)
+    int                     PeakBuildings;      // Most buildings the humans have had
 };
 
 

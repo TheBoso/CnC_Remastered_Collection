@@ -13,6 +13,7 @@
 #define PROC_TEAMS_INI          "PROCTEAMS.INI"
 #define PROC_BASES_INI          "PROCBASES.INI"
 #define PROC_OBJECTIVES_INI     "PROCOBJECTIVES.INI"
+#define PROC_EVENTS_INI         "PROCEVENTS.INI"
 
 #define PROC_GENERATOR_SECTION  "Generator"     // In PROCMISSION.INI
 #define PROC_OVERRIDE_SECTION   "Procedural"    // In the scenario INI
